@@ -1,0 +1,81 @@
+name: Build and publish Windows update
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push cancels an older build. A release is visible only after every
+# asset has uploaded and the main-branch revision is checked again.
+concurrency:
+  group: windows-update-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the pushed revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install pinned Godot and Windows templates
+        shell: pwsh
+        run: ./tools/install-godot.ps1 -Destination "$env:RUNNER_TEMP/godot"
+      - name: Verify package tooling
+        shell: pwsh
+        run: |
+          ./tools/test-package-update.ps1 -ScratchDirectory "$env:RUNNER_TEMP/package-test"
+          ./tools/test-publish-release.ps1 -ScratchDirectory "$env:RUNNER_TEMP/publish-test"
+          ./tools/test-installer.ps1 -ScratchDirectory "$env:RUNNER_TEMP/installer-test"
+      - name: Import, export, verify and package Windows game
+        shell: pwsh
+        run: |
+          ./tools/build-windows.ps1 -Godot "$env:RUNNER_TEMP/godot/Godot_v4.6.2-stable_win64_console.exe" -BuildNumber $env:GITHUB_RUN_NUMBER -Commit $env:GITHUB_SHA
+      - name: Keep diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-build-diagnostics
+          path: |
+            build/*.log
+            build/verification/*report.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Transfer complete release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-update
+          path: |
+            build/release/DIAMOND_IN_THE_ROUGH_Update.zip
+            build/release/latest.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Download complete release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: windows-update
+          path: build/release
+      - name: Upload draft assets, then publish the update
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/publish-release.ps1 -Repository $env:GITHUB_REPOSITORY -Commit $env:GITHUB_SHA -BuildNumber $env:GITHUB_RUN_NUMBER

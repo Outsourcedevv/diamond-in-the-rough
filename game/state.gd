@@ -205,17 +205,21 @@ func snapshot() -> Dictionary:
 	return {"version": SAVE_VERSION, "seed": seed_value, "money": money, "gems": gems.duplicate(true), "upgrades": upgrades.duplicate(), "collection": collection.duplicate(), "diamond_id": diamond_id, "certified": certified, "searched": searched, "players": players.duplicate(true), "certification_step": certification_step, "certification_id": certification_id}
 
 
-func save_game() -> void:
+func save_game() -> bool:
 	if not is_authority() or not _world_is_local or gems.is_empty():
-		return
+		return false
 	var temporary: String = _save_path + ".tmp"
 	var file: FileAccess = FileAccess.open(temporary, FileAccess.WRITE)
 	if file == null:
 		notice.emit("Save failed: the workshop folder is not writable.")
-		return
+		return false
 	file.store_string(JSON.stringify(snapshot()))
 	file.flush()
+	var write_error: Error=file.get_error()
 	file.close()
+	if write_error!=OK:
+		notice.emit("Save failed while writing. The previous workshop save was kept.")
+		return false
 	var result: Error = DirAccess.rename_absolute(temporary, _save_path)
 	if result != OK:
 		# Windows refuses replacing an existing target on some filesystems.
@@ -230,6 +234,7 @@ func save_game() -> void:
 			DirAccess.remove_absolute(backup)
 		elif result != OK:
 			notice.emit("Save could not be replaced. The previous save remains recoverable.")
+	return result==OK
 
 
 func load_game() -> bool:

@@ -70,6 +70,17 @@ var _input_devices: OptionButton
 var _voice_text: String = "Solo · voice off"
 var _voice_level: float = 0.0
 var _voice_transmitting: bool = false
+var _update_status: Dictionary = {}
+var _update_version: Label
+var _update_message: Label
+var _update_details: Label
+var _update_progress: ProgressBar
+var _update_primary: Button
+var _update_check: Button
+var _update_auth: Control
+var _update_token: LineEdit
+var _update_cli: Button
+var _update_auto_check: CheckButton
 
 func build(game: Node) -> void:
 	_game = game
@@ -336,6 +347,9 @@ func _build_menu() -> void:
 	var controls_button := _button("Controls",_show_controls)
 	controls_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	utility_row.add_child(controls_button)
+	var updates_button := _button("Updates",_open_updates)
+	updates_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	utility_row.add_child(updates_button)
 	_save_button = _button("Save workshop",func(): request_action.emit("save",{}))
 	box.add_child(_save_button)
 	_return_button = _button("Return to the title",func(): request_action.emit("menu",{}))
@@ -423,6 +437,7 @@ func _build_inspection() -> void:
 	_inspection.hide()
 
 func show_menu(in_game: bool = false) -> void:
+	_clear_update_token()
 	menu_visible = true
 	inspecting = false
 	_menu.show()
@@ -435,6 +450,7 @@ func show_menu(in_game: bool = false) -> void:
 	_menu_title.text = "ON A TEA BREAK" if in_game else "CLOCK IN"
 
 func hide_menu() -> void:
+	_clear_update_token()
 	menu_visible = false
 	_menu.hide()
 	_modal.hide()
@@ -459,6 +475,7 @@ func _clear(node: Node) -> void:
 		child.queue_free()
 
 func _open_modal(title: String, subtitle: String) -> void:
+	_clear_update_token()
 	_modal_return_title = not bool(_read(_game,"active",false))
 	_modal_kind = ""
 	menu_visible = true
@@ -540,6 +557,7 @@ func _process(delta: float) -> void:
 			_toast_panel.hide()
 
 func show_inspection(gem: Dictionary, has_loupe: bool) -> void:
+	_clear_update_token()
 	inspecting = true
 	menu_visible = false
 	_menu.hide()
@@ -726,11 +744,141 @@ func _show_settings() -> void:
 	fullscreen.button_pressed = bool(_read(settings,"fullscreen",false))
 	fullscreen.toggled.connect(func(value: bool): setting_changed.emit("fullscreen",value))
 	_modal_body.add_child(fullscreen)
+	_modal_body.add_child(_button("Game updates   →",_open_updates))
 	_modal_body.add_child(_wrapped("A wider view helps keep your stations in sight. Lower sensitivity makes precise inspection easier.",14,MUTED))
 	if _resume_button.visible:
 		_modal_body.add_child(_button("Return to sorting   →",_resume,true))
 	else:
 		_modal_body.add_child(_button("Back to the title   →",func(): show_menu(false),true))
+
+func _open_updates() -> void:
+	var updater: Variant = _read(_game,"updater")
+	var status: Dictionary = _update_status
+	if updater is Object:
+		var latest: Variant = _read(updater,"status",status)
+		if latest is Dictionary:
+			status = latest
+	show_updates(status)
+
+func show_updates(status: Dictionary = {}) -> void:
+	_open_modal("WORKSHOP UPDATES","Download the latest Windows build from the private GitHub repository.")
+	_modal_kind = "updates"
+	_update_version = _label("",16,MINT,true)
+	_modal_body.add_child(_update_version)
+	_update_auto_check = CheckButton.new()
+	_update_auto_check.text = "Check automatically at startup and every 5 minutes"
+	var settings: Variant = _read(_game,"settings",{})
+	_update_auto_check.button_pressed = bool(_read(settings,"auto_updates",true))
+	_update_auto_check.toggled.connect(func(value: bool): setting_changed.emit("auto_updates",value))
+	_modal_body.add_child(_update_auto_check)
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel",_style(Color("20383c"),9,18,16))
+	_modal_body.add_child(card)
+	var box := _box(12)
+	card.add_child(box)
+	_update_message = _wrapped("",18,CREAM)
+	box.add_child(_update_message)
+	_update_progress = ProgressBar.new()
+	_update_progress.min_value = 0.0
+	_update_progress.max_value = 1.0
+	_update_progress.step = 0.001
+	_update_progress.show_percentage = false
+	_update_progress.custom_minimum_size.y = 12
+	_update_progress.add_theme_stylebox_override("background",_style(Color("385158"),4,0,0))
+	_update_progress.add_theme_stylebox_override("fill",_style(MINT,4,0,0))
+	box.add_child(_update_progress)
+	_update_details = _wrapped("",14,MUTED)
+	box.add_child(_update_details)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation",10)
+	box.add_child(actions)
+	_update_check = _button("Check for updates",func(): request_action.emit("updates_check",{}))
+	_update_check.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.add_child(_update_check)
+	_update_primary = _button("Download update",_update_primary_action,true)
+	_update_primary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.add_child(_update_primary)
+	_update_auth = PanelContainer.new()
+	_update_auth.add_theme_stylebox_override("panel",_style(Color("20383c"),9,18,16))
+	_modal_body.add_child(_update_auth)
+	var auth_box := _box(10)
+	_update_auth.add_child(auth_box)
+	auth_box.add_child(_label("PRIVATE REPOSITORY ACCESS",11,ORANGE,true))
+	auth_box.add_child(_wrapped("Use an existing GitHub CLI sign-in, or enter a token with read access to this repository. The token is kept in memory for this game session.",13,MUTED))
+	_update_cli = _button("Use GitHub CLI sign-in",func(): request_action.emit("updates_use_cli",{}))
+	auth_box.add_child(_update_cli)
+	var token_row := HBoxContainer.new()
+	token_row.add_theme_constant_override("separation",10)
+	auth_box.add_child(token_row)
+	_update_token = LineEdit.new()
+	_update_token.secret = true
+	_update_token.context_menu_enabled = false
+	_update_token.max_length = 512
+	_update_token.placeholder_text = "GitHub repository-read token"
+	_update_token.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_update_token.custom_minimum_size.y = 43
+	_update_token.text_submitted.connect(func(_text: String): _submit_update_token())
+	token_row.add_child(_update_token)
+	token_row.add_child(_button("Use token",_submit_update_token))
+	_modal_body.add_child(_wrapped("Install when you are ready to finish sorting. Your workshop is saved before the game closes, the updater installs the download, and the game restarts. Friends need the same build for co-op.",13,MUTED))
+	_modal_body.add_child(_button("Open repository on GitHub   ↗",func(): request_action.emit("updates_open_repo",{})))
+	update_updates(status)
+
+func _submit_update_token() -> void:
+	if not is_instance_valid(_update_token):
+		return
+	var session_token: String = _update_token.text.strip_edges()
+	_update_token.clear()
+	if not session_token.is_empty():
+		request_action.emit("updates_token",{"token":session_token})
+		session_token = ""
+
+func _clear_update_token() -> void:
+	if is_instance_valid(_update_token):
+		_update_token.clear()
+
+func _update_primary_action() -> void:
+	var phase: String = str(_update_status.get("phase","idle"))
+	if phase == "available":
+		request_action.emit("updates_download",{})
+	elif phase == "ready":
+		request_action.emit("updates_install",{})
+
+func update_updates(status: Dictionary) -> void:
+	_update_status = status.duplicate(true)
+	if _modal_kind != "updates" or not _modal.visible or not is_instance_valid(_update_message):
+		return
+	var phase: String = str(status.get("phase","idle"))
+	var busy: bool = phase in ["checking","downloading","installing"]
+	var installed: String = str(status.get("installed_version",""))
+	var available: String = str(status.get("available_version",""))
+	_update_version.text = "Installed: %s" % (installed if not installed.is_empty() else "local build")
+	if not available.is_empty():
+		_update_version.text += "    ·    Latest: %s" % available
+	var messages: Dictionary = {
+		"idle":"Check GitHub for the newest workshop build.",
+		"checking":"Checking for a new workshop build…",
+		"auth_required":"Sign in to access this private repository.",
+		"available":"A new workshop build is ready to download.",
+		"downloading":"Downloading the update…",
+		"ready":"Download verified. Ready to install.",
+		"error":"The update could not be completed. You can try again.",
+		"current":"Your workshop is up to date.",
+		"installing":"Saving your workshop and restarting to install…"
+	}
+	_update_message.text = str(status.get("message",messages.get(phase,messages.idle)))
+	_update_message.add_theme_color_override("font_color",ORANGE if phase in ["error","auth_required"] else CREAM)
+	_update_details.text = str(status.get("details",""))
+	_update_details.visible = not _update_details.text.is_empty() and phase != "auth_required"
+	_update_progress.visible = phase in ["downloading","ready","installing"]
+	_update_progress.value = clampf(float(status.get("progress",0.0)),0.0,1.0)
+	_update_check.disabled = busy
+	_update_primary.visible = phase in ["available","downloading","ready","installing"]
+	_update_primary.disabled = phase not in ["available","ready"]
+	_update_primary.text = "Save & restart to install" if phase in ["ready","installing"] else "Downloading…" if phase == "downloading" else "Download update"
+	_update_auth.visible = not bool(status.get("authenticated",false)) and phase in ["idle","auth_required","error"]
+	_update_cli.disabled = busy
+	_update_token.editable = not busy
 
 func _build_voice_settings(settings: Variant) -> void:
 	_modal_body.add_child(_label("PROXIMITY VOICE",11,ORANGE,true))

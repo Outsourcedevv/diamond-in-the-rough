@@ -49,3 +49,13 @@ This harness uses localhost UDP 24682 and an isolated test save. It generates sy
 Physical microphone selection, Windows desktop-app microphone access and subjective speech quality still require a manual co-op check with headphones. If no input signal appears while holding V in active co-op, select the intended input device in Settings and check Windows microphone privacy settings.
 
 The production launch options also accept `--solo`, `--host`, `--join=IP`, `--port=24680`, and `--save-slot=NAME` after `--`.
+
+## Windows update pipeline
+
+`game/updater.gd` checks authenticated GitHub releases, validates build metadata and downloads the fixed update asset. GitHub CLI uses nonblocking pipes so the game remains responsive; its credentials stay with CLI. Optional session tokens use HTTPS only for the repository API, and signed asset redirects receive no Authorization header. Both paths verify the same package SHA-256 and size.
+
+`updater/InstallUpdate.ps1` is embedded in the PCK and extracted into the user update cache for an installation. It waits for the game to exit, validates and stages the two fixed files in the installation directory, preserves backups, replaces them atomically, restarts and rolls back on basic startup failure. `state.save_game()` returns success so installation stops if a solo/host save fails.
+
+`.github/workflows/windows-release.yml` and `tools/` build and publish on main pushes. The build stamps `build.json` before export; the publishing job exposes the release only after the package and manifest have uploaded. Headless CI skips the mouse-capture assertion that requires a native window and retains the remaining 40 progression checks. Native verification still checks mouse rotation.
+
+See [docs/UPDATING.md](docs/UPDATING.md) for the release schema, private access and live verification command.

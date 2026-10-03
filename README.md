@@ -71,6 +71,10 @@ Hold **V** to speak to nearby players; **M** toggles your microphone mute. Setti
 
 Voice uses 16 kHz mono G.711 mu-law audio over a dedicated ENet channel. Physical microphone hardware and speech quality still require a manual co-op check. Use headphones; echo cancellation is not implemented.
 
+## In-game updates
+
+Open **Updates** from the title or pause menu to download a newer build and **Save & restart to install**. Automatic checks run on startup and every five minutes. Successful pushes to `main` are built and published by GitHub Actions; failed builds are not offered. The private repository requires an existing GitHub CLI sign-in or a read-only token kept for the game session. Read [the update guide](docs/UPDATING.md) for setup, recovery and build behavior.
+
 ![Nearby voice indicator](screenshots/voice_near_client.png)
 
 ## Development and verification

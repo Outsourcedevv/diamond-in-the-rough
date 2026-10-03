@@ -17,3 +17,11 @@ Voice tests used generated tones; they never opened or recorded a physical micro
 Selected native game screenshots are in `screenshots/`. Raw local logs and report artifacts are not committed to this repository. `game/verification.gd`, `game/voice_verification.gd` and the commands in `DEVELOPMENT.md` reproduce the integrated checks using isolated saves and generate JSON reports locally. No normal player save was overwritten by verification. The gameplay host/client integration checks were also rerun with the voice update.
 
 This confirms the prototype on the tested machine and local transport. Internet routing, other hardware, Steam lobbies/invites/achievements, production matchmaking, full ragdolls, and long-session load tests remain outside this verification. Steamworks is not implemented. Machine feeding and conveyor throughput use the simplified sector model described in the launch guide.
+
+## In-game updater verification
+
+The updater passed **56 loopback HTTP checks** in Godot and **55 checks** in the exported Windows game (the editor-only install guard accounts for the difference). These cover asynchronous metadata/downloads, progress, build comparisons, invalid manifests, asset digests, corrupted downloads, private authentication failures and redirects that do not forward credentials off the API. The menu passed **44 native UI checks** with its status phases and masked session-token handling.
+
+The Windows PowerShell 5.1 installer passed **13 fixture checks**, including actual atomic executable/manifest swaps, preservation of another save file, backups, a forced replacement failure and rollback, process-exit waiting, and rejection of unsafe archive paths, duplicate/link entries, extra executables, bad PE headers and excessive sizes. Packaging and draft-release publishing also passed local tests. Fixture files and generated reports are isolated from normal game saves.
+
+The updated exported game passed the **40 headless solo checks** used by the build workflow. Mouse capture is omitted in headless verification and remains asserted in native-window runs. A live private GitHub CLI check authenticated to the repository and read its legacy release without exposing credentials. The real workflow and newer-package integration are validated separately when this change is published.

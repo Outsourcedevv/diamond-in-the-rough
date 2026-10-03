@@ -6,6 +6,7 @@ const PlayerScript = preload("res://game/player.gd")
 const InterfaceScript = preload("res://game/interface.gd")
 const SoundScript = preload("res://game/sound.gd")
 const VoiceScript = preload("res://game/voice.gd")
+const UpdaterScript = preload("res://game/updater.gd")
 
 var state: Node
 var workshop: Node3D
@@ -13,7 +14,8 @@ var player: CharacterBody3D
 var ui: CanvasLayer
 var sound: Node
 var voice: Node3D
-var settings := {"sensitivity":0.0025,"fov":78.0,"volume":0.7,"fullscreen":false,"voice_enabled":true,"mic_muted":false,"voice_volume":0.85,"mic_gain":1.0,"input_device":"Default"}
+var updater: Node
+var settings := {"sensitivity":0.0025,"fov":78.0,"volume":0.7,"fullscreen":false,"voice_enabled":true,"mic_muted":false,"voice_volume":0.85,"mic_gain":1.0,"input_device":"Default","auto_updates":true}
 var active := false
 var gem_nodes := {}
 var avatars := {}
@@ -65,6 +67,12 @@ func _ready() -> void:
 	for voice_arg in OS.get_cmdline_user_args():
 		if voice_arg.begins_with("--verify-voice="): voice.test_mode=true
 	voice.build(self)
+	updater=UpdaterScript.new()
+	add_child(updater)
+	for update_arg in OS.get_cmdline_user_args():
+		if update_arg.begins_with("--verify"): updater.test_mode=true
+	updater.status_changed.connect(ui.update_updates)
+	updater.build(self)
 	particle_root = Node3D.new()
 	add_child(particle_root)
 	apply_settings()
@@ -80,6 +88,10 @@ func _ready() -> void:
 		if arg == "--host": start_session("host", "", port_from_args(args), false)
 		if arg.begins_with("--join="): start_session("join", arg.trim_prefix("--join="), port_from_args(args), false)
 	for arg in args:
+		if arg.begins_with("--verify-updater="):
+			test_runner=load("res://game/updater_verification.gd").new()
+			add_child(test_runner)
+			test_runner.begin(self,args)
 		if arg.begins_with("--verify-voice="):
 			test_runner=load("res://game/voice_verification.gd").new()
 			add_child(test_runner)
@@ -152,6 +164,12 @@ func return_to_menu() -> void:
 
 func ui_action(kind: String, args: Dictionary) -> void:
 	match kind:
+		"updates_check": updater.check_for_updates()
+		"updates_download": updater.download_update()
+		"updates_install": install_update()
+		"updates_open_repo": updater.open_repository()
+		"updates_use_cli": updater.use_github_cli()
+		"updates_token": updater.set_session_token(str(args.get("token","")))
 		"save": save_now()
 		"unstuck": unstuck()
 		"recover": recover_items()
@@ -159,6 +177,16 @@ func ui_action(kind: String, args: Dictionary) -> void:
 		"close_modal": resume_game()
 		_: state.action(kind, args)
 	if ui.menu_visible: Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func install_update() -> void:
+	if updater.status.phase!="ready": return
+	if active and state.is_authority() and not state.save_game():
+		ui.toast("The workshop could not be saved. Update installation stopped.")
+		return
+	if updater.prepare_install()<0: return
+	voice.stop_session()
+	state.leave()
+	get_tree().quit()
 
 func _process(delta: float) -> void:
 	for peer in avatars:
