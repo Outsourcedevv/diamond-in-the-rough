@@ -788,7 +788,6 @@ func show_updates(status: Dictionary = {}) -> void:
 	_update_progress.add_theme_stylebox_override("fill",_style(MINT,4,0,0))
 	box.add_child(_update_progress)
 	_update_details = _wrapped("",14,MUTED)
-	box.add_child(_update_details)
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation",10)
 	box.add_child(actions)
@@ -798,6 +797,7 @@ func show_updates(status: Dictionary = {}) -> void:
 	_update_primary = _button("Download update",_update_primary_action,true)
 	_update_primary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	actions.add_child(_update_primary)
+	box.add_child(_update_details)
 	_update_auth = PanelContainer.new()
 	_update_auth.add_theme_stylebox_override("panel",_style(Color("20383c"),9,18,16))
 	_modal_body.add_child(_update_auth)

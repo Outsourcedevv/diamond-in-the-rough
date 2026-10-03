@@ -137,7 +137,7 @@ func check_for_updates() -> void:
 	release.clear()
 	status.available_version=""
 	status.progress=0.0
-	_status("checking","Checking GitHub for a completed Windows buildâ€¦")
+	_status("checking","Checking GitHub for a completed Windows build…")
 	if _mode=="cli":
 		_start_cli(["api","repos/"+REPOSITORY+"/releases/latest","--hostname","github.com"],"release")
 	else:
@@ -294,7 +294,7 @@ func _accept_manifest(data: Dictionary) -> void:
 	if not manifest_valid(data) or asset.is_empty() or int(asset.get("size",0))!=int(data.get("size",0)):
 		_status("error","The release package or checksum manifest is invalid. Nothing was installed.")
 		return
-	var server_digest: String=str(asset.get("digest",""))
+	var server_digest: String=str(asset.digest) if asset.get("digest") is String else ""
 	if not server_digest.is_empty() and server_digest!="sha256:"+str(data.sha256):
 		_status("error","The release checksums disagree. Nothing was installed.")
 		return
@@ -307,7 +307,7 @@ func _accept_manifest(data: Dictionary) -> void:
 	_status("available","A new workshop build is ready to download.")
 	if int(manifest.build)!=_notified_build:
 		_notified_build=int(manifest.build)
-		if game.ui.has_method("toast"): game.ui.toast("Update available Â· Esc â†’ Updates")
+		if game.ui.has_method("toast"): game.ui.toast("Update available · Esc → Updates")
 
 func download_update() -> void:
 	if busy() or manifest.is_empty() or int(manifest.build)<=int(installed.get("build",0)): return
@@ -361,7 +361,7 @@ func prepare_install() -> int:
 	if pid<0:
 		_status("error","Windows could not start the updater. The current game is unchanged.")
 		return -1
-	_status("installing","Saving and restarting to install the new buildâ€¦")
+	_status("installing","Saving and restarting to install the new build…")
 	return pid
 
 func open_repository() -> void:
