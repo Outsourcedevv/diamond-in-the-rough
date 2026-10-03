@@ -2,18 +2,23 @@
 
 **One real diamond. An unreasonable amount of rubbish.**
 
-A playable native first-person 3D gem-sorting game built with Godot 4.6.2. Work an alpine mountain claim, climb the gem scree, inspect suspicious stones, sell scrap and certify the genuine diamond. Sort alone or share the claim with up to three friends.
+A playable native first-person 3D mining game built with Godot 4.6.2. Start with an old pickaxe at the foot of a big block mountain, mine ore, buy better tools and explosives, and blast your way to the one genuine diamond hidden in its core. Mine alone or share the mountain with up to three friends.
 
 ![The mountain claim and first-session guide](screenshots/01_workshop.png)
 
-![Physical equipment displays with attached prices](screenshots/03_equipment.png)
+![Dynamite going off on the mountainside](screenshots/06_dynamite.png)
+
+![A Mountain Buster crater with deep gem ore in its walls](screenshots/07_crater.png)
 
 ## Features
 
-- One persistent genuine diamond among 720 searchable objects and batched decorative scree.
-- First-person movement, scooping, physical pickups, object inspection and recoverable dropped finds.
-- Eight shared upgrades, washing, batch sorting, a vacuum, conveyor and local scanner.
-- Physical equipment models with attached names and prices: point at a model and press E to buy it.
+- A 72 × 64 m, 28-block-tall mountain of about 30,000 breakable blocks: grass, dirt, stone, granite and bedrock, with a snowcap.
+- Nine ores in veins that get richer with depth: coal, copper, iron, silver, gold, amethyst, emerald, sapphire and ruby.
+- One genuine diamond buried deep in the core among about 150 look-alike clear crystals, plus fossils and curiosities to collect.
+- Hold-to-mine pickaxe with crack feedback, then a steel pickaxe and a power drill.
+- Three thrown explosives with real fuses, physics and craters: dynamite, TNT and the Mountain Buster.
+- An ore satchel, an ore magnet, crystal sonar that pings veins through rock, and a loupe for inspection clues.
+- Physical equipment models with attached names and prices at the camp outfitter: point at a model and press E to buy it.
 - A seven-step playable tutorial, attached station signs and a compact UI that adapts to screen proportions.
 - Collectibles, cosmetic rewards, harmless pranks and three-step diamond certification.
 - Host-authoritative ENet co-op for up to four players with shared funds and progression.
@@ -55,17 +60,17 @@ The export embeds its game data in the executable. Builds and generated engine c
 | --- | --- |
 | WASD / mouse | Move / look |
 | Shift / Space | Move faster / jump |
-| E | Pick up a find, scoop a patch, use a station or buy displayed equipment |
-| Left mouse | Scoop or use the selected tool |
+| E | Pick up a find, use a station or buy displayed equipment |
+| Left mouse (hold) | Mine with the pickaxe or drill, or throw the selected explosive |
 | Right mouse | Start or finish close inspection |
 | Mouse / Ctrl + wheel | Rotate / zoom while inspecting |
 | Wheel / Q | Select a carried find / drop it |
-| 1–4 | Scoop / hands / purchased vacuum / purchased scanner |
-| C | Keep a collectible on display |
+| 1 / 2 / 3 / 4 | Pickaxe / dynamite / TNT / Mountain Buster |
+| C | Keep a fossil or curiosity on display |
 | Tab / Esc | Ledger / pause |
 | V / M | Hold to talk / toggle microphone mute |
 
-See [the playing guide](docs/PLAYING.md) for progression, pranks, saving and recovery.
+Finds that fall out of the rock are picked up by walking over them. See [the playing guide](docs/PLAYING.md) for ores, equipment, pranks, saving and recovery.
 
 ## Co-op and proximity voice
 
@@ -81,27 +86,29 @@ Open **Updates** from the title or pause menu to download a newer build and **Sa
 
 ## Development and verification
 
-The workshop geometry, materials and sound effects are generated in code. The root scene loads the scripts in `game/`:
+The mountain, camp geometry, materials and sound effects are generated in code. The root scene loads the scripts in `game/`:
 
 | File | Responsibility |
 | --- | --- |
 | `game/main.gd` | Session orchestration, interactions and visible objects |
-| `game/state.gd` | Persistent catalog, authoritative rules, saves and networking |
-| `game/player.gd` | First-person movement and held-object inspection |
-| `game/workshop.gd` | Mountain terrain, physical equipment displays, stations and animations |
+| `game/state.gd` | Authoritative mining, blasting, items, purchases, saves and networking |
+| `game/mountain.gd` | Deterministic block mountain: shape, layers, hardness and ore veins |
+| `game/mountain_view.gd` | Chunked block meshes, collision, crack overlay and sonar pings |
+| `game/player.gd` | First-person movement, tools and held-object inspection |
+| `game/workshop.gd` | Camp, scenery, physical equipment displays, stations and explosive models |
 | `game/interface.gd` | Menus, settings, ledger and HUD |
 | `game/sound.gd` | Synthesized sound effects |
 | `game/voice.gd` | Microphone capture, codec and spatial voice playback |
 | `game/tutorial.gd` | Event-driven first-session guidance and local completion preferences |
 | `game/redesign_verification.gd` | Physical purchases, tutorial progression and screen-layout checks |
-| `game/verification.gd` | Solo and native co-op integration harness |
+| `game/verification.gd` | Solo progression and native co-op integration harness |
 | `game/voice_verification.gd` | Synthetic native voice integration harness |
 
 Read [DEVELOPMENT.md](DEVELOPMENT.md) for architecture and reproducible commands, and [VERIFICATION.md](VERIFICATION.md) for tested behavior and limits. Integrated verification uses isolated saves and generates reports locally.
 
 ## Prototype scope
 
-This is a playable prototype. Steamworks, invitations, achievements, internet matchmaking, relay/NAT traversal, Opus, full ragdolls and production conveyor logistics are not implemented. Sorting machinery processes selected pile sectors in batches. See the development notes for these simplifications.
+This is a playable prototype. Steamworks, invitations, achievements, internet matchmaking, relay/NAT traversal, Opus and full ragdolls are not implemented. The mountain is made of 1 m blocks without overhang physics: blocks never fall, and loose finds settle onto the highest block beneath them. See the development notes for these simplifications.
 
 ## License notices
 

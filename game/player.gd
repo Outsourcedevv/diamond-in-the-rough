@@ -11,7 +11,8 @@ var sway := 0.0
 var kick := 0.0
 var inspecting := false
 var enabled := false
-var tool := "scoop"
+var tool := "pickaxe"
+var mining_look := ""
 var held_id := -1
 var visual_angle := Vector2.ZERO
 var inspect_scale := 1.0
@@ -51,7 +52,7 @@ func build(owner_game: Node) -> void:
 	held_root = Node3D.new()
 	hands.add_child(held_root)
 	build_hands()
-	set_tool("scoop")
+	set_tool("pickaxe")
 	position = Vector3(0, 0.12, 7.2)
 	update_view()
 
@@ -106,42 +107,41 @@ func rounded_part(parent: Node3D,radius: float,height: float,at: Vector3,color: 
 
 func set_tool(next: String) -> void:
 	tool = next
-	batch_signature=""
-	batch_root=null
 	for child in tool_root.get_children():
 		child.queue_free()
-	var orange := Color("e4a65a")
-	if tool == "scoop":
-		box(tool_root, Vector3(0.09, 0.08, 0.37), Vector3(0.18, -0.28, -0.62), Color("795341"))
-		box(tool_root, Vector3(0.42, 0.045, 0.37), Vector3(0.07, -0.3, -0.88), orange, 0.7)
-		box(tool_root, Vector3(0.04, 0.18, 0.4), Vector3(-0.13, -0.23, -0.88), orange, 0.7)
-		box(tool_root, Vector3(0.04, 0.18, 0.4), Vector3(0.27, -0.23, -0.88), orange, 0.7)
-		box(tool_root, Vector3(0.4, 0.16, 0.04), Vector3(0.07, -0.25, -0.71), orange, 0.7)
-	elif tool == "vacuum":
-		box(tool_root, Vector3(0.22, 0.21, 0.45), Vector3(0.2, -0.26, -0.68), Color("e0a357"), 0.4)
-		box(tool_root, Vector3(0.14, 0.11, 0.48), Vector3(0.14, -0.28, -1.02), Color("b6cfcb"), 0.8)
-		box(tool_root, Vector3(0.34, 0.13, 0.09), Vector3(0.14, -0.28, -1.24), Color("31525b"))
-	elif tool == "scanner":
-		box(tool_root, Vector3(0.31, 0.12, 0.4), Vector3(0.12, -0.26, -0.69), Color("ebc283"), 0.4)
-		box(tool_root, Vector3(0.23, 0.016, 0.23), Vector3(0.12, -0.193, -0.69), Color("76f8c7"))
-		box(tool_root, Vector3(0.04, 0.12, 0.04), Vector3(0.12, -0.23, -0.93), Color("76f8c7"))
+	if tool == "pickaxe":
+		mining_look = game.state.mining_tool() if is_instance_valid(game) and game.state else "pickaxe"
+		if mining_look == "drill":
+			box(tool_root, Vector3(0.16, 0.17, 0.34), Vector3(0.17, -0.27, -0.66), Color("e0a24c"), 0.3)
+			box(tool_root, Vector3(0.09, 0.2, 0.1), Vector3(0.17, -0.37, -0.6), Color("2f3436"))
+			var bit := box(tool_root, Vector3(0.05, 0.05, 0.32), Vector3(0.17, -0.27, -0.98), Color("b8bec0"), 0.9)
+			bit.name = "Bit"
+		else:
+			# The handle rises from the right glove; the head points forward over it.
+			var head_color := Color("9aa7ad") if mining_look == "steel_pick" else Color("6f6a62")
+			var pick := Node3D.new()
+			pick.name = "Pick"
+			pick.position = Vector3(0.24, -0.33, -0.56)
+			tool_root.add_child(pick)
+			box(pick, Vector3(0.045, 0.66, 0.045), Vector3(0, 0.3, 0), Color("8a5f3c"))
+			box(pick, Vector3(0.06, 0.07, 0.12), Vector3(0, 0.64, 0), head_color, 0.7)
+			var front := box(pick, Vector3(0.04, 0.04, 0.3), Vector3(0, 0.59, -0.19), head_color, 0.7)
+			front.rotation.x = -0.42
+			var back := box(pick, Vector3(0.04, 0.04, 0.26), Vector3(0, 0.6, 0.17), head_color, 0.7)
+			back.rotation.x = 0.42
+	elif tool in ["dynamite", "tnt", "buster"]:
+		var charge: Node3D = game.workshop.make_explosive(tool)
+		charge.position = Vector3(0.18, -0.25, -0.6)
+		charge.scale = Vector3.ONE * (0.9 if tool != "buster" else 0.7)
+		for mesh in charge.get_children():
+			if mesh is MeshInstance3D and mesh.material_override is StandardMaterial3D:
+				mesh.material_override = mesh.material_override.duplicate()
+				mesh.material_override.no_depth_test = true
+				mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var spark: Node3D = charge.get_node_or_null("Spark")
+		if spark: spark.visible = true
+		tool_root.add_child(charge)
 	kick = 0.25
-
-func show_batch(ids: Array,gems:Dictionary) -> void:
-	var signature: String=tool+str(ids)
-	if signature==batch_signature: return
-	batch_signature=signature
-	if is_instance_valid(batch_root): batch_root.queue_free()
-	batch_root=Node3D.new()
-	tool_root.add_child(batch_root)
-	if tool!="scoop": return
-	for i in range(mini(ids.size(),7)):
-		var gem: Dictionary=gems[int(ids[i])]
-		var visual: Node3D=game.workshop.make_gem(str(gem.kind))
-		visual.scale=Vector3.ONE*0.11
-		visual.position=Vector3(-0.055+(i%3)*0.085,-0.255+int(i/3)*0.045,-0.83-(i%2)*0.055)
-		visual.rotation.y=i*1.43
-		batch_root.add_child(visual)
 
 func show_held(gem: Dictionary) -> void:
 	var next_id: int = int(gem.get("id", -1))
@@ -203,9 +203,10 @@ func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= 20 * delta
 	elif Input.is_physical_key_pressed(KEY_SPACE) and not game.ui.menu_visible:
-		velocity.y = 6.2
+		# Enough lift to climb one block of the mountain at a time.
+		velocity.y = 7.2
 	move_and_slide()
-	if position.y < -8 or absf(position.x)>13 or absf(position.z)>12:
+	if position.y < -8 or absf(position.x) > 40 or position.z > 12 or position.z < -84:
 		game.unstuck()
 
 func _process(delta: float) -> void:
@@ -215,6 +216,13 @@ func _process(delta: float) -> void:
 	kick = move_toward(kick, 0, delta * 2.0)
 	hands.position = Vector3(sin(sway)*0.006,-0.10+sin(sway*2)*0.005-kick*0.09,-0.14+kick*0.075)
 	hands.rotation.z = sin(sway) * 0.008
+	# Swing the pickaxe down into the rock; the drill buzzes instead.
+	var pick: Node3D = tool_root.get_node_or_null("Pick")
+	if pick:
+		pick.rotation = Vector3(-0.42 - sin(clampf(kick, 0.0, 0.55) / 0.55 * PI) * 1.05, 0.0, 0.32)
+	else:
+		var bit: Node3D = tool_root.get_node_or_null("Bit")
+		if bit: bit.position.x = 0.17 + sin(Time.get_ticks_msec() * 0.2) * 0.006 * kick * 4.0
 	held_root.position = Vector3(-0.19, -0.02, -0.85) if inspecting else Vector3(-0.2, -0.15, -0.67)
 	held_root.rotation = Vector3(visual_angle.y, visual_angle.x, 0)
 	held_root.scale = Vector3.ONE * (inspect_scale * 0.72 if inspecting else 0.36)

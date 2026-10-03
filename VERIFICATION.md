@@ -1,6 +1,20 @@
 # Windows game verification
 
-## Mountain redesign
+## Mining update
+
+Verified on 3 October 2026 with the official Godot 4.6.2 Linux editor binary, headless and in a native OpenGL window (Mesa software rendering under a virtual display). The Windows export was not rebuilt for this update; the release workflow runs the solo and tutorial suites on the exported Windows executable before it publishes.
+
+The solo progression suite passed **74 checks** headless and in the rendered window. It covers a mountain of more than 20,000 blocks at least 24 blocks tall with over 2,000 ore blocks; one diamond buried at least 14 blocks deep behind an ordinary crystal-vein block; the summit's collision height; WASD movement; breaking an ore block by swinging through the real crosshair path; granite refusing the old pickaxe and yielding to the steel pickaxe; all nine physical purchases funded only by mined ore; dynamite, TNT and Mountain Buster craters; bedrock surviving explosions; crystal sonar; released finds resting on solid rock; the ore magnet; blasting the diamond free intact; protection from sale; drop and Lost & Found recovery; a full satchel refusing ore; save/reload of money, equipment, the diamond and every mined block; and the three-test certification ending surviving save/load.
+
+The tutorial and layout suite passed **97 checks**. It probes 29 mountain columns for solid collision at their authoritative heights, climbs the slope with real WASD and jump input, and follows all seven tutorial steps through real mining, selling, a physical purchase, digging a find out of a shaft, inspection and tray storage. Rejected or out-of-reach commands, taking finds back out of the tray, replays with full hands, a dug-out existing save, skip/replay persistence, joined sessions and title/pause/settings/HUD layouts at five screen shapes are covered.
+
+The native co-op suite passed **25 host and 20 client checks** across two processes on a real localhost ENet connection: the joining client receives every block the host had mined; remote mining breaks blocks through the host and fills the client's own satchel; a client buys and throws dynamite and both processes agree on every blasted block; released finds are picked up and handed between players; shared purchases spend once; pranks synchronize; and a disconnect returns the client's held finds to the tray and sells its satchel ore into shared funds.
+
+The proximity voice pair still passes **42 host and 41 client checks**, the same as before this update, and the loopback HTTP updater suite still passes **56 checks**.
+
+Rendered screenshots of the camp, mining, dynamite, a Mountain Buster crater, the outfitter and inspection were reviewed; the current ones are in `screenshots/`. Physical microphone hardware, Windows rendering performance with large blasts and internet co-op remain unverified for this update.
+
+## Scree mountain redesign (previous build)
 
 Verified on 3 October 2026 with Godot 4.6.2, including the exported Windows x64 executable and native OpenGL rendering on this machine's AMD Radeon graphics.
 
@@ -14,7 +28,7 @@ An independent UI run passed **278 layout checks** at 800×600, 1024×768, 1280�
 
 Packaging and draft-release publishing fixture tests pass. The Windows release workflow requires both solo and redesigned gameplay checks before publishing an update. Verification uses isolated AppData directories and disposable saves; it does not overwrite normal player progression.
 
-The sections below record the original prototype and updater verification. Current screenshots in `screenshots/` show the mountain revision.
+The sections below record the earlier builds' verification.
 
 ## Original prototype verification
 

@@ -47,7 +47,7 @@ if (-not $SkipVerification) {
     }
     if ($process.ExitCode -ne 0) { throw "Native solo verification failed ($($process.ExitCode))." }
     $report = Get-Content -LiteralPath (Join-Path $reportDirectory 'solo_report.json') -Raw | ConvertFrom-Json
-    if ($report.phase -ne 'complete' -or $report.errors.Count -ne 0 -or $report.checks.Count -lt 55) {
+    if ($report.phase -ne 'complete' -or $report.errors.Count -ne 0 -or $report.checks.Count -lt 74) {
         throw 'Native solo report was incomplete or failed; update will not be published.'
     }
     Write-Host "Native solo verification passed $($report.checks.Count) checks."
@@ -61,7 +61,7 @@ if (-not $SkipVerification) {
     }
     if ($redesignProcess.ExitCode -ne 0) { throw "Native redesign verification failed ($($redesignProcess.ExitCode))." }
     $redesignReport = Get-Content -LiteralPath (Join-Path $redesignDirectory 'redesign_report.json') -Raw | ConvertFrom-Json
-    if ($redesignReport.phase -ne 'complete' -or $redesignReport.errors.Count -ne 0 -or $redesignReport.checks.Count -lt 76) {
+    if ($redesignReport.phase -ne 'complete' -or $redesignReport.errors.Count -ne 0 -or $redesignReport.checks.Count -lt 97) {
         throw 'Native tutorial and screen-layout report was incomplete or failed; update will not be published.'
     }
     Write-Host "Native tutorial and screen-layout verification passed $($redesignReport.checks.Count) checks."

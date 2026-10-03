@@ -1,21 +1,15 @@
 extends Node3D
 class_name RoughWorkshop
 
+const SHOP_ORDER: Array[String] = ["steel_pick", "satchel", "loupe", "dynamite", "magnet", "drill", "tnt", "sonar", "buster"]
+
 var stations: Dictionary = {}
-var pile_centers: Array[Vector3] = []
 var upgrade_positions: Dictionary = {}
 var _product_cards: Dictionary = {}
-var _machines: Dictionary = {}
 var _materials: Dictionary = {}
 var _sign_font: SystemFont
 var _game: Node
 var _rng := RandomNumberGenerator.new()
-var conveyor_center := Vector3(6.65, 0.9, -2.0)
-var conveyor_direction: int = 1
-var _belt_enabled: bool = false
-var _belt_slats: Array[MeshInstance3D] = []
-var _animation_timers: Dictionary = {}
-var _moving_parts: Dictionary = {}
 static var _shared_gem_mesh: ArrayMesh
 
 func build(game: Node) -> void:
@@ -25,65 +19,14 @@ func build(game: Node) -> void:
 	_make_materials()
 	_build_environment()
 	_build_room()
-	_build_pile()
 	_build_stations()
 	_build_props()
 	update_upgrades([])
 
-func animate_machine(id: String, duration: float = 1.25) -> void:
-	_animation_timers[id] = maxf(float(_animation_timers.get(id, 0.0)), duration)
-
-func reverse_conveyor() -> void:
-	conveyor_direction *= -1
-
-func set_conveyor_direction(direction: int) -> void:
-	conveyor_direction = 1 if direction >= 0 else -1
-
-func _process(delta: float) -> void:
-	if _belt_enabled:
-		for slat: MeshInstance3D in _belt_slats:
-			slat.position.z = wrapf(slat.position.z + delta * 0.85 * conveyor_direction, -2.25, 2.25)
-	for id: String in _animation_timers.keys():
-		var remaining: float = maxf(0.0, float(_animation_timers[id]) - delta)
-		_animation_timers[id] = remaining
-		if remaining <= 0.0 or not _moving_parts.has(id):
-			continue
-		var parts: Array = _moving_parts[id]
-		for index: int in range(parts.size()):
-			var part: Node3D = parts[index]
-			if id == "scanner":
-				part.position.z = sin(remaining * 12.0) * 0.27
-			elif id == "wash":
-				part.position.y = 1.4 + sin(remaining * 14.0 + float(index)) * 0.045
-			else:
-				part.rotate_object_local(Vector3.UP, delta * 11.0)
-
-func pile_position(sector: int, slot: int) -> Vector3:
-	var c: Vector3 = pile_centers[clampi(sector, 0, pile_centers.size() - 1)]
-	var angle: float = float(slot) * 2.399963 + float(sector) * 0.43
-	var radius: float = 0.26 + float(slot % 4) * 0.22
-	var x: float = c.x + cos(angle) * radius
-	var z: float = c.z + sin(angle) * radius * 0.72
-	return Vector3(x, _pile_height(x, z) + 0.17, z)
-
 func update_upgrades(upgrades: Array) -> void:
-	for key: String in _machines:
-		var entry: Dictionary = _machines[key]
-		var active: bool = key in upgrades
-		if key == "conveyor":
-			_belt_enabled = active
-			entry["node"].visible = active
-			entry["collision"].disabled = not active
-		else:
-			entry["node"].visible = active
-			entry["collision"].disabled = not active
-			entry["notice"].visible = not active
-			var status: Label3D = entry["status"]
-			status.text = "READY" if active else "EQUIPMENT NOT INSTALLED"
-			status.modulate = Color("f0e3c7") if active else Color("bcaa8b")
 	for id: String in _product_cards:
 		var card: Label3D = _product_cards[id]
-		card.text = "INSTALLED" if id in upgrades else "$%d" % int(_game.state.prices.get(id, 0))
+		card.text = "OWNED" if id in upgrades else "$%d" % int(_game.state.prices.get(id, 0))
 		card.modulate = Color("9dac86") if id in upgrades else Color("e9b866")
 	if has_node("ExpansionSupplies"):
 		get_node("ExpansionSupplies").visible = upgrades.size() >= 3
@@ -162,6 +105,8 @@ func _build_environment() -> void:
 	sunlight.light_energy = 0.72
 	sunlight.rotation_degrees = Vector3(-48, -38, 0)
 	sunlight.shadow_enabled = true
+	sunlight.shadow_bias = 0.08
+	sunlight.shadow_normal_bias = 2.2
 	sunlight.directional_shadow_max_distance = 70.0
 	add_child(sunlight)
 
@@ -176,19 +121,17 @@ func _omni(at: Vector3, color: Color, energy: float, reach: float) -> void:
 func _build_room() -> void:
 	# The sorting camp sits on a gravel terrace cut into an alpine mountainside.
 	_box(self, Vector3(0, -0.22, 0), Vector3(26.0, 0.44, 23.0), "floor", true)
-	_box(self, Vector3(0, -0.55, -16), Vector3(112.0, 0.55, 108.0), "floor_alt")
-	_mountain(Vector3(0, -0.5, -34), 23.0, 24.0, 21, true)
-	_mountain(Vector3(-23, -1.0, -31), 18.0, 17.0, 29, false)
-	_mountain(Vector3(24, -1.0, -35), 20.0, 20.0, 32, true)
-	_mountain(Vector3(-43, -1.0, -50), 24.0, 30.0, 41, true)
-	_mountain(Vector3(43, -1.0, -55), 27.0, 34.0, 42, true)
-	# Rough quarry face and a timber retaining edge behind the working terrace.
-	for n: int in range(17):
-		var x: float = -16.0 + float(n) * 2.0
-		_rock(Vector3(x, 0.85, -12.3 + _rng.randf_range(-0.6, 0.6)), Vector3(1.8, _rng.randf_range(1.3, 3.6), 1.55), n % 3)
+	_box(self, Vector3(0, -0.32, -40), Vector3(240.0, 0.6, 220.0), "floor_alt", true)
+	# Distant peaks frame the mineable mountain without touching its blocks.
+	_mountain(Vector3(-82, -1.0, -80), 32.0, 36.0, 41, true)
+	_mountain(Vector3(84, -1.0, -86), 34.0, 40.0, 42, true)
+	_mountain(Vector3(-4, -1.0, -142), 48.0, 54.0, 21, true)
+	_mountain(Vector3(-64, -1.0, -20), 16.0, 14.0, 29, false)
+	_mountain(Vector3(66, -1.0, -24), 17.0, 16.0, 32, false)
 	for side: int in [-1, 1]:
 		for n: int in range(8):
-			_pine(Vector3(side * _rng.randf_range(16.0, 24.0), -0.25, -11.0 + float(n) * 5.0), _rng.randf_range(3.6, 7.0))
+			_pine(Vector3(side * _rng.randf_range(40.0, 48.0), -0.25, -60.0 + float(n) * 9.0), _rng.randf_range(3.6, 7.0))
+			_pine(Vector3(side * _rng.randf_range(15.0, 24.0), -0.25, -9.0 + float(n) * 2.6), _rng.randf_range(3.6, 6.0))
 		for z: int in range(-10, 12, 3):
 			_box(self, Vector3(side * 12.1, 0.78, float(z)), Vector3(0.17, 1.55, 0.17), "wood_dark")
 		for h: float in [0.65, 1.14]:
@@ -199,13 +142,11 @@ func _build_room() -> void:
 		for h: float in [0.65, 1.14]:
 			_box(self, Vector3(side * 7.1, h, 10.75), Vector3(7.4, 0.10, 0.09), "wood")
 	# Open-sided canvas work bays leave the mountain view unobstructed.
-	_canopy(Vector3(-8.15, 0, -0.1), Vector2(4.1, 11.2), 3.75)
-	_canopy(Vector3(8.15, 0, -2.4), Vector2(4.1, 7.8), 3.75)
-	_canopy(Vector3(8.0, 0, 4.55), Vector2(6.6, 4.2), 3.9)
+	_canopy(Vector3(-8.15, 0, 1.9), Vector2(4.1, 7.2), 3.75)
+	_canopy(Vector3(8.0, 0, 3.6), Vector2(6.0, 7.2), 3.9)
 	_canopy(Vector3(0, 0, -8.5), Vector2(4.3, 3.5), 3.7)
-	for side: int in [-1, 1]:
-		_box(self, Vector3(side * 8.2, 0.02, -0.1), Vector3(4.2, 0.045, 11.4), "wood_dark")
-	_box(self, Vector3(8.0, 0.02, 4.55), Vector3(6.55, 0.05, 4.15), "wood_dark")
+	_box(self, Vector3(-8.2, 0.02, 1.9), Vector3(4.2, 0.045, 7.4), "wood_dark")
+	_box(self, Vector3(8.0, 0.02, 3.6), Vector3(5.9, 0.05, 7.1), "wood_dark")
 	# Hand-built trailhead board, with text attached to the board rather than the camera.
 	var trailhead := Node3D.new()
 	trailhead.position = Vector3(-2.35, 0, 9.9)
@@ -215,13 +156,13 @@ func _build_room() -> void:
 		_box(trailhead, Vector3(x, 1.08, 0), Vector3(0.14, 2.2, 0.16), "wood_dark")
 	_box(trailhead, Vector3(0, 1.75, 0), Vector3(2.18, 0.89, 0.13), "sign")
 	_label(trailhead, "DIAMOND IN THE ROUGH", Vector3(0, 1.96, 0.071), 27, Color("e9dfc8")).pixel_size = 0.0029
-	_label(trailhead, "ALPINE SORTING CAMP", Vector3(0, 1.67, 0.071), 18, Color("c6baa1")).pixel_size = 0.0036
-	_label(trailhead, "Search the scree. Keep what matters.", Vector3(0, 1.44, 0.071), 16, Color("c6baa1")).pixel_size = 0.0031
+	_label(trailhead, "ALPINE MINING CLAIM", Vector3(0, 1.67, 0.071), 18, Color("c6baa1")).pixel_size = 0.0036
+	_label(trailhead, "Break the mountain. Find the diamond.", Vector3(0, 1.44, 0.071), 16, Color("c6baa1")).pixel_size = 0.0031
 	# Angular gravel makes the terrace belong to the landscape.
 	for n: int in range(90):
 		var x: float = _rng.randf_range(-11.4, 11.4)
 		var z: float = _rng.randf_range(-10.4, 10.0)
-		if absf(x) < 6.3 and z > -6.0 and z < 2.3:
+		if absf(x) < 3.0 and z > 4.0:
 			continue
 		_rock(Vector3(x, 0.025, z), Vector3(_rng.randf_range(0.05, 0.17), 0.06, _rng.randf_range(0.07, 0.20)), n % 3)
 
@@ -323,140 +264,30 @@ func _lamp(at: Vector3) -> void:
 	_cylinder(self, at, 0.48, 0.24, 0.3, "brass", 10)
 	_cylinder(self, at + Vector3(0, -0.16, 0), 0.38, 0.38, 0.025, "light", 10)
 
-func _pile_height(x: float, z: float) -> float:
-	# Gentle continuous ramps, with a peak towards the quarry face. Every sector is walkable.
-	var x_profile: float = maxf(0.0, 1.0 - pow(absf(x) / 6.4, 2.0))
-	var z_profile: float = maxf(0.0, 1.0 - pow((z + 2.7) / 4.8, 2.0))
-	return 0.03 + 2.65 * x_profile * z_profile
-
-func _build_pile() -> void:
-	for row: int in range(3):
-		for col: int in range(4):
-			var center := Vector3(-4.5 + float(col) * 3.0, 0, -4.4 + float(row) * 2.4)
-			center.y = _pile_height(center.x, center.z)
-			pile_centers.append(center)
-			var sector_id: int = row * 4 + col
-			var body := StaticBody3D.new()
-			body.name = "PileSector_%s" % sector_id
-			body.set_meta("pile", sector_id)
-			body.add_to_group("pile_sectors")
-			add_child(body)
-			var faces: Array = []
-			var span_x: float = 3.0
-			var span_z: float = 2.4
-			for sx: int in range(6):
-				for sz: int in range(5):
-					var x0: float = center.x - span_x * 0.5 + float(sx) * span_x / 6.0
-					var x1: float = x0 + span_x / 6.0
-					var z0: float = center.z - span_z * 0.5 + float(sz) * span_z / 5.0
-					var z1: float = z0 + span_z / 5.0
-					var a := Vector3(x0, _pile_height(x0, z0), z0)
-					var b := Vector3(x1, _pile_height(x1, z0), z0)
-					var c := Vector3(x1, _pile_height(x1, z1), z1)
-					var d := Vector3(x0, _pile_height(x0, z1), z1)
-					faces.append([a, c, b])
-					faces.append([a, d, c])
-			var mesh: ArrayMesh = _face_mesh(faces)
-			var surface := MeshInstance3D.new()
-			surface.mesh = mesh
-			surface.material_override = _materials["gravel" if sector_id % 3 == 0 else "rock_light"]
-			body.add_child(surface)
-			var collider := CollisionShape3D.new()
-			collider.shape = mesh.create_trimesh_shape()
-			collider.shape.backface_collision = true
-			body.add_child(collider)
-	# Feather the hill into the camp floor so its edges are climbable instead of steps.
-	var rim_faces: Array = []
-	for side: int in [-1, 1]:
-		for n: int in range(18):
-			var z0: float = -5.6 + n * 0.4
-			var z1: float = z0 + 0.4
-			var inner_x: float = side * 6.0
-			var outer_x: float = side * 6.5
-			rim_faces.append([Vector3(inner_x, _pile_height(inner_x, z0), z0), Vector3(inner_x, _pile_height(inner_x, z1), z1), Vector3(outer_x, 0.025, z0)])
-			rim_faces.append([Vector3(inner_x, _pile_height(inner_x, z1), z1), Vector3(outer_x, 0.025, z1), Vector3(outer_x, 0.025, z0)])
-	for edge: float in [-5.6, 1.6]:
-		var outer_z: float = -7.0 if edge < 0 else 2.4
-		for n: int in range(24):
-			var x0: float = -6.0 + n * 0.5
-			var x1: float = x0 + 0.5
-			rim_faces.append([Vector3(x0, _pile_height(x0, edge), edge), Vector3(x1, _pile_height(x1, edge), edge), Vector3(x0, 0.025, outer_z)])
-			rim_faces.append([Vector3(x1, _pile_height(x1, edge), edge), Vector3(x1, 0.025, outer_z), Vector3(x0, 0.025, outer_z)])
-	for face: Array in rim_faces:
-		if (face[1] - face[0]).cross(face[2] - face[0]).y < 0.0:
-			var swap: Vector3 = face[1]
-			face[1] = face[2]
-			face[2] = swap
-	var rim_sectors: Dictionary = {}
-	for face: Array in rim_faces:
-		var center: Vector3 = (face[0] + face[1] + face[2]) / 3.0
-		var col: int = clampi(roundi((center.x + 4.5) / 3.0), 0, 3)
-		var row: int = clampi(roundi((center.z + 4.4) / 2.4), 0, 2)
-		var sector: int = row * 4 + col
-		if not rim_sectors.has(sector):
-			rim_sectors[sector] = []
-		rim_sectors[sector].append(face)
-	for sector: int in rim_sectors:
-		var rim_mesh: ArrayMesh = _face_mesh(rim_sectors[sector])
-		var rim := MeshInstance3D.new()
-		rim.mesh = rim_mesh
-		rim.material_override = _materials["gravel"]
-		var rim_body := StaticBody3D.new()
-		rim_body.name = "ScreeEdge_%d" % sector
-		rim_body.set_meta("pile", sector)
-		rim_body.add_child(rim)
-		var rim_collision := CollisionShape3D.new()
-		rim_collision.shape = rim_mesh.create_trimesh_shape()
-		rim_collision.shape.backface_collision = true
-		rim_body.add_child(rim_collision)
-		add_child(rim_body)
-	# Hundreds of dull stones and occasional glass glints are embedded in the scree.
-	var colors: Array[Color] = [Color("85877b"), Color("a6aca1"), Color("788781"), Color("8a8177"), Color("b2b6a7"), Color("87999c")]
-	for color_index: int in range(colors.size()):
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.mesh = gem_mesh()
-		mm.instance_count = 215
-		var stones := MultiMeshInstance3D.new()
-		stones.name = "ScreeStones_%s" % color_index
-		stones.multimesh = mm
-		stones.material_override = _material(colors[color_index], 0.16 if color_index == 5 else 0.0, 0.50 if color_index == 5 else 0.93)
-		stones.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(stones)
-		for n: int in range(mm.instance_count):
-			var x: float = _rng.randf_range(-6.13, 6.13)
-			var z: float = _rng.randf_range(-5.6, 1.6)
-			var size: float = _rng.randf_range(0.13, 0.31)
-			var basis: Basis = Basis.from_euler(Vector3(_rng.randf_range(-1.5, 1.5), _rng.randf_range(-PI, PI), _rng.randf_range(-1.5, 1.5)))
-			basis = basis.scaled(Vector3(size, size * _rng.randf_range(0.5, 0.8), size))
-			mm.set_instance_transform(n, Transform3D(basis, Vector3(x, _pile_height(x, z) + 0.035, z)))
-	var marker := Node3D.new()
-	marker.position = Vector3(-4.5, 0, 2.8)
-	add_child(marker)
-	_box(marker, Vector3(0, 0.6, 0), Vector3(0.08, 1.25, 0.09), "wood_dark")
-	_box(marker, Vector3(0, 0.98, 0), Vector3(1.35, 0.35, 0.09), "sign")
-	_label(marker, "GEM SCREE", Vector3(0, 0.98, 0.05), 26, Color("e8ddc2")).pixel_size = 0.0035
-
 func _build_stations() -> void:
 	_station("sell", Vector3(-8, 1, 4), "SCRAP EXCHANGE", "", "orange")
 	_station("shop", Vector3(8, 1, 4), "CAMP OUTFITTER", "", "orange")
-	_station("tray", Vector3(-8, 1, 0), "INSPECTION TRAY", "GOOD GEMS DESERVE A SECOND LOOK", "mint")
-	_station("wash", Vector3(-8, 1, -4), "WASHING STATION", "", "window")
-	_station("sorter", Vector3(8, 1, -4), "BATCH SORTER", "", "orange")
-	_station("certify", Vector3(0, 1, -8), "CERTIFICATION BENCH", "REAL PROOF. REAL DIAMOND.", "brass")
-	_station("scanner", Vector3(8, 1, 0), "CANDIDATE SCANNER", "", "pink")
-	_station("recover", Vector3(-5, 1, 8), "LOST & FOUND", "NO GEM LEFT BEHIND", "orange")
+	_station("tray", Vector3(-8, 1, 0), "INSPECTION TRAY", "", "mint")
+	_station("certify", Vector3(0, 1, -8), "CERTIFICATION BENCH", "", "brass")
+	_station("recover", Vector3(-5, 1, 8), "LOST & FOUND", "", "orange")
 	_station("collection", Vector3(5, 1, 8), "SPECIMEN COLLECTION", "", "pink")
 	_build_sell()
 	_build_shop()
 	_build_tray()
-	_build_wash()
-	_build_sorter()
-	_build_scanner()
 	_build_certify()
 	_build_recovery()
 	_build_collection()
-	_build_conveyor()
+	_build_mountain_signs()
+
+func _build_mountain_signs() -> void:
+	var board := Node3D.new()
+	board.name = "BlastingSign"
+	board.position = Vector3(4.6, 0, -10.6)
+	add_child(board)
+	_box(board, Vector3(0, 0.75, 0), Vector3(0.1, 1.5, 0.1), "wood_dark")
+	_box(board, Vector3(0, 1.45, 0), Vector3(1.9, 0.62, 0.08), "orange")
+	_label(board, "BLASTING ZONE", Vector3(0, 1.55, 0.045), 26, Color("2d2418")).pixel_size = 0.0032
+	_label(board, "Light it, throw it, step back.", Vector3(0, 1.33, 0.045), 16, Color("2d2418")).pixel_size = 0.0034
 
 func _station(id: String, at: Vector3, title: String, _subtitle: String, _accent: String) -> void:
 	stations[id] = at
@@ -474,16 +305,17 @@ func _station(id: String, at: Vector3, title: String, _subtitle: String, _accent
 			body.rotation.y = PI
 	add_child(body)
 	if id == "shop":
-		_box(body, Vector3(0, 0.38, -0.58), Vector3(2.0, 0.74, 0.45), "wood_dark")
+		# The outfitter is a hall of physical displays; it has no counter of its own.
+		return
 	else:
 		for x: float in [-1.22, 1.22]:
 			_box(body, Vector3(x, 0.48, 0), Vector3(0.14, 0.96, 1.56), "wood_dark")
 		_box(body, Vector3(0, 0.42, -0.6), Vector3(2.55, 0.15, 0.12), "wood_dark")
 		_box(body, Vector3(0, 0.99, 0), Vector3(2.82, 0.12, 1.7), "wood")
 	var shape := BoxShape3D.new()
-	shape.size = Vector3(2.82, 1.05, 1.7) if id != "shop" else Vector3(2.0, 0.74, 0.45)
+	shape.size = Vector3(2.82, 1.05, 1.7)
 	var collision := CollisionShape3D.new()
-	collision.position = Vector3(0, 0.525, 0) if id != "shop" else Vector3(0, 0.37, -0.58)
+	collision.position = Vector3(0, 0.525, 0)
 	collision.shape = shape
 	body.add_child(collision)
 	# Fixed boards mounted to timber uprights above the bench.
@@ -511,11 +343,10 @@ func _build_sell() -> void:
 
 func _build_shop() -> void:
 	# Each item is a physical purchase target. Cards belong to its plinth.
-	var ids: Array[String] = ["scoop", "trays", "loupe", "wash", "sorter", "vacuum", "conveyor", "scanner"]
-	for index: int in range(ids.size()):
-		var id: String = ids[index]
-		var x: float = 5.95 + float(index % 4) * 1.40
-		var z: float = 5.62 if index < 4 else 3.57
+	for index: int in range(SHOP_ORDER.size()):
+		var id: String = SHOP_ORDER[index]
+		var x: float = 6.4 + float(index % 3) * 1.6
+		var z: float = 6.0 - float(index / 3) * 2.4
 		var pedestal := StaticBody3D.new()
 		pedestal.name = "Product_%s" % id
 		pedestal.position = Vector3(x, 0, z)
@@ -523,7 +354,7 @@ func _build_shop() -> void:
 		pedestal.add_to_group("upgrade_displays")
 		add_child(pedestal)
 		upgrade_positions[id] = Vector3(x, 0.9, z)
-		var base_height: float = 0.98 if index < 4 else 1.38
+		var base_height: float = 0.98
 		for side: float in [-0.49, 0.49]:
 			_box(pedestal, Vector3(side, base_height * 0.5, 0), Vector3(0.11, base_height, 0.90), "wood_dark")
 		_box(pedestal, Vector3(0, base_height, 0), Vector3(1.26, 0.10, 1.04), "wood")
@@ -543,21 +374,25 @@ func _build_shop() -> void:
 		model.position.y = base_height + 0.08
 		pedestal.add_child(model)
 		_product_model(model, id)
+	var board := Node3D.new()
+	board.position = Vector3(8.0, 0, 7.25)
+	add_child(board)
+	_box(board, Vector3(0, 3.25, 0), Vector3(3.2, 0.55, 0.09), "sign")
+	_label(board, "CAMP OUTFITTER", Vector3(0, 3.27, 0.05), 30, Color("e8ddc2")).pixel_size = 0.0034
 
 func _product_model(model: Node3D, id: String) -> void:
 	match id:
-		"scoop":
-			var handle: MeshInstance3D = _cylinder(model, Vector3(0.12, 0.36, -0.12), 0.055, 0.055, 0.64, "wood_dark", 8)
-			handle.rotation.x = -0.48
-			_box(model, Vector3(0.02, 0.08, 0.15), Vector3(0.69, 0.08, 0.48), "brass")
-			for side: float in [-0.32, 0.32]:
-				_box(model, Vector3(side + 0.02, 0.17, 0.15), Vector3(0.07, 0.2, 0.48), "brass")
-			_box(model, Vector3(0.02, 0.15, -0.08), Vector3(0.68, 0.22, 0.055), "brass")
-		"trays":
-			for n: int in range(3):
-				_box(model, Vector3(-0.13 + n * 0.11, 0.06 + n * 0.13, 0), Vector3(0.83, 0.075, 0.62), "steel")
-				for side: float in [-0.41, 0.41]:
-					_box(model, Vector3(side - 0.13 + n * 0.11, 0.11 + n * 0.13, 0), Vector3(0.04, 0.12, 0.62), "steel")
+		"steel_pick":
+			var handle: MeshInstance3D = _cylinder(model, Vector3(0, 0.3, 0), 0.035, 0.035, 0.62, "wood", 8)
+			handle.rotation.z = 0.5
+			var head: MeshInstance3D = _box(model, Vector3(-0.14, 0.55, 0), Vector3(0.62, 0.07, 0.07), "steel")
+			head.rotation.z = 0.5 - PI / 2.0 + 0.25
+		"satchel":
+			_box(model, Vector3(0, 0.2, 0), Vector3(0.62, 0.4, 0.3), "wood")
+			_box(model, Vector3(0, 0.34, 0.12), Vector3(0.64, 0.16, 0.1), "wood_dark")
+			_box(model, Vector3(0, 0.36, 0.18), Vector3(0.08, 0.08, 0.02), "brass")
+			var strap: MeshInstance3D = _cylinder(model, Vector3(0, 0.46, 0), 0.25, 0.25, 0.03, "wood_dark", 14)
+			strap.rotation.x = PI / 2.0
 		"loupe":
 			_cylinder(model, Vector3(-0.25, 0.25, -0.12), 0.035, 0.035, 0.52, "brass", 8)
 			_box(model, Vector3(-0.07, 0.49, -0.12), Vector3(0.41, 0.04, 0.04), "brass")
@@ -565,41 +400,40 @@ func _product_model(model: Node3D, id: String) -> void:
 			var lens: MeshInstance3D = _cylinder(model, Vector3(0.22, 0.11, 0.17), 0.16, 0.16, 0.085, "steel", 12)
 			lens.rotation.x = 0.35
 			_cylinder(model, Vector3(0.22, 0.16, 0.17), 0.12, 0.12, 0.018, "window", 12)
-		"wash":
-			_cylinder(model, Vector3(0, 0.15, 0), 0.42, 0.35, 0.28, "steel", 14)
-			_cylinder(model, Vector3(0, 0.30, 0), 0.35, 0.35, 0.025, "window", 14)
-			_cylinder(model, Vector3(0.29, 0.42, -0.27), 0.035, 0.035, 0.39, "brass", 8)
-			var tap: MeshInstance3D = _cylinder(model, Vector3(0.10, 0.61, -0.27), 0.035, 0.035, 0.39, "brass", 8)
-			tap.rotation.z = PI / 2.0
-		"sorter":
-			_box(model, Vector3(0, 0.25, 0), Vector3(0.85, 0.45, 0.64), "orange")
-			_box(model, Vector3(0, 0.50, 0), Vector3(0.87, 0.05, 0.68), "dark")
-			for n: int in range(5):
-				_box(model, Vector3(-0.34 + n * 0.17, 0.535, 0), Vector3(0.045, 0.025, 0.62), "steel")
-			for side: float in [-0.24, 0.24]:
-				_box(model, Vector3(side, 0.10, 0.4), Vector3(0.33, 0.13, 0.25), "steel")
-		"vacuum":
-			_cylinder(model, Vector3(0, 0.27, -0.07), 0.29, 0.29, 0.47, "orange", 12)
-			_cylinder(model, Vector3(0, 0.52, -0.07), 0.31, 0.31, 0.09, "dark", 12)
-			for side: float in [-0.23, 0.23]:
-				_sphere(model, Vector3(side, 0.05, -0.07), 0.09, "rubber")
-			var hose: MeshInstance3D = _cylinder(model, Vector3(0.23, 0.27, 0.25), 0.055, 0.055, 0.50, "rubber", 8)
-			hose.rotation.x = -0.8
-			_box(model, Vector3(0.23, 0.09, 0.47), Vector3(0.37, 0.09, 0.13), "steel")
-		"conveyor":
-			_box(model, Vector3(0, 0.28, 0), Vector3(0.87, 0.14, 0.62), "steel")
-			_box(model, Vector3(0, 0.37, 0), Vector3(0.81, 0.045, 0.49), "rubber")
-			for n: int in range(6):
-				_box(model, Vector3(-0.35 + n * 0.14, 0.40, 0), Vector3(0.035, 0.025, 0.46), "orange")
-			for side: float in [-0.33, 0.33]:
-				_box(model, Vector3(side, 0.11, 0), Vector3(0.055, 0.28, 0.48), "steel")
-		"scanner":
-			for side: float in [-0.33, 0.33]:
-				_box(model, Vector3(side, 0.27, 0), Vector3(0.12, 0.51, 0.58), "steel")
-			_box(model, Vector3(0, 0.56, 0), Vector3(0.80, 0.14, 0.58), "steel")
-			_box(model, Vector3(0, 0.06, 0), Vector3(0.79, 0.07, 0.56), "rubber")
-			_box(model, Vector3(0, 0.49, 0), Vector3(0.52, 0.027, 0.09), "light")
-			_box(model, Vector3(0.20, 0.56, 0.3), Vector3(0.22, 0.08, 0.015), "dark")
+		"dynamite":
+			_box(model, Vector3(0, 0.08, 0), Vector3(0.7, 0.16, 0.5), "wood")
+			for n: int in range(4):
+				var stick: Node3D = make_explosive("dynamite")
+				stick.position = Vector3(-0.22 + n * 0.15, 0.22, 0)
+				stick.rotation.z = 0.12 * (n - 1.5)
+				model.add_child(stick)
+		"magnet":
+			for side: float in [-0.16, 0.16]:
+				_box(model, Vector3(side, 0.3, 0), Vector3(0.12, 0.44, 0.14), "pink")
+				_box(model, Vector3(side, 0.56, 0), Vector3(0.12, 0.1, 0.14), "steel")
+			_box(model, Vector3(0, 0.1, 0), Vector3(0.44, 0.12, 0.14), "pink")
+		"drill":
+			_box(model, Vector3(0, 0.3, 0), Vector3(0.22, 0.24, 0.52), "orange")
+			_box(model, Vector3(0, 0.12, 0.12), Vector3(0.14, 0.3, 0.14), "dark")
+			var bit: MeshInstance3D = _cylinder(model, Vector3(0, 0.3, -0.42), 0.0, 0.07, 0.34, "steel", 8)
+			bit.rotation.x = -PI / 2.0
+		"tnt":
+			var crate: MeshInstance3D = _box(model, Vector3(0, 0.22, 0), Vector3(0.62, 0.44, 0.48), "wood")
+			crate.name = "Crate"
+			_label(model, "TNT", Vector3(0, 0.24, 0.245), 52, Color("b8322a")).pixel_size = 0.004
+			var bundle: Node3D = make_explosive("tnt")
+			bundle.position = Vector3(0, 0.52, 0)
+			model.add_child(bundle)
+		"sonar":
+			_box(model, Vector3(0, 0.16, 0), Vector3(0.44, 0.3, 0.3), "steel")
+			_box(model, Vector3(0, 0.2, 0.152), Vector3(0.3, 0.16, 0.01), "mint")
+			var dish: MeshInstance3D = _cylinder(model, Vector3(0, 0.48, 0), 0.26, 0.04, 0.14, "brass", 14)
+			dish.rotation.x = -0.5
+		"buster":
+			var bomb: Node3D = make_explosive("buster")
+			bomb.position = Vector3(0, 0.3, 0)
+			bomb.scale = Vector3.ONE * 1.25
+			model.add_child(bomb)
 
 func _build_tray() -> void:
 	var node: Node3D = _station_node("tray")
@@ -610,77 +444,6 @@ func _build_tray() -> void:
 	_cylinder(node, Vector3(-1.2, 1.4, -0.56), 0.036, 0.036, 0.7, "brass", 8)
 	_box(node, Vector3(-0.92, 1.73, -0.56), Vector3(0.65, 0.065, 0.065), "brass")
 	_cylinder(node, Vector3(-0.6, 1.69, -0.56), 0.19, 0.10, 0.13, "light", 10)
-
-func _machine_setup(id: String) -> Node3D:
-	var station: Node3D = _station_node(id)
-	var machine := Node3D.new()
-	machine.name = "Machine"
-	station.add_child(machine)
-	var machine_body := StaticBody3D.new()
-	machine_body.set_meta("station", id)
-	var machine_shape := BoxShape3D.new()
-	machine_shape.size = Vector3(1.70, 0.76, 0.10)
-	var machine_collision := CollisionShape3D.new()
-	machine_collision.shape = machine_shape
-	machine_collision.position = Vector3(0, 1.43, -0.65)
-	machine_body.add_child(machine_collision)
-	machine.add_child(machine_body)
-	_box(machine, Vector3(0, 1.43, -0.65), Vector3(1.70, 0.76, 0.10), "steel")
-	var notice: Label3D = _label(station, "EQUIPMENT BAY", Vector3(0, 1.01, 0.22), 18, Color("c8b58f"), Vector3(-PI / 2.0, 0, 0))
-	notice.pixel_size = 0.0032
-	_machines[id] = {"node": machine, "notice": notice, "status": station.get_node("Status"), "collision": machine_collision}
-	return machine
-
-func _build_wash() -> void:
-	var node: Node3D = _machine_setup("wash")
-	var bubbles: Array = []
-	_cylinder(node, Vector3(0, 1.2, 0), 0.70, 0.64, 0.3, "steel", 20)
-	_cylinder(node, Vector3(0, 1.37, 0), 0.59, 0.59, 0.035, "window", 20)
-	_cylinder(node, Vector3(0.94, 1.41, -0.44), 0.046, 0.046, 0.74, "brass", 8)
-	var faucet: MeshInstance3D = _cylinder(node, Vector3(0.70, 1.78, -0.44), 0.046, 0.046, 0.50, "brass", 8)
-	faucet.rotation.z = PI / 2.0
-	_cylinder(node, Vector3(0.45, 1.72, -0.44), 0.058, 0.058, 0.14, "brass", 8)
-	for n: int in range(7):
-		bubbles.append(_sphere(node, Vector3(_rng.randf_range(-0.4, 0.4), 1.40, _rng.randf_range(-0.38, 0.38)), _rng.randf_range(0.07, 0.13), "white"))
-	_moving_parts["wash"] = bubbles
-	_box(node, Vector3(-1.04, 1.28, -0.2), Vector3(0.25, 0.44, 0.27), "pink")
-	_label(node, "FOAM", Vector3(-1.04, 1.27, -0.058), 10, Color("fff5d8"))
-
-func _build_sorter() -> void:
-	var node: Node3D = _machine_setup("sorter")
-	var gears: Array = []
-	_box(node, Vector3(0, 1.43, -0.1), Vector3(1.82, 0.74, 1.19), "orange")
-	_box(node, Vector3(0, 1.82, -0.1), Vector3(1.59, 0.05, 0.97), "dark")
-	for n: int in range(7):
-		_box(node, Vector3(-0.66 + n * 0.22, 1.86, -0.1), Vector3(0.045, 0.025, 0.95), "steel")
-	for x: float in [-0.66, 0.66]:
-		_box(node, Vector3(x, 1.2, 0.73), Vector3(0.58, 0.23, 0.40), "steel")
-		_box(node, Vector3(x, 1.33, 0.73), Vector3(0.48, 0.02, 0.32), "dark")
-	_box(node, Vector3(0.6, 1.48, 0.518), Vector3(0.12, 0.12, 0.04), "mint")
-	_box(node, Vector3(0.38, 1.48, 0.518), Vector3(0.12, 0.12, 0.04), "pink")
-	for x: float in [-0.60, 0.60]:
-		var gear := Node3D.new()
-		gear.position = Vector3(x, 1.50, 0.555)
-		gear.rotation.x = PI / 2.0
-		node.add_child(gear)
-		_cylinder(gear, Vector3.ZERO, 0.20, 0.20, 0.08, "dark", 12)
-		for tooth: int in range(5):
-			var spoke: MeshInstance3D = _box(gear, Vector3.ZERO, Vector3(0.52, 0.085, 0.055), "brass")
-			spoke.rotation.y = tooth * PI / 5.0
-		_cylinder(gear, Vector3(0, 0.052, 0), 0.07, 0.07, 0.05, "mint", 8)
-		gears.append(gear)
-	_moving_parts["sorter"] = gears
-
-func _build_scanner() -> void:
-	var node: Node3D = _machine_setup("scanner")
-	for x: float in [-0.85, 0.85]:
-		_box(node, Vector3(x, 1.48, 0), Vector3(0.25, 0.79, 1.08), "pink")
-	_box(node, Vector3(0, 1.9, 0), Vector3(1.96, 0.23, 1.08), "pink")
-	_box(node, Vector3(0, 1.14, 0), Vector3(1.68, 0.12, 1.02), "rubber")
-	var scanner_beam: MeshInstance3D = _box(node, Vector3(0, 1.75, -0.04), Vector3(1.3, 0.05, 0.16), "mint")
-	_moving_parts["scanner"] = [scanner_beam]
-	_box(node, Vector3(1.15, 1.25, 0.28), Vector3(0.34, 0.38, 0.43), "dark")
-	_box(node, Vector3(1.15, 1.34, 0.507), Vector3(0.24, 0.20, 0.025), "mint")
 
 func _build_certify() -> void:
 	var node: Node3D = _station_node("certify")
@@ -706,31 +469,6 @@ func _build_collection() -> void:
 	for x: float in [-0.87, 0.0, 0.87]:
 		_cylinder(node, Vector3(x, 1.15, 0.1), 0.30, 0.33, 0.18, "brass", 12)
 		_cylinder(node, Vector3(x, 1.27, 0.1), 0.27, 0.27, 0.08, "dark", 12)
-
-func _build_conveyor() -> void:
-	var node := Node3D.new()
-	node.name = "ConveyorUpgrade"
-	add_child(node)
-	node.position = Vector3(6.65, 0, -2.0)
-	var body := StaticBody3D.new()
-	body.set_meta("station", "sorter")
-	body.set_meta("conveyor", true)
-	var shape := BoxShape3D.new()
-	shape.size = Vector3(0.98, 0.93, 4.6)
-	var collision := CollisionShape3D.new()
-	collision.shape = shape
-	collision.position.y = 0.465
-	body.add_child(collision)
-	node.add_child(body)
-	_box(node, Vector3(0, 0.8, 0), Vector3(0.98, 0.14, 4.6), "steel")
-	_box(node, Vector3(0, 0.895, 0), Vector3(0.80, 0.06, 4.55), "rubber")
-	for n: int in range(13):
-		_belt_slats.append(_box(node, Vector3(0, 0.938, -2.10 + n * 0.35), Vector3(0.78, 0.035, 0.05), "orange"))
-	for x: float in [-0.53, 0.53]:
-		_box(node, Vector3(x, 1.00, 0), Vector3(0.06, 0.19, 4.66), "brass")
-		for z: float in [-1.8, 1.8]:
-			_box(node, Vector3(x, 0.43, z), Vector3(0.09, 0.72, 0.10), "steel")
-	_machines["conveyor"] = {"node": node, "collision": collision}
 
 func _build_props() -> void:
 	# Practical camp supplies: a few timber crates, sacks and a water barrel.
@@ -886,18 +624,24 @@ static func make_gem(kind: String) -> Node3D:
 		mesh = bolt
 		material = _material(Color("dba864"), 0.67, 0.30)
 	elif kind == "collectible":
-		mesh = gem_mesh()
-		material = _material(Color("f7a1cf"), 0.43, 0.16, 0.20)
-		var halo := MeshInstance3D.new()
-		var halo_mesh := TorusMesh.new()
-		halo_mesh.inner_radius = 0.63
-		halo_mesh.outer_radius = 0.71
-		halo_mesh.rings = 14
-		halo_mesh.ring_segments = 6
-		halo.mesh = halo_mesh
-		halo.material_override = _material(Color("ffca66"), 0.78, 0.19)
-		halo.rotation.z = 0.38
-		visual.add_child(halo)
+		# A spiral fossil: stacked shell rings shrinking towards the centre.
+		var shell := TorusMesh.new()
+		shell.inner_radius = 0.30
+		shell.outer_radius = 0.62
+		shell.rings = 16
+		shell.ring_segments = 8
+		mesh = shell
+		material = _material(Color("d9c08f"), 0.05, 0.72)
+		var inner := MeshInstance3D.new()
+		var inner_mesh := TorusMesh.new()
+		inner_mesh.inner_radius = 0.10
+		inner_mesh.outer_radius = 0.30
+		inner_mesh.rings = 12
+		inner_mesh.ring_segments = 6
+		inner.mesh = inner_mesh
+		inner.material_override = _material(Color("b89a68"), 0.05, 0.75)
+		inner.position.y = 0.05
+		visual.add_child(inner)
 	elif kind in ["diamond", "suspect"]:
 		mesh = gem_mesh()
 		material = _material(Color("c1eee6"), 0.43, 0.13)
@@ -911,4 +655,73 @@ static func make_gem(kind: String) -> Node3D:
 	instance.mesh = mesh
 	instance.material_override = material
 	visual.add_child(instance)
+	return visual
+
+static func make_explosive(tier: String) -> Node3D:
+	var visual := Node3D.new()
+	visual.name = "Explosive"
+	var red: StandardMaterial3D = _material(Color("c8322b"), 0.05, 0.6)
+	var fuse_material: StandardMaterial3D = _material(Color("e9d9a6"), 0.0, 0.9)
+	var spark: StandardMaterial3D = _material(Color("ffb347"), 0.0, 0.3, 2.0)
+	var sticks: Array[Vector3] = []
+	if tier == "dynamite":
+		sticks = [Vector3.ZERO]
+	elif tier == "tnt":
+		sticks = [Vector3(-0.055, 0, 0), Vector3(0.055, 0, 0), Vector3(0, 0, 0.09)]
+	if tier == "buster":
+		var ball := MeshInstance3D.new()
+		var ball_mesh := SphereMesh.new()
+		ball_mesh.radius = 0.2
+		ball_mesh.height = 0.4
+		ball_mesh.radial_segments = 14
+		ball_mesh.rings = 7
+		ball.mesh = ball_mesh
+		ball.material_override = _material(Color("23262a"), 0.5, 0.35)
+		visual.add_child(ball)
+		var band := MeshInstance3D.new()
+		var band_mesh := TorusMesh.new()
+		band_mesh.inner_radius = 0.19
+		band_mesh.outer_radius = 0.215
+		band.mesh = band_mesh
+		band.material_override = _material(Color("e58a2d"), 0.2, 0.4)
+		visual.add_child(band)
+	for at: Vector3 in sticks:
+		var stick := MeshInstance3D.new()
+		var stick_mesh := CylinderMesh.new()
+		stick_mesh.top_radius = 0.045
+		stick_mesh.bottom_radius = 0.045
+		stick_mesh.height = 0.32
+		stick_mesh.radial_segments = 10
+		stick.mesh = stick_mesh
+		stick.material_override = red
+		stick.position = at
+		visual.add_child(stick)
+	if tier == "tnt":
+		var tape := MeshInstance3D.new()
+		var tape_mesh := BoxMesh.new()
+		tape_mesh.size = Vector3(0.22, 0.05, 0.2)
+		tape.mesh = tape_mesh
+		tape.material_override = _material(Color("3b3a36"), 0.0, 0.8)
+		tape.position = Vector3(0, 0, 0.03)
+		visual.add_child(tape)
+	var top: float = 0.2 if tier == "buster" else 0.16
+	var fuse := MeshInstance3D.new()
+	var fuse_mesh := CylinderMesh.new()
+	fuse_mesh.top_radius = 0.008
+	fuse_mesh.bottom_radius = 0.008
+	fuse_mesh.height = 0.12
+	fuse.mesh = fuse_mesh
+	fuse.material_override = fuse_material
+	fuse.position.y = top + 0.06
+	visual.add_child(fuse)
+	var glow := MeshInstance3D.new()
+	glow.name = "Spark"
+	var glow_mesh := SphereMesh.new()
+	glow_mesh.radius = 0.025
+	glow_mesh.height = 0.05
+	glow.mesh = glow_mesh
+	glow.material_override = spark
+	glow.position.y = top + 0.12
+	glow.visible = false
+	visual.add_child(glow)
 	return visual

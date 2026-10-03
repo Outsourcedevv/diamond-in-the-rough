@@ -235,17 +235,17 @@ func _build_hud() -> void:
 	var objective_box := _box(5)
 	_objective_card.add_child(objective_box)
 	objective_box.add_child(_label("CURRENT TASK",10,MUTED,true))
-	_objective = _wrapped("Search the spoil heaps for promising stones.",14,CREAM)
+	_objective = _wrapped("Walk to the mountain and hold left click to mine ore.",14,CREAM)
 	_objective.max_lines_visible = 3
 	objective_box.add_child(_objective)
 	_tool_card = _hud_panel(_hud)
 	var tool_box := _box(3)
 	_tool_card.add_child(tool_box)
-	_tool = _label("Small scoop",16,CREAM,true)
-	_capacity = _label("0 / 3 carried",13,MUTED)
+	_tool = _label("Old pickaxe",16,CREAM,true)
+	_capacity = _label("Satchel 0 / 30 ore",13,MUTED)
 	tool_box.add_child(_tool)
 	tool_box.add_child(_capacity)
-	tool_box.add_child(_label("1–4  Tools     Tab  Journal     Esc  Pause",11,MUTED))
+	tool_box.add_child(_label("1 Pick   2–4 Explosives   Tab Journal   Esc Pause",11,MUTED))
 	_tutorial_panel = _hud_panel(_hud)
 	_tutorial_panel.add_theme_stylebox_override("panel",_style(PANEL,0,16,14,Color("5e6254")))
 	var tutorial_box := _box(5)
@@ -441,8 +441,9 @@ func _layout() -> void:
 	var task_width: float = minf(340,width*0.43)
 	_objective_card.position = Vector2(margin,height-margin-112)
 	_objective_card.size = Vector2(task_width,112)
-	_tool_card.position = Vector2(width-margin-270,height-margin-90)
-	_tool_card.size = Vector2(270,90)
+	var tool_height: float = maxf(96,_tool_card.get_combined_minimum_size().y)
+	_tool_card.position = Vector2(width-margin-290,height-margin-tool_height)
+	_tool_card.size = Vector2(290,tool_height)
 	var tutorial_height: float = maxf(210,_tutorial_panel.get_combined_minimum_size().y)
 	_tutorial_panel.position = Vector2(margin,margin+66 if compact else height-margin-tutorial_height)
 	_tutorial_panel.size = Vector2(task_width,tutorial_height)
@@ -526,10 +527,10 @@ func _read(state: Variant, key: String, fallback: Variant = null) -> Variant:
 				return value if value != null else fallback
 	return fallback
 
-func update_hud(state: Variant, tool_name: String, capacity: int, prompt: String, objective: String) -> void:
+func update_hud(state: Variant, tool_name: String, capacity: int, prompt: String, objective: String, carry_text: String = "") -> void:
 	_last_state = state
 	_money.text = "Funds  $%s" % str(_read(state,"money",0))
-	_tool.text = tool_name.capitalize()
+	_tool.text = tool_name
 	var held_count: int = 0
 	if state is Object and state.has_method("held_ids"):
 		held_count = state.held_ids().size()
@@ -537,7 +538,7 @@ func update_hud(state: Variant, tool_name: String, capacity: int, prompt: String
 		var held: Variant = _read(state,"held",[])
 		if held is Array:
 			held_count = held.size()
-	_capacity.text = "%d / %d carried" % [held_count,capacity]
+	_capacity.text = carry_text if not carry_text.is_empty() else "%d / %d carried" % [held_count,capacity]
 	_prompt.text = prompt
 	_prompt_panel.visible = not prompt.is_empty() and not inspecting
 	_objective.text = objective
@@ -734,31 +735,45 @@ func show_collection(state: Variant) -> void:
 	_modal_body.add_child(HSeparator.new())
 	_modal_body.add_child(_label("The diamond",20,CREAM,true))
 	var certified: bool = bool(_read(state,"certified",false))
-	_modal_body.add_child(_wrapped("Certified and saved." if certified else "Still in the claim. Look for sharp facets, clear material and fast-clearing breath mist. Test promising stones at the certification bench.",15,MUTED))
+	_modal_body.add_child(_wrapped("Certified and saved." if certified else "Still buried deep in the mountain's core, hidden among clear quartz crystals. Mine crystal veins, then test promising stones at the certification bench.",15,MUTED))
+	_modal_body.add_child(HSeparator.new())
+	_modal_body.add_child(_label("Satchel & ore prices",20,CREAM,true))
+	var satchel: Dictionary = {}
+	var blocks: int = 0
+	if state is Object and state.has_method("ore_of"):
+		satchel = state.ore_of()
+		blocks = state.blocks_mined()
+	var lines: Array[String] = []
+	var MountainScript: Script = load("res://game/mountain.gd")
+	for kind in MountainScript.ORE_ORDER:
+		lines.append("%s  $%d   ·   carrying %d" % [MountainScript.ORE_NAMES[kind],int(MountainScript.ORE_VALUES[kind]),int(satchel.get(kind,0))])
+	_modal_body.add_child(_wrapped("\n".join(lines),14,CREAM))
+	_modal_body.add_child(_wrapped("%d blocks mined so far." % blocks,14,MUTED))
 	_modal_body.add_child(HSeparator.new())
 	for entry in [{"label":"Save game","action":"save"},{"label":"Recover lost finds","action":"recover"},{"label":"Return to solid ground","action":"unstuck"}]:
 		var action: String = str(entry.action)
 		_modal_body.add_child(_button(str(entry.label),func(): request_action.emit(action,{})))
 
 func _show_controls() -> void:
-	_open_modal("How to play","Work the spoil heaps, sell ordinary finds and keep promising stones.")
+	_open_modal("How to play","Mine and blast the mountain, sell ore, and keep clear crystals for the bench.")
 	_modal_body.add_child(_button("Start guided tutorial",func(): request_action.emit("tutorial_restart",{}),true))
 	if bool(_tutorial_data.get("visible",false)):
 		_modal_body.add_child(_button("Skip tutorial",func(): request_action.emit("tutorial_skip",{})))
 	_modal_body.add_child(HSeparator.new())
 	var rows := [
 		["WASD / Mouse","Move and look"],
-		["E","Use a station, collect a find or buy displayed equipment"],
-		["Left click","Scoop or use your selected tool"],
+		["E","Use a station, pick up a find or buy displayed equipment"],
+		["Left click (hold)","Mine with your pickaxe or drill, or throw an explosive"],
+		["Space","Jump · climb the mountain one block at a time"],
 		["Right click","Inspect; move the mouse to rotate"],
 		["Mouse wheel","Select a carried find or change storage tray"],
 		["Ctrl + wheel","Zoom during inspection"],
 		["Q","Drop the selected find"],
-		["1 / 2 / 3 / 4","Scoop / hands / vacuum / scanner"],
+		["1 / 2 / 3 / 4","Pickaxe / dynamite / TNT / Mountain Buster"],
 		["Tab / Esc","Journal / pause"],
 		["V / M","Hold to talk / mute microphone"],
-		["C / R","Collect an oddity / gift a stone"],
-		["T / F / G / H","Reverse conveyor / label / foam / hat"]
+		["C / R","Shelve a fossil / gift a crystal"],
+		["F / G / H","Label / foam / hat"]
 	]
 	for entry in rows:
 		var row := HBoxContainer.new()
@@ -968,7 +983,7 @@ func _build_voice_settings(settings: Variant) -> void:
 	_voice_meter.add_theme_stylebox_override("background",_style(Color("424747"),3,0,0))
 	_voice_meter.add_theme_stylebox_override("fill",_style(MINT,3,0,0))
 	meter_row.add_child(_voice_meter)
-	box.add_child(_wrapped("Hold V to talk; M mutes your mic. Voices get quieter with distance and stop at 12 metres. Headphones help keep your workshop sound out of your mic.",13,MUTED))
+	box.add_child(_wrapped("Hold V to talk; M mutes your mic. Voices get quieter with distance and stop at 12 metres. Headphones help keep game sound out of your mic.",13,MUTED))
 	_setting_slider("Nearby voice volume","voice_volume",float(_read(settings,"voice_volume",0.85)),0,1,0.01,"%.0f%%",100.0)
 	_setting_slider("Microphone gain","mic_gain",float(_read(settings,"mic_gain",1.0)),0.25,3.0,0.05,"%.2f×")
 	_modal_body.add_child(HSeparator.new())
