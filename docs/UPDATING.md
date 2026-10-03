@@ -21,7 +21,7 @@ The release has two assets:
 - `DIAMOND_IN_THE_ROUGH_Update.zip`: a flat native game package, version manifest and engine notices.
 - `latest.json`: schema, build, version, source commit, ZIP size, SHA-256 and fixed executable name.
 
-The workflow uses GitHub's job token only in its publish job. Tokens are not included in the executable, ZIP or manifests. Hosted-runner availability and the account's Actions allowance control when builds can run.
+Only the publishing job has write permission through GitHub's job token; the build job has read permission. Tokens are not included in the executable, ZIP or manifests. Hosted-runner availability and the account's Actions allowance control when builds can run.
 
 ## Verification
 
