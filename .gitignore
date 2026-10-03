@@ -1,0 +1,31 @@
+# Godot-generated imports and editor state
+.godot/
+.import/
+*.import
+export_credentials.cfg
+
+# Native exports and generated reports
+/build/
+/verification/
+/reports/
+/work/
+*.exe
+*.pck
+*.zip
+*.log
+*.tmp
+*.bak
+
+# Local editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
