@@ -7,6 +7,7 @@ const InterfaceScript = preload("res://game/interface.gd")
 const SoundScript = preload("res://game/sound.gd")
 const VoiceScript = preload("res://game/voice.gd")
 const UpdaterScript = preload("res://game/updater.gd")
+const TutorialScript = preload("res://game/tutorial.gd")
 
 var state: Node
 var workshop: Node3D
@@ -15,6 +16,7 @@ var ui: CanvasLayer
 var sound: Node
 var voice: Node3D
 var updater: Node
+var tutorial: Node
 var settings := {"sensitivity":0.0025,"fov":78.0,"volume":0.7,"fullscreen":false,"voice_enabled":true,"mic_muted":false,"voice_volume":0.85,"mic_gain":1.0,"input_device":"Default","auto_updates":true}
 var active := false
 var gem_nodes := {}
@@ -35,7 +37,7 @@ var tray_page := 0
 var cosmetic_signature := ""
 
 func _ready() -> void:
-	DisplayServer.window_set_title("DIAMOND IN THE ROUGH · Native prototype")
+	DisplayServer.window_set_title("DIAMOND IN THE ROUGH")
 	load_settings()
 	state = StateScript.new()
 	add_child(state)
@@ -43,6 +45,8 @@ func _ready() -> void:
 	add_child(workshop)
 	workshop.build(self)
 	state.station_positions = workshop.stations.duplicate()
+	state.upgrade_positions = workshop.upgrade_positions.duplicate()
+	state.pile_surface = Callable(workshop,"pile_position")
 	for i in range(workshop.pile_centers.size()):
 		state.pile_positions[i] = workshop.pile_centers[i]
 	player = PlayerScript.new()
@@ -73,6 +77,12 @@ func _ready() -> void:
 		if update_arg.begins_with("--verify"): updater.test_mode=true
 	updater.status_changed.connect(ui.update_updates)
 	updater.build(self)
+	tutorial=TutorialScript.new()
+	add_child(tutorial)
+	for tutorial_arg in OS.get_cmdline_user_args():
+		if tutorial_arg.begins_with("--verify"): tutorial.test_mode=true
+	tutorial.changed.connect(ui.set_tutorial)
+	tutorial.build(self)
 	particle_root = Node3D.new()
 	add_child(particle_root)
 	apply_settings()
@@ -88,6 +98,10 @@ func _ready() -> void:
 		if arg == "--host": start_session("host", "", port_from_args(args), false)
 		if arg.begins_with("--join="): start_session("join", arg.trim_prefix("--join="), port_from_args(args), false)
 	for arg in args:
+		if arg=="--verify-redesign":
+			test_runner=load("res://game/redesign_verification.gd").new()
+			add_child(test_runner)
+			test_runner.begin(self,args)
 		if arg.begins_with("--verify-updater="):
 			test_runner=load("res://game/updater_verification.gd").new()
 			add_child(test_runner)
@@ -130,6 +144,7 @@ func start_session(mode: String, address: String, port: int, new_save: bool) -> 
 	session_mode = mode.to_upper()
 	active = true
 	player.enabled = true
+	player.hands.show()
 	player.position = Vector3(0, 0.12, 7.2)
 	player.yaw = 0
 	player.pitch = -0.10
@@ -142,7 +157,7 @@ func start_session(mode: String, address: String, port: int, new_save: bool) -> 
 	last_upgrades = state.upgrades.size()
 	refresh()
 	ui.update_network(session_mode + (" · UDP %s" % port if mode == "host" else ""))
-	ui.toast("Welcome to the shed. Scoop a batch, inspect a stone, then visit Scrap & Cash.")
+	tutorial.start_session(mode)
 
 func resume_game() -> void:
 	player.inspecting = false
@@ -155,7 +170,9 @@ func return_to_menu() -> void:
 	if active and state.is_authority(): state.save_game()
 	state.leave()
 	active = false
+	tutorial.stop()
 	player.enabled = false
+	player.hands.hide()
 	player.inspecting = false
 	ui.hide_inspection()
 	ui.show_menu(false)
@@ -170,6 +187,11 @@ func ui_action(kind: String, args: Dictionary) -> void:
 		"updates_open_repo": updater.open_repository()
 		"updates_use_cli": updater.use_github_cli()
 		"updates_token": updater.set_session_token(str(args.get("token","")))
+		"tutorial_restart":
+			if not active: start_session("solo","",24680,false)
+			tutorial.restart()
+			resume_game()
+		"tutorial_skip": tutorial.skip()
 		"save": save_now()
 		"unstuck": unstuck()
 		"recover": recover_items()
@@ -190,11 +212,12 @@ func install_update() -> void:
 
 func _process(delta: float) -> void:
 	for peer in avatars:
-		var badge: Label3D=avatars[peer].get_node_or_null("VoiceBadge")
+		var badge: Node3D=avatars[peer].get_node_or_null("VoiceBadge")
 		if badge:
 			badge.visible=voice.is_speaking(int(peer))
 	action_cooldown = maxf(0, action_cooldown-delta)
 	if not active: return
+	tutorial.tick(delta)
 	pose_timer += delta
 	if pose_timer >= 0.05:
 		pose_timer = 0
@@ -214,7 +237,7 @@ func _process(delta: float) -> void:
 		if player.inspecting and player.held_id!=int(gem.id): ui.show_inspection(gem,state.upgrades.has("loupe"))
 		player.show_held(gem)
 	player.show_batch(held,state.gems)
-	var tool_text: String = str({"scoop":"BRASS SCOOP", "hands":"BARE HANDS", "vacuum":"SHOP VAC", "scanner":"CANDIDATE SCANNER"}.get(player.tool,"SCOOP"))
+	var tool_text: String = str({"scoop":"Scoop", "hands":"Hands", "vacuum":"Vacuum", "scanner":"Scanner"}.get(player.tool,"Scoop"))
 	ui.update_hud(state, str(tool_text), state.capacity(), prompt, objective())
 	if ui.menu_visible: Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	for n in particle_root.get_children():
@@ -256,10 +279,10 @@ func _input(event: InputEvent) -> void:
 			KEY_2: equip("hands")
 			KEY_3:
 				if state.upgrades.has("vacuum"): equip("vacuum")
-				else: ui.toast("Shop vac is on the upgrade board: $440.")
+				else: ui.toast("Vacuum · $440 at the equipment counter.")
 			KEY_4:
 				if state.upgrades.has("scanner"): equip("scanner")
-				else: ui.toast("The scanner shortlists one local batch. Buy it at the shop.")
+				else: ui.toast("Candidate scanner · $850 at the equipment counter.")
 			KEY_F: prank("label")
 			KEY_M:
 				set_setting("mic_muted",not bool(settings.mic_muted))
@@ -300,6 +323,7 @@ func toggle_inspection() -> void:
 	player.inspecting = not player.inspecting
 	if player.inspecting:
 		ui.show_inspection(gem,state.upgrades.has("loupe"))
+		tutorial.on_action("inspect")
 	else:
 		ui.hide_inspection()
 
@@ -327,7 +351,14 @@ func target_meta(key: String, fallback: Variant=null) -> Variant:
 	return body.get_meta(key,fallback) if is_instance_valid(body) else fallback
 
 func interaction_prompt() -> String:
-	if player.inspecting: return "Mouse · rotate     Wheel · next stone     Ctrl + wheel · zoom     RMB · put down"
+	if player.inspecting: return "Mouse: rotate   ·   Wheel: next   ·   Ctrl + wheel: zoom   ·   Right-click: finish"
+	var upgrade: String=str(target_meta("upgrade",""))
+	if state.prices.has(upgrade):
+		var equipment: String=str(state.upgrade_names[upgrade])
+		if upgrade in state.upgrades: return equipment+" · installed"
+		var price: int=int(state.prices[upgrade])
+		var purchase: String="E: buy" if state.money>=price else "Need $%d more" % (price-state.money)
+		return "%s · $%d\n%s · %s" % [equipment,price,purchase,state.benefits[upgrade]]
 	var gid: int = int(target_meta("gem_id",-1))
 	if gid >= 0:
 		var g: Dictionary = state.gems.get(gid,{})
@@ -339,13 +370,13 @@ func interaction_prompt() -> String:
 		var remaining := 0
 		for g in state.gems.values():
 			if int(g.pile)==pile and g.stage=="pile": remaining += 1
-		return "[LMB] Scoop sector %s · %s searchable pieces remain" % [sector_name(pile),remaining]
+		return "E / Left-click: scoop · %s pieces in section %s" % [remaining,sector_name(pile)]
 	var station := str(target_meta("station",""))
 	match station:
 		"sell": return "[E] Sell batch · promising stones go safely to the tray"
-		"shop": return "[E] Upgrade your operation"
+		"shop": return "Point at a tool or machine to see its price. E: buy"
 		"tray": return "[E] Pour batch / next empty-hand tray · [Wheel] storage %s/%s" % [tray_page+1,maxi(1,ceili(float(tray_count())/48))]
-		"wash": return "[E] Wash held/tray finds" if state.upgrades.has("wash") else "[E] Washing station · unlock at the shop ($180)"
+		"wash": return "E: wash finds" if state.upgrades.has("wash") else "Washing station · $180 at the equipment counter"
 		"sorter": return "[E] Process sector %s · recycle bulk & save promising candidates" % sector_name(last_pile)
 		"scanner": return "[E] Scan a batch from sector %s" % sector_name(last_pile)
 		"certify":
@@ -356,19 +387,19 @@ func interaction_prompt() -> String:
 		"collection": return "[E] Collection ledger & workshop milestones"
 	var peer: int = int(target_meta("peer_id",-1))
 	if peer >= 0: return "[F] Label   [G] Foam   [R] Wrapped present   [T] Reverse belt   [LMB] Pour / vacuum"
-	return "E · interact     LMB · use tool     RMB · inspect     Tab · ledger"
+	return ""
 
 func sector_name(index: int) -> String:
 	return "%s%s" % ["ABC"[clampi(index/4,0,2)], index%4+1]
 
 func objective() -> String:
-	if state.certified: return "CERTIFIED! Keep collecting, improve the shed, or invite a friend."
-	if state.searched == 0: return "01 / Scoop a batch from the pile. Try E on any individual stone."
-	if not state.upgrades.has("scoop"): return "Next: larger scoop $70 · sell batches at Scrap & Cash. Inspect promising stones."
-	if not state.upgrades.has("loupe"): return "Next: loupe + lamp $145 · learn the diamond's clues at the inspection tray."
-	if not state.upgrades.has("sorter"): return "Next: batch sorter $330 · build a collection of 6 oddities."
-	if not state.upgrades.has("scanner"): return "Next: scanner $850 · certify a stone with sharp facets, no bubbles and fast-clearing fog."
-	return "Find the real diamond · shortlist nearby batches, inspect the candidates, certify at the back bench."
+	if state.certified: return "Diamond certified. Keep exploring or fill your collection."
+	if state.searched == 0: return "Search the mountain. Keep promising stones for inspection."
+	if not state.upgrades.has("scoop"): return "Earn $70 for a larger scoop. Sell scrap at the exchange."
+	if not state.upgrades.has("loupe"): return "Loupe & lamp · $145. Compare edges, bubbles and light."
+	if not state.upgrades.has("sorter"): return "Batch sorter · $330. Recover candidates in the tray."
+	if not state.upgrades.has("scanner"): return "Candidate scanner · $850. Examine local batches."
+	return "Find sharp facets, no bubbles and crisp reflections. Verify at the certification bench."
 
 func use_tool() -> void:
 	if action_cooldown>0 or player.inspecting: return
@@ -381,7 +412,9 @@ func use_tool() -> void:
 	if gid>=0:
 		pile = int(state.gems[gid].pile)
 		if player.tool=="hands" or state.gems[gid].stage!="pile":
+			var from_pile: bool=state.gems[gid].stage=="pile"
 			state.action("pick",{"id":gid})
+			tutorial.on_action("pick",{"id":gid,"from_pile":from_pile})
 			sound.play("pick")
 			player.kick = 0.28
 			return
@@ -394,36 +427,46 @@ func use_tool() -> void:
 		sound.play("scan")
 	else:
 		state.action("scoop",{"pile":pile,"tool":player.tool})
+		tutorial.on_action("scoop",{"pile":pile,"tool":player.tool})
 		sound.play("scoop")
 	player.kick = 0.65
 	action_cooldown = 0.32
 
 func interact() -> void:
 	if action_cooldown>0: return
+	var upgrade: String=str(target_meta("upgrade",""))
+	if state.prices.has(upgrade):
+		state.action("buy",{"upgrade":upgrade})
+		tutorial.on_action("buy",{"upgrade":upgrade})
+		action_cooldown=0.35
+		return
 	var gid: int = int(target_meta("gem_id",-1))
 	if gid>=0:
 		var g: Dictionary = state.gems[gid]
+		var from_pile: bool=g.stage=="pile"
 		if g.stage=="pile": last_pile=int(g.pile)
 		state.action("pick",{"id":gid})
+		tutorial.on_action("pick",{"id":gid,"from_pile":from_pile})
 		sound.play("pick")
 		player.kick=0.2
 		return
 	var station := str(target_meta("station",""))
 	match station:
 		"shop":
-			player.inspecting=false
-			ui.hide_inspection()
-			ui.show_shop(state)
-			Input.mouse_mode=Input.MOUSE_MODE_VISIBLE
+			ui.toast("Point at the equipment model and press E to buy it.")
 		"collection":
 			await collect_held_batch()
 			player.inspecting=false
 			ui.hide_inspection()
 			ui.show_collection(state)
 			Input.mouse_mode=Input.MOUSE_MODE_VISIBLE
-		"sell": state.action("sell")
+		"sell":
+			state.action("sell")
+			tutorial.on_action("sell")
 		"tray":
-			if not state.held_ids().is_empty(): state.action("tray")
+			if not state.held_ids().is_empty():
+				state.action("tray")
+				tutorial.on_action("tray")
 			else:
 				var pages: int=maxi(1,ceili(float(tray_count())/48))
 				tray_page=posmod(tray_page+1,pages)
@@ -501,7 +544,7 @@ func refresh() -> void:
 			var count: int = counts.get(sector,0)
 			if count>=7: continue
 			counts[sector]=count+1
-			p=workshop.pile_position(sector,count)
+			p=workshop.pile_position(sector,int(gem.id)%60)
 		elif stage=="tray":
 			var slot: int=tray_index-tray_page*48
 			tray_index+=1
@@ -550,14 +593,18 @@ func refresh() -> void:
 		body.rotation=Vector3(0.0,float(id)*2.31,0.06)
 		add_child(body)
 		gem_nodes[id]=body
-		if gem.get("flagged",false) or gem.get("tag",false):
+		if gem.get("flagged",false):
+			avatar_box(body,Vector3(0.035,0.19,0.035),Vector3(0,0.22,0),Color("38372f"))
+			avatar_box(body,Vector3(0.15,0.10,0.025),Vector3(0.055,0.28,0),Color("e1b04d"))
+		if gem.get("tag",false):
+			avatar_box(body,Vector3(0.27,0.07,0.015),Vector3(0,0.1,0.15),Color("ede3cd"))
 			var label:=Label3D.new()
-			label.text="?" if gem.get("flagged",false) else "CERTIFIED*"
-			label.position.y=0.32
-			label.font_size=32
-			label.pixel_size=0.004
-			label.billboard=BaseMaterial3D.BILLBOARD_ENABLED
-			label.modulate=Color("ffd184")
+			label.text="CERTIFIED*"
+			label.position=Vector3(0,0.1,0.161)
+			label.font_size=18
+			label.pixel_size=0.0015
+			label.outline_size=0
+			label.modulate=Color("332c21")
 			body.add_child(label)
 	for id in gem_nodes.keys():
 		if not desired.has(id):
@@ -594,8 +641,10 @@ func on_network(message: String) -> void:
 	ui.update_network(message)
 	if message.to_lower().contains("failed") or message.to_lower().contains("closed") or message.to_lower().contains("disconnected"):
 		voice.stop_session()
+		tutorial.stop()
 		active=false
 		player.enabled=false
+		player.hands.hide()
 		ui.show_menu(false)
 		Input.mouse_mode=Input.MOUSE_MODE_VISIBLE
 		ui.toast(message)
@@ -627,21 +676,12 @@ func create_avatar(peer: int) -> void:
 	avatar_box(head,Vector3(0.35,0.37,0.34),Vector3.ZERO,Color("d4a477"))
 	avatar_box(head,Vector3(0.38,0.18,0.38),Vector3(0,0.18,0),Color("ebbb66"))
 	for x in [-0.08,0.08]: avatar_box(head,Vector3(0.04,0.055,0.02),Vector3(x,0.045,-0.18),Color("173539"))
-	var label:=Label3D.new()
-	label.text="SORTER %s" % (avatars.size()+2)
-	label.position.y=2.15
-	label.font_size=26
-	label.pixel_size=0.006
-	label.billboard=BaseMaterial3D.BILLBOARD_ENABLED
-	avatar.add_child(label)
-	var voice_badge:=Label3D.new()
+	var voice_badge:=Node3D.new()
 	voice_badge.name="VoiceBadge"
-	voice_badge.text="◖  TALKING  ◗"
-	voice_badge.position.y=2.47
-	voice_badge.font_size=22
-	voice_badge.pixel_size=0.005
-	voice_badge.modulate=Color("b9e9ca")
-	voice_badge.billboard=BaseMaterial3D.BILLBOARD_ENABLED
+	voice_badge.position.y=2.05
+	for bar in range(5):
+		var height: float=0.045+0.022*float(2-absi(bar-2))
+		avatar_box(voice_badge,Vector3(0.025,height,0.025),Vector3((bar-2)*0.045,0,0),Color("edc86e"))
 	voice_badge.visible=false
 	avatar.add_child(voice_badge)
 	var collision:=StaticBody3D.new()

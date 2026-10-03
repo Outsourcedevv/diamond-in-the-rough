@@ -38,6 +38,11 @@ Your workshop saves and settings are stored separately in Windows user data.
 WASD/mouse: move/look. E: interact. Right mouse: inspect. Esc: pause.
 Hold V: nearby voice. M: mute microphone. Voices stop beyond 12 metres.
 
+Work the mountain scree. The first session teaches the sorting loop in play.
+Equipment is sold as physical models: aim at one and press E to buy it.
+Names and prices are attached to the displays. How to play replays the guide.
+The UI adapts to 4:3, 5:4, widescreen and ultrawide windows.
+
 Use Updates from the main menu to check for a new build and install it.
 Because the GitHub repository is private, updates require a GitHub account
 with repository access. Sign in using GitHub CLI (gh auth login), or use the

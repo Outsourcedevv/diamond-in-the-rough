@@ -34,6 +34,7 @@ var seed_value: int = 0
 var certification_step: int = 0
 var certification_id: int = -1
 var prices: Dictionary = {"scoop": 70, "trays": 100, "loupe": 145, "wash": 180, "sorter": 330, "vacuum": 440, "conveyor": 560, "scanner": 850}
+var upgrade_names: Dictionary = {"scoop":"Larger scoop", "trays":"Sorting trays", "loupe":"Loupe & lamp", "wash":"Washing station", "sorter":"Batch sorter", "vacuum":"Vacuum", "conveyor":"Conveyor", "scanner":"Candidate scanner"}
 var benefits: Dictionary = {
 	"scoop": "Carry 9 objects and scoop bigger batches.",
 	"trays": "Carry 14 objects; expanded candidate storage.",
@@ -46,6 +47,8 @@ var benefits: Dictionary = {
 }
 var pile_positions: Dictionary = {}
 var station_positions: Dictionary = {}
+var upgrade_positions: Dictionary = {}
+var pile_surface: Callable
 
 var _save_path: String = "user://rough_default.json"
 var _network_mode: String = "solo"
@@ -265,7 +268,9 @@ func load_game() -> bool:
 	players[1]["hat"] = saved_hat
 	for id in gems:
 		var gem: Dictionary = gems[id]
-		if str(gem.get("stage", "")) == "held":
+		if str(gem.get("stage", "")) == "pile":
+			gem["pos"] = _vector_array(_pile_gem_position(int(id), int(gem.pile)))
+		elif str(gem.get("stage", "")) == "held":
 			_to_tray(gem)
 		elif str(gem.get("stage", "")) == "loose" and not _valid_position(_array_vector(gem.get("pos", []))):
 			_to_tray(gem)
@@ -559,19 +564,20 @@ func _sell(peer_id: int) -> void:
 
 
 func _buy(peer_id: int, upgrade: String) -> void:
-	if not _near_station(peer_id, "shop"):
-		_reject(peer_id, "Visit the upgrade counter.")
-		return
 	if not prices.has(upgrade) or upgrade in upgrades:
 		_reject(peer_id, "That upgrade is unavailable or already installed.")
 		return
+	var nearby: bool = _peer_position(peer_id).distance_to(_as_vector(upgrade_positions[upgrade])) <= 4.0 if upgrade_positions.has(upgrade) else _near_station(peer_id, "shop")
+	if not nearby:
+		_reject(peer_id, "Move closer to the equipment you want to buy.")
+		return
 	var price: int = int(prices[upgrade])
 	if money < price:
-		_reject(peer_id, "Need $%d more for %s." % [price - money, upgrade.capitalize()])
+		_reject(peer_id, "Need $%d more for %s." % [price - money, str(upgrade_names[upgrade]).to_lower()])
 		return
 	money -= price
 	upgrades.append(upgrade)
-	_commit("%s installed! %s" % [upgrade.capitalize(), str(benefits[upgrade])])
+	_commit("%s installed. %s" % [upgrade_names[upgrade], str(benefits[upgrade])])
 
 
 func _wash(peer_id: int) -> void:
@@ -847,6 +853,8 @@ func _peer_position(peer_id: int) -> Vector3:
 
 
 func _pile_gem_position(id: int, sector: int) -> Vector3:
+	if pile_surface.is_valid():
+		return pile_surface.call(sector, id % 60)
 	var center: Vector3 = _as_vector(pile_positions.get(sector, Vector3(-4.5 + float(sector % 4) * 3.0, 0.25, -4.4 + float(sector / 4) * 2.4)))
 	var slot: int = id % 60
 	return center + Vector3(float(slot % 10) * 0.235 - 1.06, 0.08 + float(slot % 7) * 0.025, float(slot / 10) * 0.25 - 0.625)

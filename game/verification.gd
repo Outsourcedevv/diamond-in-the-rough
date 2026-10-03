@@ -97,9 +97,18 @@ func fund(amount: int) -> void:
 
 func buy(id: String) -> void:
 	await fund(int(game.state.prices[id]))
-	await go(station("shop"))
-	await act("buy",{"upgrade":id})
+	var display: Vector3=game.workshop.upgrade_positions[id]
+	await go(Vector3(display.x,0.1,display.z+1.65))
+	game.player.camera.look_at(display,Vector3.UP)
+	await get_tree().physics_frame
+	game.selected_target=game.player.target()
+	var displayed: Object=game.selected_target.get("collider")
+	check(is_instance_valid(displayed) and str(displayed.get_meta("upgrade",""))==id,"First-person ray reaches equipment model: "+id)
+	game.action_cooldown=0
+	game.interact()
+	await get_tree().create_timer(0.14 if role=="client" else 0.02).timeout
 	check(id in game.state.upgrades,"Purchased working upgrade: "+id)
+	check(not game.ui.menu_visible,"Physical purchase keeps first-person controls: "+id)
 
 func screenshot(name: String) -> void:
 	if DisplayServer.get_name()=="headless": return
@@ -134,14 +143,11 @@ func solo() -> void:
 	check(game.player.position.x>initial.x+0.2,"First-person WASD moves the physical player")
 	await buy("scoop")
 	check(game.state.capacity()==9,"Larger scoop changes carrying capacity from 3 to 9")
-	game.player.yaw=0
-	game.player.pitch=-0.45
-	game.player.update_view()
+	var scoop_display: Vector3=game.workshop.upgrade_positions.scoop
+	game.player.camera.look_at(scoop_display,Vector3.UP)
 	game.selected_target=game.player.target()
-	var physical_station: Object=game.selected_target.get("collider")
-	check(is_instance_valid(physical_station) and physical_station.get_meta("station","")=="shop","First-person ray reaches the physical upgrade counter")
 	game.interact()
-	check(game.ui.menu_visible,"E opens the actual shop interface")
+	check(not game.ui.menu_visible,"Owned equipment stays physical without opening a buying menu")
 	game.resume_game()
 	check(not game.ui.menu_visible and not game.player.inspecting,"Leaving a modal restores first-person controls")
 	await buy("trays")

@@ -1,4 +1,22 @@
-# Desktop prototype verification
+# Windows game verification
+
+## Mountain redesign
+
+Verified on 3 October 2026 with Godot 4.6.2, including the exported Windows x64 executable and native OpenGL rendering on this machine's AMD Radeon graphics.
+
+The current solo progression suite passed **55 headless checks**, covering all eight physical purchase displays, real ray interactions, normal earnings, equipment and machinery, protected diamond ownership, certification, storage and save reload. Purchase interactions keep the first-person view active without opening a buying menu. Existing saves retain their diamond identity, funds and upgrades while pile objects move onto the new terrain.
+
+The redesigned gameplay suite passed **76 checks** in both headless and native exported runs. Top-down collision rays hit the correct surface in all twelve scree sectors, and actual movement climbs the continuous slope. Tests follow the seven tutorial steps through real movement, successful scooping or individual pickup, object rotation, ordinary sales, a physical purchase and safe storage. Rejected actions and stale notices cannot advance the guide. Replay, skip, local persistence and joined-session behavior are covered. Full hands receive safe-storage directions; an exhausted existing save receives useful stored-find guidance without resetting the world or granting items or money.
+
+The native co-op suite passed **26 host and 12 client checks** using two processes with a real localhost ENet connection. It covers synchronized positions, avatars, item ownership, shared physical purchases, machinery, pranks and disconnect recovery.
+
+An independent UI run passed **278 layout checks** at 800×600, 1024×768, 1280×720, 1280×1024, 1920×1080, 2560×1080 and 3440×1440. The integrated gameplay suite also checks title, pause, settings and tutorial bounds and overlaps at five screen shapes. Native screenshots were reviewed for readable text, title/button separation, physical price cards, attached signs and gameplay HUD placement. The updater menu retained its **44 passing UI checks**.
+
+Packaging and draft-release publishing fixture tests pass. The Windows release workflow requires both solo and redesigned gameplay checks before publishing an update. Verification uses isolated AppData directories and disposable saves; it does not overwrite normal player progression.
+
+The sections below record the original prototype and updater verification. Current screenshots in `screenshots/` show the mountain revision.
+
+## Original prototype verification
 
 Verified on 3 October 2026 using native Godot 4.6.2 and the exported Windows x64 executable, rendered with OpenGL 3.3 on this machine's AMD Radeon graphics.
 
