@@ -7,7 +7,7 @@
   "main": "bridge.mjs",
   "scripts": {
     "start": "node bridge.mjs",
-    "test": "node --test events.test.mjs catalogue.test.mjs"
+    "test": "node --test *.test.mjs"
   },
   "engines": {
     "node": ">=20"

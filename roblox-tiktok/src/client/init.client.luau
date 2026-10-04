@@ -544,6 +544,17 @@ for index = 1, #testGifts, 2 do
 	panelButtons(buttons)
 end
 
+panelLabel("REBUILD TEST GIFTS (adds blocks)")
+panelLabel("Dig first. Tests refill dug spaces up to a full mountain.")
+panelButtons({
+	{ "+1,000 blocks", function() send("testRebuildGift", 1000) end },
+	{ "+10,000 blocks", function() send("testRebuildGift", 10000) end },
+})
+panelButtons({
+	{ "+100,000 blocks", function() send("testRebuildGift", 100000) end },
+	{ "Refill mountain", function() send("testRebuildGift", 1500000) end },
+})
+
 local function refreshPanelFields()
 	titleBox.Text = attr("WinTitle", "WINS")
 	winsInput.Text = tostring(attr("Wins", 0))

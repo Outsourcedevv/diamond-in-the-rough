@@ -7,8 +7,8 @@ local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Format = require(Shared:WaitForChild("Format"))
 local GiftEffects = {}
-local colours = { Color3.fromRGB(255, 208, 112), Color3.fromRGB(255, 137, 55), Color3.fromRGB(255, 80, 66), Color3.fromRGB(70, 230, 255), Color3.fromRGB(156, 90, 255), Color3.fromRGB(255, 225, 120) }
-local titles = { "SPARK BURST", "SHOCKWAVE", "DOUBLE IMPACT", "ORBITAL STRIKE", "GALAXY COLLAPSE", "COSMIC BURST" }
+local colours = { Color3.fromRGB(255, 208, 112), Color3.fromRGB(255, 137, 55), Color3.fromRGB(110, 245, 255), Color3.fromRGB(70, 230, 255), Color3.fromRGB(156, 90, 255), Color3.fromRGB(255, 225, 120) }
+local titles = { "SPARK BURST", "SHOCKWAVE", "DIAMOND FRACTURE", "ORBITAL STRIKE", "GALAXY COLLAPSE", "COSMIC BURST" }
 local active: { { folder: Folder, tier: number } } = {}
 local label: TextLabel? = nil
 local bannerSerial = 0
@@ -196,8 +196,84 @@ function GiftEffects.play(data: any)
 			end)
 		end)
 	end
+	local function diamondFracture()
+		-- Project each jagged crack onto actual remaining stone, never the gem
+		-- or characters. The server has already applied the gift's damage.
+		local mountain = workspace:FindFirstChild("Mountain", true)
+		local rayParams = RaycastParams.new()
+		rayParams.FilterType = Enum.RaycastFilterType.Include
+		rayParams.FilterDescendantsInstances = if mountain then { mountain } else {}
+		local function surface(at: Vector3): Vector3?
+			if mountain == nil then return nil end
+			local hit = workspace:Raycast(at + Vector3.new(0, 100, 0), Vector3.new(0, -220, 0), rayParams)
+			return if hit then hit.Position + hit.Normal * 0.09 else nil
+		end
+		local origin = surface(centre) or centre
+		local cracks: { Part } = {}
+		local fragmentOrigins: { Vector3 } = {}
+		local radius = 7 + math.clamp((data.coins - 100) / 399, 0, 1) * 5
+		local rotation = random:NextNumber(0, math.pi * 2)
+		for branch = 1, 6 do
+			local angle = rotation + branch * math.pi / 3
+			local previous: Vector3? = surface(centre)
+			for step = 1, 4 do
+				local bend = angle + random:NextNumber(-0.28, 0.28)
+				local target = surface(centre + Vector3.new(math.cos(bend), 0, math.sin(bend)) * radius * step / 4)
+				local start = previous
+				previous = target
+				if target then table.insert(fragmentOrigins, target) end
+				if start == nil or target == nil then continue end
+				local delta = target - start
+				-- Do not draw glowing bridges across an excavated cliff or gap.
+				if delta.Magnitude < 0.05 or delta.Magnitude > 7 then continue end
+				local finish = target
+				task.delay((step - 1) * 0.14 + branch * 0.018, function()
+					local frame = CFrame.lookAt(start, finish)
+					local crack = piece(Enum.PartType.Block, Vector3.new(0.09, 0.09, 0.05), frame)
+					if crack == nil then return end
+					table.insert(cracks, crack)
+					TweenService:Create(crack, TweenInfo.new(0.16, Enum.EasingStyle.Linear), {
+						Size = Vector3.new(0.10, 0.10, delta.Magnitude),
+						CFrame = frame * CFrame.new(0, 0, -delta.Magnitude / 2),
+					}):Play()
+				end)
+			end
+		end
+		task.delay(0.9, function()
+			if folder.Parent == nil then return end
+			for _, crack in cracks do
+				if crack.Parent then
+					crack.Color = Color3.new(1, 1, 1)
+					animate(crack, 0.18, { Transparency = 1, Size = crack.Size + Vector3.new(0.12, 0.12, 0) })
+				end
+			end
+			ring(origin, radius * 1.6, 0)
+			local flash = piece(Enum.PartType.Ball, Vector3.one, CFrame.new(origin))
+			if flash then
+				flash.Transparency = 0.5
+				animate(flash, 0.35, { Size = Vector3.one * radius, Transparency = 1 })
+			end
+			-- 24 cracks + 12 fragments + flash + ring remain below 40 parts.
+			for i = 1, 12 do
+				local at = if #fragmentOrigins > 0 then fragmentOrigins[(i - 1) % #fragmentOrigins + 1] else origin
+				local angle = rotation + i * math.pi / 6
+				local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+				local shard = piece(Enum.PartType.Block, Vector3.new(0.15, 0.35, 0.15), CFrame.new(at))
+				if shard == nil then continue end
+				local height = random:NextNumber(2, 5)
+				local spin = random:NextNumber(4, 10)
+				motion(shard, random:NextNumber(0.7, 1.2), function(t)
+					shard.CFrame = CFrame.new(at + direction * radius * 0.6 * t + Vector3.new(0, height * 4 * t * (1 - t), 0)) * CFrame.Angles(t * spin, angle, t * spin)
+					shard.Color = colour:Lerp(Color3.new(1, 1, 1), (math.sin(t * 35 + i) + 1) * 0.5)
+					shard.Transparency = math.clamp(t * t + 0.15 * math.sin(t * 45 + i), 0, 1)
+				end)
+			end
+		end)
+	end
 	if data.adding then
 		ring(centre, 8 + tier * 2, 0)
+	elseif tier == 3 then
+		diamondFracture()
 	elseif tier == 4 then
 		-- 500 coins: six descending energy lances close in on one impact point.
 		for i = 1, 6 do
@@ -218,7 +294,7 @@ function GiftEffects.play(data: any)
 			if spark then animate(spark, random:NextNumber(0.5, 1.2), { Position = centre + Vector3.new(random:NextNumber(-7, 7), random:NextNumber(3, 12), random:NextNumber(-7, 7)), Transparency = 1 }) end
 		end
 	else
-		local count = if tier == 3 then 2 elseif tier >= 5 then 4 else 5
+		local count = if tier >= 5 then 4 else 5
 		for i = 1, count do
 			local offset = if i == 1 then Vector3.zero else Vector3.new(random:NextNumber(-10, 10), 0, random:NextNumber(-10, 10))
 			meteor(centre + offset, (i - 1) * 0.3)

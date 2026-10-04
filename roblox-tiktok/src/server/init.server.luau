@@ -593,12 +593,13 @@ local function filtered(player: Player, text: string): string?
 	return if ok then result else nil
 end
 
-local function testGift(coins: number, count: number, name: string)
+local function testGift(coins: number, count: number, name: string, rocks: number?)
 	onTikTok({
 		id = "test-" .. tostring(os.clock()),
 		type = "gift",
 		name = "Test",
 		gift = name,
+		rocks = rocks,
 		coins = coins,
 		count = count,
 	})
@@ -650,6 +651,11 @@ local function applySetting(player: Player, action: string, value: any)
 		if phase ~= "Won" then
 			newRound()
 		end
+		return
+	elseif action == "testRebuildGift" and type(value) == "number" then
+		-- Admin-only presets bypass saved destructive rules without changing them.
+		if value ~= 1000 and value ~= 10000 and value ~= 100000 and value ~= 1500000 then return end
+		testGift(1, 1, "Rebuild test", -value)
 		return
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
