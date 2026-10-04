@@ -17,6 +17,8 @@ export type Event = {
 	coins: number?, -- coins per gift
 	count: number?, -- gifts in this event
 	likes: number?,
+	rocks: number?,
+	keybind: string?,
 }
 
 local TikTokFeed = {}
@@ -37,6 +39,8 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 		seen[table.remove(seenOrder, 1) :: string] = nil
 	end
 	local event: Event = {
+		rocks = if type(raw.rocks) == "number" and raw.rocks == raw.rocks then math.clamp(raw.rocks, -1500000, 1500000) else nil,
+		keybind = if type(raw.keybind) == "string" then string.sub(raw.keybind, 1, 16) else nil,
 		id = raw.id,
 		type = raw.type,
 		user = if type(raw.user) == "string" then string.sub(raw.user, 1, 40) else nil,

@@ -16,10 +16,10 @@ local function check(condition: boolean, message: string)
 end
 
 -- Coin tiers apply to total gift value, independent of custom rock-removal rules.
-for _, case in { {1, 1}, {9, 1}, {10, 2}, {99, 2}, {100, 3}, {999, 3}, {1000, 4}, {9999, 4}, {10000, 5}, {34999, 5}, {1000000000, 5} } do
+for _, case in { {1, 1}, {9, 1}, {10, 2}, {99, 2}, {100, 3}, {499, 3}, {500, 4}, {999, 4}, {1000, 5}, {9999, 5}, {10000, 6}, {34999, 6}, {1000000000, 6} } do
 	check(GiftTier.forCoins(case[1]) == case[2], "gift tier boundary " .. case[1])
 end
-check(GiftTier.forCoins(30 * 40) == 4, "gift combos scale by their total coin value")
+check(GiftTier.forCoins(30 * 40) == 5, "gift combos scale by their total coin value")
 
 -- Hold countdown: 15 real seconds shown as 10 -> 0, slowing near the end.
 check(HoldTimer.display(0, 15, 10, 0.6) == 10, "countdown starts at 10")
@@ -149,6 +149,21 @@ for _, key in grid.order do
 end
 check(consistent, "uncovered list matches the actual uncovered rocks")
 check(grid:remaining() == grid.total - grid.removed, "remaining count")
+local beforeRestore = grid:remaining()
+local restored = grid:restore(1200)
+check(#restored == 1200 and grid:remaining() == beforeRestore + 1200, "adding restores exactly the requested excavated rocks")
+check(not grid:isSolid(hidden), "restoration never fills the diamond cell")
+local exposureMatches = true
+for _, key in grid.order do
+	if grid:isSolid(key) and (grid.exposedIndex[key] ~= nil) ~= grid:isExposed(key) then exposureMatches = false end
+end
+check(exposureMatches, "restore updates exposed neighbours correctly")
+grid:restore(grid.total * 2)
+check(grid:remaining() == grid.total and #grid.removedOrder == 0, "add gifts cannot overfill the original mountain")
+check(#grid:restore(50) == 0, "add gift on full mountain is a no-op")
+grid:blast(123)
+check(#grid:restore(123) == 123, "repeated dig and refill preserves accounting")
+
 t0 = os.clock()
 grid:blast(grid.total)
 print(string.format("cleared the rest in %.2f s", os.clock() - t0))

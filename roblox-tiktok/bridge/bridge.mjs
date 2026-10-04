@@ -4,6 +4,7 @@
 // games can receive them through Roblox Open Cloud MessagingService.
 // Open http://localhost:8787 for the control page (connect + test gifts).
 import http from 'node:http';
+import { KEYS, STARTER, normalizeGifts, validateRule } from './catalogue.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,7 @@ const configPath = path.join(here, 'config.json');
 const defaults = {
   tiktokUsername: '',
   port: 8787,
+  giftRules: {},
   openCloud: { apiKey: '', universeId: '', topic: 'DiamondRushTikTok' },
 };
 
@@ -47,13 +49,39 @@ function log(line) {
 
 function emit(event) {
   if (!event) return;
+  if(event.type === 'gift') {
+    const rule=config.giftRules?.[String(event.gift).toLowerCase()];
+    if(rule) event={...event,rocks:rule.rocks};
+  }
   const stamped = queue.push(event);
   outbox.push(stamped);
+  if (event.type === 'giftRule') return;
   recent.unshift({ at: Date.now(), ...stamped });
   recent.length = Math.min(recent.length, 30);
   const what = event.type === 'gift' ? `${event.gift} x${event.count} (${event.coins} coins each)` : event.type === 'like' ? `${event.likes} likes` : event.type;
   log(`${event.name}: ${what}`);
 }
+
+const cataloguePath = path.join(here, 'gift-catalogue.json');
+let catalogue = STARTER;
+let catalogueStatus = 'Starter gifts. Refresh to load all gifts available for your TikTok LIVE.';
+try { const cached=JSON.parse(fs.readFileSync(cataloguePath,'utf8')); const rows=normalizeGifts(cached); if(rows.length){catalogue=rows;catalogueStatus='Saved TikTok catalogue';} } catch {}
+let catalogueLoading = null;
+async function refreshCatalogue() {
+ if(catalogueLoading) return catalogueLoading;
+ catalogueLoading=(async()=>{
+  if(!config.tiktokUsername) throw new Error('Enter your TikTok username first.');
+  const { TikTokLiveConnection }=await import('tiktok-live-connector');
+  const client=connection ?? new TikTokLiveConnection(config.tiktokUsername);
+  const gifts=normalizeGifts(await client.fetchAvailableGifts());
+  if(!gifts.length) throw new Error('TikTok returned no gifts. Try refreshing while your account is LIVE.');
+  catalogue=gifts; catalogueStatus=`${gifts.length} gifts loaded from TikTok`;
+  fs.writeFileSync(cataloguePath,JSON.stringify(gifts,null,2));
+ })().finally(()=>{catalogueLoading=null;});
+ return catalogueLoading;
+}
+function publishRule(rule) { emit({type:'giftRule',name:'Gift catalogue',...rule}); }
+for(const rule of Object.values(config.giftRules ?? {})) publishRule(rule);
 
 // TikTok ----------------------------------------------------------------------
 async function connectTikTok(username) {
@@ -69,7 +97,7 @@ async function connectTikTok(username) {
     return;
   }
   const { TikTokLiveConnection, WebcastEvent, ControlEvent } = await import('tiktok-live-connector');
-  const live = new TikTokLiveConnection(username, { processInitialData: false, enableExtendedGiftInfo: false });
+  const live = new TikTokLiveConnection(username, { processInitialData: false, enableExtendedGiftInfo: true });
   connection = live;
   tiktokStatus = `connecting to @${username}…`;
   live.on(WebcastEvent.GIFT, (data) => emit(handleGift(data)));
@@ -91,6 +119,7 @@ async function connectTikTok(username) {
     if (connection === live) {
       tiktokStatus = `connected to @${username}`;
       log(`Connected to @${username}'s LIVE`);
+      refreshCatalogue().catch(error=>{catalogueStatus=error.message;});
     }
   } catch (error) {
     if (connection !== live) return;
@@ -154,11 +183,30 @@ function readBody(request) {
 
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
+  if (request.method === 'GET' && url.pathname === '/catalogue') {
+    return sendJson(response,200,{gifts:catalogue,status:catalogueStatus,rules:config.giftRules ?? {},keys:KEYS});
+  }
+  if (request.method === 'POST' && url.pathname === '/catalogue/refresh') {
+    try { await refreshCatalogue(); return sendJson(response,200,{ok:true}); }
+    catch(error) { catalogueStatus=error.message; return sendJson(response,400,{error:error.message}); }
+  }
+  if (request.method === 'POST' && url.pathname === '/catalogue/rule') {
+    try {
+      const rule=validateRule(await readBody(request));
+      const conflict=Object.values(config.giftRules ?? {}).find(other=>other.keybind && other.keybind===rule.keybind && other.gift.toLowerCase()!==rule.gift.toLowerCase());
+      if(conflict) throw new Error(`${rule.keybind} is already assigned to ${conflict.gift}. Clear that binding first.`);
+      config.giftRules ??= {};
+      config.giftRules[rule.gift.toLowerCase()]=rule;
+      saveConfig();publishRule(rule);
+      return sendJson(response,200,{ok:true});
+    } catch(error) {return sendJson(response,400,{error:error.message});}
+  }
   if (request.method === 'GET' && url.pathname === '/events') {
     lastRobloxPoll = Date.now();
     const session = url.searchParams.get('session');
     const since = session === queue.session ? Number(url.searchParams.get('since')) || 0 : 0;
     const events = queue.since(since).map(({ seq, ...event }) => event);
+    if(!since) for(const [key,rule] of Object.entries(config.giftRules ?? {})) events.unshift({id:`rules:${queue.session}:${key}:${JSON.stringify(rule)}`,type:'giftRule',...rule});
     return sendJson(response, 200, { session: queue.session, last: queue.last, tiktok: tiktokStatus, events });
   }
   if (request.method === 'GET' && url.pathname === '/status') {

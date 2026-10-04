@@ -75,4 +75,45 @@ function RebuildEffects.play(data: any)
 		end
 	end)
 end
+local restorations: { () -> () } = {}
+function RebuildEffects.restore(data: any)
+	if #data.stones == 0 then return end
+	if #restorations >= 2 then table.remove(restorations, 1)() end
+	local folder = Instance.new("Folder")
+	folder.Name = "RestoringRocks"
+	folder.Parent = workspace
+	local hidden = {}
+	local function cleanup()
+		for _, part in hidden do if part.Parent then part.LocalTransparencyModifier = 0 end end
+		table.clear(hidden)
+		folder:Destroy()
+	end
+	table.insert(restorations, cleanup)
+	for i, stone in data.stones do
+		if i > 24 then break end
+		local p = Instance.new("WedgePart")
+		p.Size = stone.size * 1.6
+		p.Color = stone.colour
+		p.Material = Enum.Material.Slate
+		p.Anchored = true
+		p.CanCollide = false
+		p.CanQuery = false
+		p.CanTouch = false
+		p.CastShadow = false
+		local angle = i * 2.39996
+		p.CFrame = stone.frame + Vector3.new(math.cos(angle) * 5, 6 + i % 3, math.sin(angle) * 5)
+		p.Parent = folder
+		if typeof(stone.part) == "Instance" and stone.part:IsA("BasePart") then
+			stone.part.LocalTransparencyModifier = 1
+			table.insert(hidden, stone.part)
+		end
+		TweenService:Create(p, TweenInfo.new(0.65, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, i * 0.012), { CFrame = stone.frame, Size = stone.size }):Play()
+	end
+	task.delay(1.05, function()
+		local index = table.find(restorations, cleanup)
+		if index then table.remove(restorations, index) end
+		cleanup()
+	end)
+end
+
 return RebuildEffects

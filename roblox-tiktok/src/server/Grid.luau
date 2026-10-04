@@ -18,6 +18,7 @@ export type Grid = typeof(setmetatable(
 		order: { number },
 		total: number,
 		removed: number,
+		removedOrder: { number },
 		exposedList: { number },
 		exposedIndex: { [number]: number },
 		rand: (number?, number?) -> number,
@@ -52,6 +53,7 @@ function Grid.new(target: number, seed: number, rand: (number?, number?) -> numb
 		order = {},
 		total = 0,
 		removed = 0,
+		removedOrder = {},
 		exposedList = {},
 		exposedIndex = {},
 		rand = rand,
@@ -191,6 +193,7 @@ function Grid.remove(self: Grid, key: number): boolean
 	end
 	self.solid[key] = nil
 	self.removed += 1
+	table.insert(self.removedOrder, key)
 	self:_unexpose(key)
 	local x, y, z = Grid.coords(key)
 	for _, step in NEIGHBOURS do
@@ -203,6 +206,26 @@ function Grid.remove(self: Grid, key: number): boolean
 		end
 	end
 	return true
+end
+
+-- Refill recently excavated cells in reverse order, never the sealed diamond cell.
+function Grid.restore(self: Grid, count: number): { number }
+	local restored = {}
+	local affected = {}
+	while #restored < count and #self.removedOrder > 0 do
+		local key = table.remove(self.removedOrder) :: number
+		if not self.solid[key] and not self.sealed[key] then
+			self.solid[key] = true
+			self.removed -= 1
+			table.insert(restored, key)
+			affected[key] = true
+			for _, neighbour in self:solidNeighbours(key) do affected[neighbour] = true end
+		end
+	end
+	for key in affected do
+		if self:isExposed(key) then self:_expose(key) else self:_unexpose(key) end
+	end
+	return restored
 end
 
 function Grid.randomExposed(self: Grid): number?

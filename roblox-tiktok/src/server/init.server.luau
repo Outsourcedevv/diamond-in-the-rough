@@ -48,6 +48,7 @@ local settings = {
 	perFollow = Config.StonePerFollow,
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
+	giftBindings = {} :: { [string]: any },
 }
 local saved = Store.load()
 if saved then
@@ -79,6 +80,7 @@ local function publishSettings()
 	State:SetAttribute("PerFollow", settings.perFollow)
 	State:SetAttribute("PerShare", settings.perShare)
 	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
+	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
 end
 
 local function saveSettings()
@@ -187,7 +189,7 @@ local DIAMOND_TILT = CFrame.Angles(0, math.rad(22.5), 0)
 local mountain: Mountain.Mountain? = nil
 local phase = "Digging"
 local startingStone = settings.startingStone
-local pendingStone = 0
+local pendingChanges: { number } = {}
 local roundStart = 0
 local holder: Player? = nil
 local holdStarted = 0
@@ -261,16 +263,24 @@ local function reveal()
 end
 
 -- One rock is one stone: blast exactly that many rocks.
-local function applyStone(amount: number): Vector3?
+local function applyStone(amount: number): (Vector3?, number?)
 	amount = math.floor(amount)
-	if amount <= 0 then
-		return
-	end
+	if amount == 0 then return nil, 0 end
 	local current = mountain
 	if phase == "Won" or phase == "Rebuilding" or current == nil then
 		-- Gifts during the win screen count towards the next mountain.
-		pendingStone += amount
+		table.insert(pendingChanges, amount)
 		return
+	end
+	if amount < 0 then
+		local restored, samples = current:restore(-amount)
+		refreshStone()
+		if phase == "Revealed" then
+			stopSettling()
+			diamond.CFrame = CFrame.new(diamondLanding(Vector3.new(diamond.Position.X, current.grid.height * blockSize * 2 + 8, diamond.Position.Z))) * DIAMOND_TILT
+		end
+		Notify:FireAllClients("restore", { stones = samples, count = restored })
+		return (if #samples > 0 then samples[1].frame.Position else nil), -restored
 	end
 	local count = math.min(amount, current:remaining())
 	local centre = current:blast(count)
@@ -278,7 +288,7 @@ local function applyStone(amount: number): Vector3?
 	-- physics Explosion: blasts may remove grid stones, never the diamond or rigs.
 	refreshStone()
 	settleDiamond()
-	return centre
+	return centre, count
 end
 
 local function teleportHome(player: Player)
@@ -387,9 +397,9 @@ local function newRound(animated: boolean?)
 	setPhase("Digging")
 	roundStart = workspace:GetServerTimeNow()
 	State:SetAttribute("RoundStart", roundStart)
-	local carried = pendingStone
-	pendingStone = 0
-	applyStone(carried)
+	local carried = pendingChanges
+	pendingChanges = {}
+	for _, change in carried do applyStone(change) end
 end
 
 -- Holding the diamond -----------------------------------------------------------
@@ -509,13 +519,25 @@ end)
 
 -- TikTok ------------------------------------------------------------------------
 local function onTikTok(event: TikTokFeed.Event)
+	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
+		local name = string.lower(event.gift)
+		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
+		for key, binding in settings.giftBindings do
+			if string.lower(binding.gift) == name then settings.giftBindings[key] = nil end
+		end
+		if event.keybind and event.keybind ~= "" then
+			settings.giftBindings[event.keybind] = { gift = event.gift, coins = event.coins or 1 }
+		end
+		saveSettings()
+		return
+	end
 	local who = event.name or event.user or "Someone"
 	local amount = 0
 	local text = ""
 	if event.type == "gift" then
 		local count = math.max(1, math.floor(event.count or 1))
 		local coins = math.max(1, event.coins or 1)
-		local rule = settings.giftRules[string.lower(event.gift or "")]
+		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
 		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
 	elseif event.type == "like" then
@@ -530,16 +552,18 @@ local function onTikTok(event: TikTokFeed.Event)
 		text = who .. " shared the live"
 	end
 	if amount <= 0 and event.type ~= "gift" then return end
-	local centre = applyStone(amount)
+	local centre, applied = applyStone(amount)
 	if event.type == "gift" then
 		Notify:FireAllClients("giftEffect", {
 			coins = math.max(1, event.coins or 1) * math.max(1, math.floor(event.count or 1)),
 			position = centre or Vector3.new(0, 8, 0),
 			name = who,
 			gift = event.gift or "Gift",
+			adding = amount < 0,
+			blocks = applied,
 		})
 	end
-	Notify:FireAllClients("feed", { text = text, stone = amount, kind = event.type })
+	Notify:FireAllClients("feed", { text = text .. (if applied == nil then " (queued)" elseif amount < 0 and applied == 0 then " (mountain full)" else ""), stone = applied or amount, kind = event.type })
 end
 
 TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, function(status: string)
@@ -616,7 +640,7 @@ local function applySetting(player: Player, action: string, value: any)
 			return
 		end
 		if type(value.rocks) == "number" then
-			settings.giftRules[name] = math.clamp(math.floor(value.rocks), 0, 1500000)
+			settings.giftRules[name] = math.clamp(math.floor(value.rocks), -1500000, 1500000)
 		else
 			settings.giftRules[name] = nil
 		end
@@ -628,9 +652,9 @@ local function applySetting(player: Player, action: string, value: any)
 		end
 		return
 	elseif action == "testGift" and type(value) == "table" then
-		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 50000) else 1
+		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
 		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1
-		testGift(coins, count, if type(value.name) == "string" then string.sub(value.name, 1, 24) else "Test gift")
+		testGift(coins, count, if type(value.name) == "string" then string.sub(value.name, 1, 40) else "Test gift")
 		return
 	else
 		return

@@ -89,7 +89,7 @@ function Mountain._draw(self: Mountain, key: number)
 	end
 	local backing = self.grid.exposedIndex[key] == nil
 	if existing ~= nil then
-		if backing or not existing:GetAttribute("BackingRock") then return end
+		if backing == (existing:GetAttribute("BackingRock") == true) then return end
 		-- The inner stone becomes a faceted, diggable surface stone when uncovered.
 		self.keys[existing] = nil
 		existing:Destroy()
@@ -147,6 +147,44 @@ function Mountain._drawShell(self: Mountain, key: number)
 	for _, neighbour in self.grid:solidNeighbours(key) do
 		self:_draw(neighbour)
 	end
+end
+
+-- Reconcile only the changed cells and the two surrounding rock layers.
+function Mountain.restore(self: Mountain, count: number): (number, { any })
+	local restored = self.grid:restore(count)
+	local affected = {}
+	for _, key in restored do
+		affected[key] = true
+		for _, neighbour in self.grid:solidNeighbours(key) do
+			affected[neighbour] = true
+			for _, second in self.grid:solidNeighbours(neighbour) do affected[second] = true end
+		end
+	end
+	for key in affected do
+		local needed = self.grid.exposedIndex[key] ~= nil
+		if not needed then
+			for _, neighbour in self.grid:solidNeighbours(key) do
+				if self.grid.exposedIndex[neighbour] then needed = true; break end
+			end
+		end
+		if needed then self:_draw(key)
+		elseif self.parts[key] then
+			local part = self.parts[key]
+			self.keys[part] = nil
+			self.parts[key] = nil
+			part:Destroy()
+		end
+	end
+	self.grid:takeFresh()
+	local samples = {}
+	for _, key in restored do
+		local part = self.parts[key]
+		if part and not part:GetAttribute("BackingRock") then
+			table.insert(samples, { frame = part.CFrame, size = part.Size, colour = part.Color, part = part })
+			if #samples >= 24 then break end
+		end
+	end
+	return #restored, samples
 end
 
 function Mountain.total(self: Mountain): number

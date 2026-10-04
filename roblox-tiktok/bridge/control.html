@@ -26,6 +26,16 @@
   li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
   li:last-child { border: 0; }
   small { color: var(--muted); }
+  select { padding:10px; border-radius:8px; background:#1b1626; color:var(--text); border:1px solid var(--line); font:inherit; }
+  .catalogue { max-height:340px; overflow:auto; margin:12px 0; }
+  .catalogue button { text-align:left; min-height:72px; background:#302940; border:2px solid transparent; }
+  .catalogue button[aria-pressed="true"] { border-color:var(--accent); background:#254250; }
+  .catalogue small { display:block; }
+  .editor { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; padding:14px 0; }
+  .editor label { display:flex; flex-direction:column; gap:6px; }
+  .editor input { flex:initial; width:100%; }
+  #catalogueMessage { min-height:24px; margin-top:10px; }
+  @media(max-width:540px) { .editor { grid-template-columns:1fr; } }
   details summary { cursor: pointer; font-weight: 600; }
 </style>
 </head>
@@ -49,6 +59,27 @@
       <input id="username" placeholder="your_tiktok_username" autocomplete="off">
       <button>Connect</button>
     </form>
+  </section>
+
+  <section>
+    <h2>Gift catalogue</h2>
+    <p>Pick a gift, choose what it does, and save a shortcut. Refresh loads the gifts available for your TikTok LIVE.</p>
+    <div class="row"><input id="giftSearch" type="search" placeholder="Search gifts by name or coin price" aria-label="Search gifts"><button id="refreshCatalogue">Refresh from TikTok</button></div>
+    <p id="catalogueStatus" style="margin-top:10px" aria-live="polite"></p>
+    <div class="grid catalogue" id="catalogue"></div>
+    <h2 id="chosenGift">Select a gift above</h2>
+    <form id="giftEditor">
+      <fieldset id="giftFields" disabled style="border:0;padding:0;margin:0">
+        <div class="editor">
+          <label>Action<select id="giftAction"><option value="remove">Remove blocks</option><option value="add">Add blocks</option></select></label>
+          <label>Blocks per gift<input id="giftBlocks" type="number" min="0" max="1500000" step="1" required></label>
+          <label>Test keybind<select id="giftKey"></select></label>
+        </div>
+        <div class="row"><button type="submit">Save gift</button><button type="button" id="testChosenGift">Save &amp; test</button></div>
+      </fieldset>
+    </form>
+    <p id="catalogueMessage" role="status"></p>
+    <small>Keybinds work in this window or in Roblox for the streamer once settings sync. They pause while typing or using in-game settings. Adding blocks refills dug spaces up to the original mountain size.</small>
   </section>
 
   <section>
@@ -110,6 +141,70 @@ document.getElementById('cloud').onsubmit = (event) => {
   event.preventDefault();
   post('/opencloud', { universeId: document.getElementById('universe').value, apiKey: document.getElementById('apikey').value }).then(refresh);
 };
+
+let giftCatalogue = [], giftRules = {}, selectedGift = null;
+const catalogueBox = document.getElementById('catalogue');
+function drawCatalogue() {
+ const query=document.getElementById('giftSearch').value.trim().toLowerCase();
+ const rows=giftCatalogue.filter(g=>g.name.toLowerCase().includes(query)||String(g.coins).includes(query));
+ catalogueBox.replaceChildren();
+ for(const gift of rows) {
+  const rule=giftRules[gift.name.toLowerCase()];
+  const button=document.createElement('button');button.type='button';
+  button.setAttribute('aria-pressed',String(selectedGift?.id===gift.id));
+  const name=document.createElement('span');name.textContent=gift.name;
+  const detail=document.createElement('small');
+  detail.textContent=`${gift.coins.toLocaleString()} coins${rule ? ` · ${rule.rocks<0?'Adds':'Removes'} ${Math.abs(rule.rocks).toLocaleString()}${rule.keybind ? ` · ${rule.keybind}`:''}`:''}`;
+  button.append(name,detail);button.onclick=()=>chooseGift(gift);catalogueBox.append(button);
+ }
+ if(!rows.length) catalogueBox.textContent='No gifts match your search.';
+}
+function chooseGift(gift) {
+ selectedGift=gift;
+ const rule=giftRules[gift.name.toLowerCase()];
+ document.getElementById('chosenGift').textContent=`${gift.name} · ${gift.coins.toLocaleString()} coins`;
+ document.getElementById('giftAction').value=rule?.rocks<0?'add':'remove';
+ document.getElementById('giftBlocks').value=Math.abs(rule?.rocks ?? Math.min(1500000,gift.coins*100));
+ document.getElementById('giftKey').value=rule?.keybind ?? '';
+ document.getElementById('giftFields').disabled=false;
+ document.getElementById('catalogueMessage').textContent='';drawCatalogue();
+}
+async function loadCatalogue() {
+ const data=await (await fetch('/catalogue')).json();
+ giftCatalogue=data.gifts;giftRules=data.rules;
+ document.getElementById('catalogueStatus').textContent=data.status;
+ const keys=document.getElementById('giftKey');const previous=keys.value;
+ keys.replaceChildren(...data.keys.map(key=>{const option=document.createElement('option');option.value=key;option.textContent=key||'No keybind';return option;}));
+ keys.value=previous;drawCatalogue();
+}
+async function saveChosen(test=false) {
+ if(!selectedGift || !document.getElementById('giftEditor').reportValidity()) return;
+ const message=document.getElementById('catalogueMessage');
+ try {
+  const response=await post('/catalogue/rule',{gift:selectedGift.name,coins:selectedGift.coins,action:document.getElementById('giftAction').value,blocks:Number(document.getElementById('giftBlocks').value),keybind:document.getElementById('giftKey').value});
+  const result=await response.json();if(!response.ok)throw new Error(result.error);
+  if(test) await post('/test',{gift:selectedGift.name,coins:selectedGift.coins});
+  message.textContent=test?'Saved. Test gift sent.':'Saved. Roblox will receive this rule and keybind.';
+  await loadCatalogue();
+ } catch(error) {message.textContent=error.message;}
+}
+document.getElementById('giftSearch').oninput=drawCatalogue;
+document.getElementById('giftEditor').onsubmit=event=>{event.preventDefault();saveChosen();};
+document.getElementById('testChosenGift').onclick=()=>saveChosen(true);
+document.getElementById('refreshCatalogue').onclick=async event=>{
+ event.target.disabled=true;document.getElementById('catalogueStatus').textContent='Loading gifts from TikTok…';
+ try { const response=await post('/catalogue/refresh',{});const data=await response.json();if(!response.ok)throw new Error(data.error);await loadCatalogue(); }
+ catch(error){document.getElementById('catalogueStatus').textContent=error.message;}
+ finally {event.target.disabled=false;}
+};
+document.addEventListener('keydown',event=>{
+ if(event.repeat||event.ctrlKey||event.altKey||event.metaKey||['INPUT','TEXTAREA','SELECT','BUTTON'].includes(document.activeElement?.tagName))return;
+ const key=event.code.startsWith('Key')?event.code.slice(3):event.code;
+ const rule=Object.values(giftRules).find(rule=>rule.keybind && rule.keybind===key);
+ if(rule){event.preventDefault();post('/test',{gift:rule.gift,coins:rule.coins});}
+});
+loadCatalogue().catch(()=>{document.getElementById('catalogueStatus').textContent='Start the bridge to load your catalogue.';});
+
 let filled = false;
 function describe(event) {
   if (event.type === 'gift') return `${event.name} sent ${event.gift} x${event.count} · ${event.coins * event.count} coins`;

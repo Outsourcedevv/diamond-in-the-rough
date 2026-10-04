@@ -190,8 +190,9 @@ return Format
           <string name="Source"><![CDATA[--!strict
 local GiftTier = {}
 function GiftTier.forCoins(coins: number): number
-	if coins >= 10000 then return 5 end
-	if coins >= 1000 then return 4 end
+	if coins >= 10000 then return 6 end
+	if coins >= 1000 then return 5 end
+	if coins >= 500 then return 4 end
 	if coins >= 100 then return 3 end
 	if coins >= 10 then return 2 end
 	return 1
@@ -291,6 +292,7 @@ local settings = {
 	perFollow = Config.StonePerFollow,
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
+	giftBindings = {} :: { [string]: any },
 }
 local saved = Store.load()
 if saved then
@@ -322,6 +324,7 @@ local function publishSettings()
 	State:SetAttribute("PerFollow", settings.perFollow)
 	State:SetAttribute("PerShare", settings.perShare)
 	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
+	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
 end
 
 local function saveSettings()
@@ -430,7 +433,7 @@ local DIAMOND_TILT = CFrame.Angles(0, math.rad(22.5), 0)
 local mountain: Mountain.Mountain? = nil
 local phase = "Digging"
 local startingStone = settings.startingStone
-local pendingStone = 0
+local pendingChanges: { number } = {}
 local roundStart = 0
 local holder: Player? = nil
 local holdStarted = 0
@@ -504,16 +507,24 @@ local function reveal()
 end
 
 -- One rock is one stone: blast exactly that many rocks.
-local function applyStone(amount: number): Vector3?
+local function applyStone(amount: number): (Vector3?, number?)
 	amount = math.floor(amount)
-	if amount <= 0 then
-		return
-	end
+	if amount == 0 then return nil, 0 end
 	local current = mountain
 	if phase == "Won" or phase == "Rebuilding" or current == nil then
 		-- Gifts during the win screen count towards the next mountain.
-		pendingStone += amount
+		table.insert(pendingChanges, amount)
 		return
+	end
+	if amount < 0 then
+		local restored, samples = current:restore(-amount)
+		refreshStone()
+		if phase == "Revealed" then
+			stopSettling()
+			diamond.CFrame = CFrame.new(diamondLanding(Vector3.new(diamond.Position.X, current.grid.height * blockSize * 2 + 8, diamond.Position.Z))) * DIAMOND_TILT
+		end
+		Notify:FireAllClients("restore", { stones = samples, count = restored })
+		return (if #samples > 0 then samples[1].frame.Position else nil), -restored
 	end
 	local count = math.min(amount, current:remaining())
 	local centre = current:blast(count)
@@ -521,7 +532,7 @@ local function applyStone(amount: number): Vector3?
 	-- physics Explosion: blasts may remove grid stones, never the diamond or rigs.
 	refreshStone()
 	settleDiamond()
-	return centre
+	return centre, count
 end
 
 local function teleportHome(player: Player)
@@ -630,9 +641,9 @@ local function newRound(animated: boolean?)
 	setPhase("Digging")
 	roundStart = workspace:GetServerTimeNow()
 	State:SetAttribute("RoundStart", roundStart)
-	local carried = pendingStone
-	pendingStone = 0
-	applyStone(carried)
+	local carried = pendingChanges
+	pendingChanges = {}
+	for _, change in carried do applyStone(change) end
 end
 
 -- Holding the diamond -----------------------------------------------------------
@@ -752,13 +763,25 @@ end)
 
 -- TikTok ------------------------------------------------------------------------
 local function onTikTok(event: TikTokFeed.Event)
+	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
+		local name = string.lower(event.gift)
+		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
+		for key, binding in settings.giftBindings do
+			if string.lower(binding.gift) == name then settings.giftBindings[key] = nil end
+		end
+		if event.keybind and event.keybind ~= "" then
+			settings.giftBindings[event.keybind] = { gift = event.gift, coins = event.coins or 1 }
+		end
+		saveSettings()
+		return
+	end
 	local who = event.name or event.user or "Someone"
 	local amount = 0
 	local text = ""
 	if event.type == "gift" then
 		local count = math.max(1, math.floor(event.count or 1))
 		local coins = math.max(1, event.coins or 1)
-		local rule = settings.giftRules[string.lower(event.gift or "")]
+		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
 		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
 	elseif event.type == "like" then
@@ -773,16 +796,18 @@ local function onTikTok(event: TikTokFeed.Event)
 		text = who .. " shared the live"
 	end
 	if amount <= 0 and event.type ~= "gift" then return end
-	local centre = applyStone(amount)
+	local centre, applied = applyStone(amount)
 	if event.type == "gift" then
 		Notify:FireAllClients("giftEffect", {
 			coins = math.max(1, event.coins or 1) * math.max(1, math.floor(event.count or 1)),
 			position = centre or Vector3.new(0, 8, 0),
 			name = who,
 			gift = event.gift or "Gift",
+			adding = amount < 0,
+			blocks = applied,
 		})
 	end
-	Notify:FireAllClients("feed", { text = text, stone = amount, kind = event.type })
+	Notify:FireAllClients("feed", { text = text .. (if applied == nil then " (queued)" elseif amount < 0 and applied == 0 then " (mountain full)" else ""), stone = applied or amount, kind = event.type })
 end
 
 TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, function(status: string)
@@ -859,7 +884,7 @@ local function applySetting(player: Player, action: string, value: any)
 			return
 		end
 		if type(value.rocks) == "number" then
-			settings.giftRules[name] = math.clamp(math.floor(value.rocks), 0, 1500000)
+			settings.giftRules[name] = math.clamp(math.floor(value.rocks), -1500000, 1500000)
 		else
 			settings.giftRules[name] = nil
 		end
@@ -871,9 +896,9 @@ local function applySetting(player: Player, action: string, value: any)
 		end
 		return
 	elseif action == "testGift" and type(value) == "table" then
-		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 50000) else 1
+		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
 		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1
-		testGift(coins, count, if type(value.name) == "string" then string.sub(value.name, 1, 24) else "Test gift")
+		testGift(coins, count, if type(value.name) == "string" then string.sub(value.name, 1, 40) else "Test gift")
 		return
 	else
 		return
@@ -1021,6 +1046,7 @@ export type Grid = typeof(setmetatable(
 		order: { number },
 		total: number,
 		removed: number,
+		removedOrder: { number },
 		exposedList: { number },
 		exposedIndex: { [number]: number },
 		rand: (number?, number?) -> number,
@@ -1055,6 +1081,7 @@ function Grid.new(target: number, seed: number, rand: (number?, number?) -> numb
 		order = {},
 		total = 0,
 		removed = 0,
+		removedOrder = {},
 		exposedList = {},
 		exposedIndex = {},
 		rand = rand,
@@ -1194,6 +1221,7 @@ function Grid.remove(self: Grid, key: number): boolean
 	end
 	self.solid[key] = nil
 	self.removed += 1
+	table.insert(self.removedOrder, key)
 	self:_unexpose(key)
 	local x, y, z = Grid.coords(key)
 	for _, step in NEIGHBOURS do
@@ -1206,6 +1234,26 @@ function Grid.remove(self: Grid, key: number): boolean
 		end
 	end
 	return true
+end
+
+-- Refill recently excavated cells in reverse order, never the sealed diamond cell.
+function Grid.restore(self: Grid, count: number): { number }
+	local restored = {}
+	local affected = {}
+	while #restored < count and #self.removedOrder > 0 do
+		local key = table.remove(self.removedOrder) :: number
+		if not self.solid[key] and not self.sealed[key] then
+			self.solid[key] = true
+			self.removed -= 1
+			table.insert(restored, key)
+			affected[key] = true
+			for _, neighbour in self:solidNeighbours(key) do affected[neighbour] = true end
+		end
+	end
+	for key in affected do
+		if self:isExposed(key) then self:_expose(key) else self:_unexpose(key) end
+	end
+	return restored
 end
 
 function Grid.randomExposed(self: Grid): number?
@@ -1465,7 +1513,7 @@ function Mountain._draw(self: Mountain, key: number)
 	end
 	local backing = self.grid.exposedIndex[key] == nil
 	if existing ~= nil then
-		if backing or not existing:GetAttribute("BackingRock") then return end
+		if backing == (existing:GetAttribute("BackingRock") == true) then return end
 		-- The inner stone becomes a faceted, diggable surface stone when uncovered.
 		self.keys[existing] = nil
 		existing:Destroy()
@@ -1523,6 +1571,44 @@ function Mountain._drawShell(self: Mountain, key: number)
 	for _, neighbour in self.grid:solidNeighbours(key) do
 		self:_draw(neighbour)
 	end
+end
+
+-- Reconcile only the changed cells and the two surrounding rock layers.
+function Mountain.restore(self: Mountain, count: number): (number, { any })
+	local restored = self.grid:restore(count)
+	local affected = {}
+	for _, key in restored do
+		affected[key] = true
+		for _, neighbour in self.grid:solidNeighbours(key) do
+			affected[neighbour] = true
+			for _, second in self.grid:solidNeighbours(neighbour) do affected[second] = true end
+		end
+	end
+	for key in affected do
+		local needed = self.grid.exposedIndex[key] ~= nil
+		if not needed then
+			for _, neighbour in self.grid:solidNeighbours(key) do
+				if self.grid.exposedIndex[neighbour] then needed = true; break end
+			end
+		end
+		if needed then self:_draw(key)
+		elseif self.parts[key] then
+			local part = self.parts[key]
+			self.keys[part] = nil
+			self.parts[key] = nil
+			part:Destroy()
+		end
+	end
+	self.grid:takeFresh()
+	local samples = {}
+	for _, key in restored do
+		local part = self.parts[key]
+		if part and not part:GetAttribute("BackingRock") then
+			table.insert(samples, { frame = part.CFrame, size = part.Size, colour = part.Color, part = part })
+			if #samples >= 24 then break end
+		end
+	end
+	return #restored, samples
 end
 
 function Mountain.total(self: Mountain): number
@@ -1947,6 +2033,8 @@ export type Event = {
 	coins: number?, -- coins per gift
 	count: number?, -- gifts in this event
 	likes: number?,
+	rocks: number?,
+	keybind: string?,
 }
 
 local TikTokFeed = {}
@@ -1967,6 +2055,8 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 		seen[table.remove(seenOrder, 1) :: string] = nil
 	end
 	local event: Event = {
+		rocks = if type(raw.rocks) == "number" and raw.rocks == raw.rocks then math.clamp(raw.rocks, -1500000, 1500000) else nil,
+		keybind = if type(raw.keybind) == "string" then string.sub(raw.keybind, 1, 16) else nil,
 		id = raw.id,
 		type = raw.type,
 		user = if type(raw.user) == "string" then string.sub(raw.user, 1, 40) else nil,
@@ -2294,8 +2384,8 @@ local function addFeed(text: string, stone: number, kind: string)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextColor3 = WHITE,
 		RichText = true,
-		Text = if stone > 0
-			then string.format('%s  <font color="#%s">-%s</font>', (text:gsub("[<>&]", "")), colour:ToHex(), Format.commas(stone))
+		Text = if stone ~= 0
+			then string.format('%s  <font color="#%s">%s%s</font>', (text:gsub("[<>&]", "")), (if stone < 0 then Color3.fromRGB(100, 240, 170) else colour):ToHex(), if stone < 0 then "+" else "-", Format.commas(math.abs(stone)))
 			else (text:gsub("[<>&]", "")),
 	}, feed)
 	rounded(row, 10)
@@ -2523,7 +2613,8 @@ local perLikeBox = amountBox("setPerLike")
 local perFollowBox = amountBox("setPerFollow")
 local perShareBox = amountBox("setPerShare")
 
-panelLabel("GIFT RULES (rocks removed per gift)")
+panelLabel("GIFT CATALOGUE: localhost:8787 in your browser")
+panelLabel("GIFT RULES: positive removes, negative adds")
 panelOrder += 1
 local rulesList = make("Frame", {
 	LayoutOrder = panelOrder,
@@ -2536,7 +2627,7 @@ make("UIListLayout", { SortOrder = Enum.SortOrder.Name, Padding = UDim.new(0, 4)
 local newGiftName = panelBox("", function() end)
 newGiftName.PlaceholderText = "Gift name, e.g. Rose"
 local newGiftRocks = panelBox("", function() end)
-newGiftRocks.PlaceholderText = "Rocks removed per gift, e.g. 500"
+newGiftRocks.PlaceholderText = "500 removes; -500 adds blocks"
 panelButtons({
 	{ "Add / change gift rule", function()
 		local rocks = tonumber((string.gsub(newGiftRocks.Text, "[,%s]", "")))
@@ -2569,7 +2660,7 @@ local function refreshRules()
 			TextSize = 15,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = WHITE,
-			Text = string.format("%s → %s rocks", tostring(name), Format.commas(tonumber(rocks) or 0)),
+			Text = string.format("%s → %s rocks", tostring(name), (if (tonumber(rocks) or 0) < 0 then "ADD " else "REMOVE ") .. Format.commas(math.abs(tonumber(rocks) or 0))),
 			ZIndex = 12,
 		}, row)
 		local remove = make("TextButton", {
@@ -2733,6 +2824,8 @@ end)
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	if kind == "rebuild" and type(data) == "table" then
 		RebuildEffects.play(data)
+	elseif kind == "restore" and type(data) == "table" then
+		RebuildEffects.restore(data)
 	elseif kind == "giftEffect" and type(data) == "table" then
 		GiftEffects.play(data)
 	elseif kind == "feed" and type(data) == "table" then
@@ -2848,6 +2941,15 @@ RunService.Heartbeat:Connect(function(dt: number)
 	if tool == nil and onRock then
 		Request:FireServer("mine", target)
 	end
+end)
+
+-- Catalogue keybinds work in-game for the streamer, outside text entry and menus.
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed or not isAdmin or panel.Visible or UserInputService:GetFocusedTextBox() then return end
+	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
+	if not ok or type(bindings) ~= "table" then return end
+	local binding = bindings[input.KeyCode.Name]
+	if binding then send("testGift", { coins = binding.coins, count = 1, name = binding.gift }) end
 end)
 ]]></string>
         </Properties>
@@ -3100,8 +3202,8 @@ local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Format = require(Shared:WaitForChild("Format"))
 local GiftEffects = {}
-local colours = { Color3.fromRGB(255, 208, 112), Color3.fromRGB(255, 137, 55), Color3.fromRGB(255, 80, 66), Color3.fromRGB(126, 116, 255), Color3.fromRGB(91, 240, 255) }
-local titles = { "SPARK BURST", "SHOCKWAVE", "METEOR STRIKE", "METEOR SHOWER", "COSMIC BURST" }
+local colours = { Color3.fromRGB(255, 208, 112), Color3.fromRGB(255, 137, 55), Color3.fromRGB(255, 80, 66), Color3.fromRGB(70, 230, 255), Color3.fromRGB(156, 90, 255), Color3.fromRGB(255, 225, 120) }
+local titles = { "SPARK BURST", "SHOCKWAVE", "DOUBLE IMPACT", "ORBITAL STRIKE", "GALAXY COLLAPSE", "COSMIC BURST" }
 local active: { { folder: Folder, tier: number } } = {}
 local label: TextLabel? = nil
 local bannerSerial = 0
@@ -3152,7 +3254,7 @@ function GiftEffects.play(data: any)
 	folder.Parent = workspace
 	table.insert(active, { folder = folder, tier = tier })
 	Debris:AddItem(folder, 8)
-	local colour = colours[tier]
+	local colour = if data.adding then Color3.fromRGB(90, 235, 170) else colours[tier]
 	local centre: Vector3 = data.position
 	local allocated = 0
 	local function piece(shape: Enum.PartType, size: Vector3, frame: CFrame): Part?
@@ -3289,19 +3391,34 @@ function GiftEffects.play(data: any)
 			end)
 		end)
 	end
-	if tier <= 2 then
+	if data.adding then
+		ring(centre, 8 + tier * 2, 0)
+	elseif tier == 4 then
+		-- 500 coins: six descending energy lances close in on one impact point.
+		for i = 1, 6 do
+			task.delay((i - 1) * 0.12, function()
+				if folder.Parent == nil then return end
+				local angle = i * math.pi / 3
+				local at = centre + Vector3.new(math.cos(angle) * 6, 0, math.sin(angle) * 6)
+				local lance = piece(Enum.PartType.Cylinder, Vector3.new(45, 0.35, 0.35), CFrame.new(at + Vector3.new(0, 23, 0)) * CFrame.Angles(0, 0, math.pi / 2))
+				if lance then animate(lance, 0.45, { Size = Vector3.new(45, 2.5, 2.5), Transparency = 1 }) end
+				ring(at, 9, 0.08)
+			end)
+		end
+		task.delay(0.85, function() if folder.Parent then pulse(centre, 26) end end)
+	elseif tier <= 2 then
 		pulse(centre, 3 + tier * 3)
 		for _ = 1, tier * 3 do
 			local spark = piece(Enum.PartType.Ball, Vector3.one * 0.22, CFrame.new(centre))
 			if spark then animate(spark, random:NextNumber(0.5, 1.2), { Position = centre + Vector3.new(random:NextNumber(-7, 7), random:NextNumber(3, 12), random:NextNumber(-7, 7)), Transparency = 1 }) end
 		end
 	else
-		local count = if tier == 3 then 1 elseif tier == 4 then 2 else 3
+		local count = if tier == 3 then 2 elseif tier >= 5 then 4 else 5
 		for i = 1, count do
 			local offset = if i == 1 then Vector3.zero else Vector3.new(random:NextNumber(-10, 10), 0, random:NextNumber(-10, 10))
 			meteor(centre + offset, (i - 1) * 0.3)
 		end
-		if tier == 5 then
+		if tier >= 5 then
 			task.delay(2.3, function()
 				if folder.Parent == nil then return end
 				pulse(centre, 32)
@@ -3320,7 +3437,7 @@ function GiftEffects.play(data: any)
 		bannerTier = tier
 		bannerSerial += 1
 		local serial = bannerSerial
-		text.Text = titles[tier] .. "  •  " .. Format.commas(data.coins) .. " COINS\n" .. tostring(data.name or "Someone") .. " sent " .. tostring(data.gift or "a gift")
+		text.Text = (if data.adding then (if data.blocks == 0 then "MOUNTAIN FULL" elseif data.blocks == nil then "RESTORE QUEUED" else "ROCKS RESTORED") else titles[tier]) .. "  •  " .. Format.commas(data.coins) .. " COINS\n" .. tostring(data.name or "Someone") .. " sent " .. tostring(data.gift or "a gift")
 		text.TextColor3 = colour
 		if bannerTween then bannerTween:Cancel() end
 		text.TextTransparency = 0
@@ -3419,6 +3536,47 @@ function RebuildEffects.play(data: any)
 		end
 	end)
 end
+local restorations: { () -> () } = {}
+function RebuildEffects.restore(data: any)
+	if #data.stones == 0 then return end
+	if #restorations >= 2 then table.remove(restorations, 1)() end
+	local folder = Instance.new("Folder")
+	folder.Name = "RestoringRocks"
+	folder.Parent = workspace
+	local hidden = {}
+	local function cleanup()
+		for _, part in hidden do if part.Parent then part.LocalTransparencyModifier = 0 end end
+		table.clear(hidden)
+		folder:Destroy()
+	end
+	table.insert(restorations, cleanup)
+	for i, stone in data.stones do
+		if i > 24 then break end
+		local p = Instance.new("WedgePart")
+		p.Size = stone.size * 1.6
+		p.Color = stone.colour
+		p.Material = Enum.Material.Slate
+		p.Anchored = true
+		p.CanCollide = false
+		p.CanQuery = false
+		p.CanTouch = false
+		p.CastShadow = false
+		local angle = i * 2.39996
+		p.CFrame = stone.frame + Vector3.new(math.cos(angle) * 5, 6 + i % 3, math.sin(angle) * 5)
+		p.Parent = folder
+		if typeof(stone.part) == "Instance" and stone.part:IsA("BasePart") then
+			stone.part.LocalTransparencyModifier = 1
+			table.insert(hidden, stone.part)
+		end
+		TweenService:Create(p, TweenInfo.new(0.65, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, i * 0.012), { CFrame = stone.frame, Size = stone.size }):Play()
+	end
+	task.delay(1.05, function()
+		local index = table.find(restorations, cleanup)
+		if index then table.remove(restorations, index) end
+		cleanup()
+	end)
+end
+
 return RebuildEffects
 ]]></string>
           </Properties>

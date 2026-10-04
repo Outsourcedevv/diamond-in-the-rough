@@ -216,8 +216,8 @@ local function addFeed(text: string, stone: number, kind: string)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextColor3 = WHITE,
 		RichText = true,
-		Text = if stone > 0
-			then string.format('%s  <font color="#%s">-%s</font>', (text:gsub("[<>&]", "")), colour:ToHex(), Format.commas(stone))
+		Text = if stone ~= 0
+			then string.format('%s  <font color="#%s">%s%s</font>', (text:gsub("[<>&]", "")), (if stone < 0 then Color3.fromRGB(100, 240, 170) else colour):ToHex(), if stone < 0 then "+" else "-", Format.commas(math.abs(stone)))
 			else (text:gsub("[<>&]", "")),
 	}, feed)
 	rounded(row, 10)
@@ -445,7 +445,8 @@ local perLikeBox = amountBox("setPerLike")
 local perFollowBox = amountBox("setPerFollow")
 local perShareBox = amountBox("setPerShare")
 
-panelLabel("GIFT RULES (rocks removed per gift)")
+panelLabel("GIFT CATALOGUE: localhost:8787 in your browser")
+panelLabel("GIFT RULES: positive removes, negative adds")
 panelOrder += 1
 local rulesList = make("Frame", {
 	LayoutOrder = panelOrder,
@@ -458,7 +459,7 @@ make("UIListLayout", { SortOrder = Enum.SortOrder.Name, Padding = UDim.new(0, 4)
 local newGiftName = panelBox("", function() end)
 newGiftName.PlaceholderText = "Gift name, e.g. Rose"
 local newGiftRocks = panelBox("", function() end)
-newGiftRocks.PlaceholderText = "Rocks removed per gift, e.g. 500"
+newGiftRocks.PlaceholderText = "500 removes; -500 adds blocks"
 panelButtons({
 	{ "Add / change gift rule", function()
 		local rocks = tonumber((string.gsub(newGiftRocks.Text, "[,%s]", "")))
@@ -491,7 +492,7 @@ local function refreshRules()
 			TextSize = 15,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = WHITE,
-			Text = string.format("%s → %s rocks", tostring(name), Format.commas(tonumber(rocks) or 0)),
+			Text = string.format("%s → %s rocks", tostring(name), (if (tonumber(rocks) or 0) < 0 then "ADD " else "REMOVE ") .. Format.commas(math.abs(tonumber(rocks) or 0))),
 			ZIndex = 12,
 		}, row)
 		local remove = make("TextButton", {
@@ -655,6 +656,8 @@ end)
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	if kind == "rebuild" and type(data) == "table" then
 		RebuildEffects.play(data)
+	elseif kind == "restore" and type(data) == "table" then
+		RebuildEffects.restore(data)
 	elseif kind == "giftEffect" and type(data) == "table" then
 		GiftEffects.play(data)
 	elseif kind == "feed" and type(data) == "table" then
@@ -770,4 +773,13 @@ RunService.Heartbeat:Connect(function(dt: number)
 	if tool == nil and onRock then
 		Request:FireServer("mine", target)
 	end
+end)
+
+-- Catalogue keybinds work in-game for the streamer, outside text entry and menus.
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed or not isAdmin or panel.Visible or UserInputService:GetFocusedTextBox() then return end
+	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
+	if not ok or type(bindings) ~= "table" then return end
+	local binding = bindings[input.KeyCode.Name]
+	if binding then send("testGift", { coins = binding.coins, count = 1, name = binding.gift }) end
 end)

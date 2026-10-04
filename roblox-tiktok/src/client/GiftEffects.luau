@@ -7,8 +7,8 @@ local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Format = require(Shared:WaitForChild("Format"))
 local GiftEffects = {}
-local colours = { Color3.fromRGB(255, 208, 112), Color3.fromRGB(255, 137, 55), Color3.fromRGB(255, 80, 66), Color3.fromRGB(126, 116, 255), Color3.fromRGB(91, 240, 255) }
-local titles = { "SPARK BURST", "SHOCKWAVE", "METEOR STRIKE", "METEOR SHOWER", "COSMIC BURST" }
+local colours = { Color3.fromRGB(255, 208, 112), Color3.fromRGB(255, 137, 55), Color3.fromRGB(255, 80, 66), Color3.fromRGB(70, 230, 255), Color3.fromRGB(156, 90, 255), Color3.fromRGB(255, 225, 120) }
+local titles = { "SPARK BURST", "SHOCKWAVE", "DOUBLE IMPACT", "ORBITAL STRIKE", "GALAXY COLLAPSE", "COSMIC BURST" }
 local active: { { folder: Folder, tier: number } } = {}
 local label: TextLabel? = nil
 local bannerSerial = 0
@@ -59,7 +59,7 @@ function GiftEffects.play(data: any)
 	folder.Parent = workspace
 	table.insert(active, { folder = folder, tier = tier })
 	Debris:AddItem(folder, 8)
-	local colour = colours[tier]
+	local colour = if data.adding then Color3.fromRGB(90, 235, 170) else colours[tier]
 	local centre: Vector3 = data.position
 	local allocated = 0
 	local function piece(shape: Enum.PartType, size: Vector3, frame: CFrame): Part?
@@ -196,19 +196,34 @@ function GiftEffects.play(data: any)
 			end)
 		end)
 	end
-	if tier <= 2 then
+	if data.adding then
+		ring(centre, 8 + tier * 2, 0)
+	elseif tier == 4 then
+		-- 500 coins: six descending energy lances close in on one impact point.
+		for i = 1, 6 do
+			task.delay((i - 1) * 0.12, function()
+				if folder.Parent == nil then return end
+				local angle = i * math.pi / 3
+				local at = centre + Vector3.new(math.cos(angle) * 6, 0, math.sin(angle) * 6)
+				local lance = piece(Enum.PartType.Cylinder, Vector3.new(45, 0.35, 0.35), CFrame.new(at + Vector3.new(0, 23, 0)) * CFrame.Angles(0, 0, math.pi / 2))
+				if lance then animate(lance, 0.45, { Size = Vector3.new(45, 2.5, 2.5), Transparency = 1 }) end
+				ring(at, 9, 0.08)
+			end)
+		end
+		task.delay(0.85, function() if folder.Parent then pulse(centre, 26) end end)
+	elseif tier <= 2 then
 		pulse(centre, 3 + tier * 3)
 		for _ = 1, tier * 3 do
 			local spark = piece(Enum.PartType.Ball, Vector3.one * 0.22, CFrame.new(centre))
 			if spark then animate(spark, random:NextNumber(0.5, 1.2), { Position = centre + Vector3.new(random:NextNumber(-7, 7), random:NextNumber(3, 12), random:NextNumber(-7, 7)), Transparency = 1 }) end
 		end
 	else
-		local count = if tier == 3 then 1 elseif tier == 4 then 2 else 3
+		local count = if tier == 3 then 2 elseif tier >= 5 then 4 else 5
 		for i = 1, count do
 			local offset = if i == 1 then Vector3.zero else Vector3.new(random:NextNumber(-10, 10), 0, random:NextNumber(-10, 10))
 			meteor(centre + offset, (i - 1) * 0.3)
 		end
-		if tier == 5 then
+		if tier >= 5 then
 			task.delay(2.3, function()
 				if folder.Parent == nil then return end
 				pulse(centre, 32)
@@ -227,7 +242,7 @@ function GiftEffects.play(data: any)
 		bannerTier = tier
 		bannerSerial += 1
 		local serial = bannerSerial
-		text.Text = titles[tier] .. "  •  " .. Format.commas(data.coins) .. " COINS\n" .. tostring(data.name or "Someone") .. " sent " .. tostring(data.gift or "a gift")
+		text.Text = (if data.adding then (if data.blocks == 0 then "MOUNTAIN FULL" elseif data.blocks == nil then "RESTORE QUEUED" else "ROCKS RESTORED") else titles[tier]) .. "  •  " .. Format.commas(data.coins) .. " COINS\n" .. tostring(data.name or "Someone") .. " sent " .. tostring(data.gift or "a gift")
 		text.TextColor3 = colour
 		if bannerTween then bannerTween:Cancel() end
 		text.TextTransparency = 0
