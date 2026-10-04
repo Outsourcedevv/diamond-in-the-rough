@@ -270,7 +270,7 @@ local function makePickaxe(): Tool
 	local tool = Instance.new("Tool")
 	tool.Name = "Pickaxe"
 	tool.CanBeDropped = false
-	tool.ToolTip = "Click rock to mine it"
+	tool.ToolTip = "Click rock to dig it"
 	tool.GripPos = Vector3.new(0, -1.3, 0)
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
@@ -295,7 +295,9 @@ local function makePickaxe(): Tool
 	head.Parent = tool
 	return tool
 end
-makePickaxe().Parent = StarterPack
+-- Digging is done with bare hands, so nobody carries a tool.
+local _ = makePickaxe
+local _ = StarterPack
 
 -- The one diamond -----------------------------------------------------------------
 local diamond = Instance.new("Part")
@@ -2060,7 +2062,7 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	end
 end)
 
--- Pickaxe: click a rock block while holding the pickaxe to mine it.
+-- Digging: click a rock block to dig it out with your hands.
 local mouse = player:GetMouse()
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed then
@@ -2070,8 +2072,9 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		return
 	end
 	local character = player.Character
+	-- Dig with bare hands: click a rock block within reach.
 	local tool = character and character:FindFirstChildOfClass("Tool")
-	if tool ~= nil and tool.Name == "Pickaxe" and mouse.Target ~= nil and mouse.Target.Name == "Stone" then
+	if tool == nil and mouse.Target ~= nil and mouse.Target.Name == "Stone" then
 		Request:FireServer("mine", mouse.Target)
 	end
 end)
@@ -2083,7 +2086,7 @@ end)
             <string name="Source"><![CDATA[--!strict
 -- First-person view with two hands in front of the camera (like the PC game).
 -- The hands follow the camera, bob while walking and swing when you click.
--- While the pickaxe is equipped the right hand holds a pickaxe model.
+-- You dig with your hands: each click punches with the other hand.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -2129,10 +2132,12 @@ function FirstPerson.start()
 	pickHead.Parent = rig
 
 	local swing = 0
+	local punchSide = 1
 	local bob = 0
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if not processed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
 			swing = 1
+			punchSide = -punchSide
 		end
 	end)
 
@@ -2149,7 +2154,6 @@ function FirstPerson.start()
 		local colours = character:FindFirstChildOfClass("BodyColors")
 		local skin = if colours then colours.RightArmColor3 else SKIN_FALLBACK
 		local tool = character:FindFirstChildOfClass("Tool")
-		local holdingPick = tool ~= nil and tool.Name == "Pickaxe"
 		-- Hide the third-person tool; the hands show their own pickaxe.
 		if tool then
 			for _, d in tool:GetDescendants() do
@@ -2165,7 +2169,7 @@ function FirstPerson.start()
 		local strike = math.sin(swing * math.pi)
 		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
 		for _, h in hands do
-			local hit = if h.side == 1 then strike else 0
+			local hit = if h.side == punchSide then strike else 0
 			local arm = base
 				* CFrame.new(h.side * 0.75, hit * 0.25, -hit * 0.4)
 				* CFrame.Angles(math.rad(10 + hit * -55), math.rad(-h.side * 8), 0)
@@ -2173,7 +2177,7 @@ function FirstPerson.start()
 			h.hand.CFrame = arm * CFrame.new(0, 0, -0.35)
 			h.hand.Color = skin
 		end
-		pickHandle.Transparency = if holdingPick then 0 else 1
+		pickHandle.Transparency = 1
 		pickHead.Transparency = pickHandle.Transparency
 		local grip = hands[2].hand.CFrame * CFrame.Angles(math.rad(-70), 0, 0)
 		pickHandle.CFrame = grip * CFrame.new(0, 0.55, 0)

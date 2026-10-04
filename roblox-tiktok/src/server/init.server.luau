@@ -114,7 +114,7 @@ local function makePickaxe(): Tool
 	local tool = Instance.new("Tool")
 	tool.Name = "Pickaxe"
 	tool.CanBeDropped = false
-	tool.ToolTip = "Click rock to mine it"
+	tool.ToolTip = "Click rock to dig it"
 	tool.GripPos = Vector3.new(0, -1.3, 0)
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
@@ -139,7 +139,9 @@ local function makePickaxe(): Tool
 	head.Parent = tool
 	return tool
 end
-makePickaxe().Parent = StarterPack
+-- Digging is done with bare hands, so nobody carries a tool.
+local _ = makePickaxe
+local _ = StarterPack
 
 -- The one diamond -----------------------------------------------------------------
 local diamond = Instance.new("Part")

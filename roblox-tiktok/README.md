@@ -9,7 +9,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ho
   - If you fall or leave, the diamond drops.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and ⭐ NEW BEST! when you beat it). Then a fresh mountain appears.
-- **Pickaxe.** You also get a pickaxe to chip at rock yourself (click a block).
+- **Dig with your hands.** Click a rock block to punch it out yourself; your hands swing in turn.
 
 ## What you need
 
