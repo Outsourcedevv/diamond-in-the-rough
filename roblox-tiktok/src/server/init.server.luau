@@ -297,11 +297,46 @@ local function teleportHome(player: Player)
 	end
 end
 
+-- Raises both arms straight up to the sky (R15 and R6 rigs) while holding.
+local raisedArms: { [Motor6D]: CFrame } = {}
+local function raiseArms(character: Model)
+	local motors: { { motor: Motor6D, up: CFrame } } = {}
+	for _, spec in { { "RightUpperArm", "RightShoulder" }, { "LeftUpperArm", "LeftShoulder" }, { "Torso", "Right Shoulder" }, { "Torso", "Left Shoulder" } } do
+		local parent = character:FindFirstChild(spec[1])
+		local motor = parent and parent:FindFirstChild(spec[2])
+		if motor ~= nil and motor:IsA("Motor6D") then
+			local up = if spec[1] == "Torso"
+				then CFrame.Angles(0, 0, math.rad(if spec[2] == "Right Shoulder" then 170 else -170))
+				else CFrame.Angles(math.rad(170), 0, 0)
+			table.insert(motors, { motor = motor, up = up })
+		end
+	end
+	for _, entry in motors do
+		local motor, up = entry.motor, entry.up
+		local original: CFrame? = raisedArms[motor]
+		if original == nil then
+			original = motor.C0
+			raisedArms[motor] = motor.C0
+		end
+		TweenService:Create(motor, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { C0 = (original :: CFrame) * up }):Play()
+	end
+end
+
+local function lowerArms()
+	for motor, original in raisedArms do
+		if motor.Parent ~= nil then
+			TweenService:Create(motor, TweenInfo.new(0.25), { C0 = original }):Play()
+		end
+	end
+	table.clear(raisedArms)
+end
+
 local function newRound()
 	if mountain ~= nil then
 		mountain:destroy()
 	end
 	holder = nil
+	lowerArms()
 	if holdWeld ~= nil then
 		holdWeld:Destroy()
 		holdWeld = nil
@@ -346,12 +381,13 @@ local function grab(player: Player)
 	diamond.Anchored = false
 	diamond.Massless = true
 	diamond.CanCollide = false
-	diamond.CFrame = head.CFrame * CFrame.new(0, 3, 0) * DIAMOND_TILT
+	diamond.CFrame = head.CFrame * CFrame.new(0, 3.4, 0) * DIAMOND_TILT
 	local weld = Instance.new("WeldConstraint")
 	weld.Part0 = head
 	weld.Part1 = diamond
 	weld.Parent = diamond
 	holdWeld = weld
+	raiseArms(character :: Model)
 	State:SetAttribute("Holder", player.DisplayName)
 	State:SetAttribute("HoldStart", workspace:GetServerTimeNow())
 	Notify:FireAllClients("grabbed", player.DisplayName)
@@ -364,6 +400,7 @@ local function drop(reason: string)
 	local where = diamond.Position
 	local lost = holder
 	holder = nil
+	lowerArms()
 	if holdWeld ~= nil then
 		holdWeld:Destroy()
 		holdWeld = nil

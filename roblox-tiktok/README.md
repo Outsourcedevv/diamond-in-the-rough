@@ -4,7 +4,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 
 - **Stone counter.** The top of the screen shows how much stone is left (250,000 to start), with a progress bar.
 - **Gifts blast the mountain.** Each TikTok coin removes 100 rocks, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. The counter always equals the rocks really left. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
-- **Hold the diamond.** When it is uncovered, a banner says "THE DIAMOND IS EXPOSED — GRAB IT!". Walk into it (or press E) to lift it above your head.
+- **Hold the diamond.** When it is uncovered, a banner says "THE DIAMOND IS EXPOSED — GRAB IT!". Walk into it (or press E) and your character raises it to the sky with both arms; in first person you see your hands lift it overhead.
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
   - If you fall or leave, the diamond drops.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
