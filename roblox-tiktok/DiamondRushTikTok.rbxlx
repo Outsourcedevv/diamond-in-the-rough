@@ -27,10 +27,13 @@
 local Config = {
 	-- Stone -----------------------------------------------------------------
 	StartingStone = 250000, -- (live) rocks in the mountain at the start of a round (one rock = one stone, max 1,500,000)
-	StonePerCoin = 100, -- stone removed per TikTok coin gifted (a Rose is 1 coin)
-	StonePerLike = 2,
-	StonePerFollow = 500,
-	StonePerShare = 300,
+	StonePerCoin = 100, -- (live) rocks removed per TikTok coin, for gifts without their own rule
+	-- (live) Gift rules: gift name -> rocks removed per gift. Change them in the
+	-- settings panel (press Y) while playing.
+	GiftRules = {} :: { [string]: number },
+	StonePerLike = 2, -- (live)
+	StonePerFollow = 500, -- (live)
+	StonePerShare = 300, -- (live)
 
 	-- The diamond -----------------------------------------------------------
 	HoldSeconds = 15, -- real seconds the diamond must be held to win
@@ -45,7 +48,8 @@ local Config = {
 	WinBackgroundColor = "#2B2140",
 
 	-- Rocks -----------------------------------------------------------------------
-	BlockSize = 1, -- size of one rock in studs (the diamond is the same size)
+	BlockSize = 0.4, -- size of one rock in studs (the diamond is the same size)
+	DigPerSecond = 100, -- rocks dug per second while the dig button is held
 
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
@@ -197,6 +201,11 @@ local settings = {
 	showWins = true,
 	best = 0,
 	startingStone = Config.StartingStone,
+	perCoin = Config.StonePerCoin,
+	perLike = Config.StonePerLike,
+	perFollow = Config.StonePerFollow,
+	perShare = Config.StonePerShare,
+	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 }
 local saved = Store.load()
 if saved then
@@ -205,6 +214,13 @@ if saved then
 			settings[key] = value
 		end
 	end
+	local rules: { [string]: number } = {}
+	for name, rocks in settings.giftRules do
+		if type(name) == "string" and type(rocks) == "number" then
+			rules[string.lower(name)] = rocks
+		end
+	end
+	settings.giftRules = rules
 end
 
 local function publishSettings()
@@ -216,6 +232,11 @@ local function publishSettings()
 	State:SetAttribute("ShowWins", settings.showWins)
 	State:SetAttribute("BestTime", settings.best)
 	State:SetAttribute("NextStartingStone", settings.startingStone)
+	State:SetAttribute("PerCoin", settings.perCoin)
+	State:SetAttribute("PerLike", settings.perLike)
+	State:SetAttribute("PerFollow", settings.perFollow)
+	State:SetAttribute("PerShare", settings.perShare)
+	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
 end
 
 local function saveSettings()
@@ -586,17 +607,18 @@ local function onTikTok(event: TikTokFeed.Event)
 	if event.type == "gift" then
 		local count = math.max(1, math.floor(event.count or 1))
 		local coins = math.max(1, event.coins or 1)
-		amount = coins * count * Config.StonePerCoin
+		local rule = settings.giftRules[string.lower(event.gift or "")]
+		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
 		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
-		amount = likes * Config.StonePerLike
+		amount = likes * settings.perLike
 		text = string.format("%s liked x%d", who, likes)
 	elseif event.type == "follow" then
-		amount = Config.StonePerFollow
+		amount = settings.perFollow
 		text = who .. " followed"
 	elseif event.type == "share" then
-		amount = Config.StonePerShare
+		amount = settings.perShare
 		text = who .. " shared the live"
 	end
 	if amount <= 0 then
@@ -671,6 +693,19 @@ local function applySetting(player: Player, action: string, value: any)
 		settings.showWins = value
 	elseif action == "setStartingStone" and type(value) == "number" then
 		settings.startingStone = math.clamp(math.floor(value), 100, 1500000)
+	elseif (action == "setPerCoin" or action == "setPerLike" or action == "setPerFollow" or action == "setPerShare") and type(value) == "number" then
+		local field = ({ setPerCoin = "perCoin", setPerLike = "perLike", setPerFollow = "perFollow", setPerShare = "perShare" })[action]
+		settings[field] = math.clamp(math.floor(value), 0, 1500000)
+	elseif action == "setGiftRule" and type(value) == "table" and type(value.gift) == "string" then
+		local name = string.lower((string.gsub(string.sub(value.gift, 1, 40), "^%s*(.-)%s*$", "%1")))
+		if name == "" then
+			return
+		end
+		if type(value.rocks) == "number" then
+			settings.giftRules[name] = math.clamp(math.floor(value.rocks), 0, 1500000)
+		else
+			settings.giftRules[name] = nil
+		end
 	elseif action == "resetBest" then
 		settings.best = 0
 	elseif action == "newRound" then
@@ -694,12 +729,16 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		return
 	end
 	if action == "mine" then
+		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
+		-- DigPerSecond allows for the time since the last dig.
 		local current = mountain
 		if current == nil or phase == "Won" or typeof(value) ~= "Instance" then
 			return
 		end
 		local now = os.clock()
-		if now - (mineCooldown[player] or 0) < 0.18 then
+		local since = now - (mineCooldown[player] or 0)
+		local allowed = math.min(math.floor(since * Config.DigPerSecond), math.ceil(Config.DigPerSecond / 4))
+		if allowed < 1 then
 			return
 		end
 		local key = current:keyForPart(value)
@@ -712,7 +751,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 			return
 		end
 		mineCooldown[player] = now
-		if current:mine(key) then
+		if current:dig(key, allowed) > 0 then
 			refreshStone()
 			settleDiamond()
 		end
@@ -1357,6 +1396,16 @@ function Mountain.blast(self: Mountain, count: number): Vector3?
 	return centre
 end
 
+-- Digs up to `count` rocks by hand around an uncovered rock. Returns how many broke.
+function Mountain.dig(self: Mountain, key: number, count: number): number
+	if count <= 0 or not self:isExposed(key) then
+		return 0
+	end
+	local keys = self.grid:blast(count, key)
+	self:_settle(keys, self:keyPosition(key))
+	return #keys
+end
+
 -- Digs out one uncovered rock by hand. Returns true when it broke.
 function Mountain.mine(self: Mountain, key: number): boolean
 	if not self:isExposed(key) then
@@ -1745,19 +1794,6 @@ rounded(winsBox, 16)
 make("UIPadding", { PaddingLeft = UDim.new(0, 22), PaddingRight = UDim.new(0, 22) }, winsBox)
 local winsStroke = make("UIStroke", { Thickness = 3, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
 
-local gear = make("TextButton", {
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -12, 0, 88),
-	Size = UDim2.fromOffset(150, 34),
-	BackgroundColor3 = PANEL,
-	BackgroundTransparency = 0.15,
-	Font = FONT,
-	TextSize = 18,
-	TextColor3 = WHITE,
-	Text = "⚙ Settings",
-	Visible = false,
-}, gui)
-rounded(gear, 10)
 
 -- Banner, hold countdown and status ----------------------------------------------------
 local banner = make("TextLabel", {
@@ -1922,8 +1958,8 @@ end
 -- Settings panel (owner / admins only) ------------------------------------------------------
 local panel = make("ScrollingFrame", {
 	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -12, 0, 128),
-	Size = UDim2.fromOffset(330, 460),
+	Position = UDim2.new(1, -12, 0, 92),
+	Size = UDim2.fromOffset(340, 520),
 	CanvasSize = UDim2.fromOffset(0, 0),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ScrollBarThickness = 6,
@@ -2050,6 +2086,95 @@ panelButtons({
 	{ "New round", function() send("newRound") end },
 	{ "Reset best time", function() send("resetBest") end },
 })
+panelLabel("ROCKS PER COIN (gifts without a rule)")
+local perCoinBox = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[,%s]", "")))
+	if number then
+		send("setPerCoin", number)
+	end
+end)
+panelLabel("ROCKS PER LIKE / FOLLOW / SHARE")
+local function amountBox(action: string): TextBox
+	return panelBox("", function(text)
+		local number = tonumber((string.gsub(text, "[^%d]", "")))
+		if number then
+			send(action, number)
+		end
+	end)
+end
+local perLikeBox = amountBox("setPerLike")
+local perFollowBox = amountBox("setPerFollow")
+local perShareBox = amountBox("setPerShare")
+
+panelLabel("GIFT RULES (rocks removed per gift)")
+panelOrder += 1
+local rulesList = make("Frame", {
+	LayoutOrder = panelOrder,
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	ZIndex = 11,
+}, panel)
+make("UIListLayout", { SortOrder = Enum.SortOrder.Name, Padding = UDim.new(0, 4) }, rulesList)
+local newGiftName = panelBox("", function() end)
+newGiftName.PlaceholderText = "Gift name, e.g. Rose"
+local newGiftRocks = panelBox("", function() end)
+newGiftRocks.PlaceholderText = "Rocks removed per gift, e.g. 500"
+panelButtons({
+	{ "Add / change gift rule", function()
+		local rocks = tonumber((string.gsub(newGiftRocks.Text, "[,%s]", "")))
+		if newGiftName.Text ~= "" and rocks then
+			send("setGiftRule", { gift = newGiftName.Text, rocks = rocks })
+			newGiftName.Text = ""
+			newGiftRocks.Text = ""
+		end
+	end },
+})
+
+local function refreshRules()
+	for _, child in rulesList:GetChildren() do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+	local ok, rules = pcall(function()
+		return game:GetService("HttpService"):JSONDecode(attr("GiftRules", "{}"))
+	end)
+	if not ok or type(rules) ~= "table" then
+		return
+	end
+	for name, rocks in rules do
+		local row = make("Frame", { Name = tostring(name), Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, rulesList)
+		make("TextLabel", {
+			Size = UDim2.new(1, -40, 1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 15,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextColor3 = WHITE,
+			Text = string.format("%s → %s rocks", tostring(name), Format.commas(tonumber(rocks) or 0)),
+			ZIndex = 12,
+		}, row)
+		local remove = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.fromOffset(34, 30),
+			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
+			Font = FONT,
+			TextSize = 16,
+			TextColor3 = WHITE,
+			Text = "✕",
+			ZIndex = 12,
+		}, row)
+		rounded(remove, 8)
+		remove.Activated:Connect(function()
+			send("setGiftRule", { gift = tostring(name) })
+		end)
+	end
+end
+State:GetAttributeChangedSignal("GiftRules"):Connect(refreshRules)
+refreshRules()
+
 panelLabel("TEST GIFTS (no TikTok needed)")
 panelButtons({
 	{ "Rose 1", function() send("testGift", { coins = 1, count = 1, name = "Rose" }) end },
@@ -2067,18 +2192,35 @@ local function refreshPanelFields()
 	textColourBox.Text = attr("WinTextColor", "#FFFFFF")
 	backgroundBox.Text = attr("WinBackgroundColor", "#2B2140")
 	stoneBoxInput.Text = Format.commas(attr("NextStartingStone", Config.StartingStone))
+	perCoinBox.Text = tostring(attr("PerCoin", Config.StonePerCoin))
+	perLikeBox.Text = "Like: " .. tostring(attr("PerLike", Config.StonePerLike))
+	perFollowBox.Text = "Follow: " .. tostring(attr("PerFollow", Config.StonePerFollow))
+	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
 end
 
-gear.Activated:Connect(function()
+-- The settings panel is hidden: the owner presses Y to open or close it.
+local isAdmin = false
+UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+	if processed or input.KeyCode ~= Enum.KeyCode.Y or not isAdmin then
+		return
+	end
 	panel.Visible = not panel.Visible
 	if panel.Visible then
 		refreshPanelFields()
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	end
+end)
+RunService.RenderStepped:Connect(function()
+	-- First person locks the mouse; free it while the panel is open.
+	if panel.Visible then
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		UserInputService.MouseIconEnabled = true
 	end
 end)
 
 local function refreshAdmin()
-	gear.Visible = player:GetAttribute("DiamondRushAdmin") == true
-	if not gear.Visible then
+	isAdmin = player:GetAttribute("DiamondRushAdmin") == true
+	if not isAdmin then
 		panel.Visible = false
 	end
 end
@@ -2155,17 +2297,35 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	end
 end)
 
--- Digging: click a rock block to dig it out with your hands.
+-- Digging: hold the dig button (left mouse / touch) and your hands tear
+-- through the rock you aim at, about DigPerSecond rocks a second.
 local mouse = player:GetMouse()
+local digging = false
+local digClock = 0
+local function isDigInput(input: InputObject): boolean
+	return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
+end
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-	if processed then
+	if not processed and isDigInput(input) then
+		digging = true
+		digClock = 1
+	end
+end)
+UserInputService.InputEnded:Connect(function(input: InputObject)
+	if isDigInput(input) then
+		digging = false
+	end
+end)
+RunService.Heartbeat:Connect(function(dt: number)
+	if not digging or panel.Visible then
 		return
 	end
-	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+	digClock += dt
+	if digClock < 0.1 then
 		return
 	end
+	digClock = 0
 	local character = player.Character
-	-- Dig with bare hands: click a rock block within reach.
 	local tool = character and character:FindFirstChildOfClass("Tool")
 	if tool == nil and mouse.Target ~= nil and mouse.Target.Name == "Stone" then
 		Request:FireServer("mine", mouse.Target)
@@ -2227,10 +2387,17 @@ function FirstPerson.start()
 	local swing = 0
 	local punchSide = 1
 	local bob = 0
+	local held = false
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if not processed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+			held = true
 			swing = 1
 			punchSide = -punchSide
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			held = false
 		end
 	end)
 
@@ -2258,7 +2425,12 @@ function FirstPerson.start()
 		local moving = humanoid.MoveDirection.Magnitude > 0.1 and humanoid.FloorMaterial ~= Enum.Material.Air
 		bob += dt * (if moving then 9 else 2)
 		local sway = if moving then 0.05 else 0.015
-		swing = math.max(0, swing - dt * 4)
+		swing = math.max(0, swing - dt * 7)
+		-- Holding dig keeps both hands tearing at the rock in turn.
+		if held and swing <= 0 then
+			swing = 1
+			punchSide = -punchSide
+		end
 		local strike = math.sin(swing * math.pi)
 		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
 		for _, h in hands do

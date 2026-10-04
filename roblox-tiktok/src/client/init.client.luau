@@ -128,19 +128,6 @@ rounded(winsBox, 16)
 make("UIPadding", { PaddingLeft = UDim.new(0, 22), PaddingRight = UDim.new(0, 22) }, winsBox)
 local winsStroke = make("UIStroke", { Thickness = 3, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
 
-local gear = make("TextButton", {
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -12, 0, 88),
-	Size = UDim2.fromOffset(150, 34),
-	BackgroundColor3 = PANEL,
-	BackgroundTransparency = 0.15,
-	Font = FONT,
-	TextSize = 18,
-	TextColor3 = WHITE,
-	Text = "⚙ Settings",
-	Visible = false,
-}, gui)
-rounded(gear, 10)
 
 -- Banner, hold countdown and status ----------------------------------------------------
 local banner = make("TextLabel", {
@@ -305,8 +292,8 @@ end
 -- Settings panel (owner / admins only) ------------------------------------------------------
 local panel = make("ScrollingFrame", {
 	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -12, 0, 128),
-	Size = UDim2.fromOffset(330, 460),
+	Position = UDim2.new(1, -12, 0, 92),
+	Size = UDim2.fromOffset(340, 520),
 	CanvasSize = UDim2.fromOffset(0, 0),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ScrollBarThickness = 6,
@@ -433,6 +420,95 @@ panelButtons({
 	{ "New round", function() send("newRound") end },
 	{ "Reset best time", function() send("resetBest") end },
 })
+panelLabel("ROCKS PER COIN (gifts without a rule)")
+local perCoinBox = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[,%s]", "")))
+	if number then
+		send("setPerCoin", number)
+	end
+end)
+panelLabel("ROCKS PER LIKE / FOLLOW / SHARE")
+local function amountBox(action: string): TextBox
+	return panelBox("", function(text)
+		local number = tonumber((string.gsub(text, "[^%d]", "")))
+		if number then
+			send(action, number)
+		end
+	end)
+end
+local perLikeBox = amountBox("setPerLike")
+local perFollowBox = amountBox("setPerFollow")
+local perShareBox = amountBox("setPerShare")
+
+panelLabel("GIFT RULES (rocks removed per gift)")
+panelOrder += 1
+local rulesList = make("Frame", {
+	LayoutOrder = panelOrder,
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	ZIndex = 11,
+}, panel)
+make("UIListLayout", { SortOrder = Enum.SortOrder.Name, Padding = UDim.new(0, 4) }, rulesList)
+local newGiftName = panelBox("", function() end)
+newGiftName.PlaceholderText = "Gift name, e.g. Rose"
+local newGiftRocks = panelBox("", function() end)
+newGiftRocks.PlaceholderText = "Rocks removed per gift, e.g. 500"
+panelButtons({
+	{ "Add / change gift rule", function()
+		local rocks = tonumber((string.gsub(newGiftRocks.Text, "[,%s]", "")))
+		if newGiftName.Text ~= "" and rocks then
+			send("setGiftRule", { gift = newGiftName.Text, rocks = rocks })
+			newGiftName.Text = ""
+			newGiftRocks.Text = ""
+		end
+	end },
+})
+
+local function refreshRules()
+	for _, child in rulesList:GetChildren() do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+	local ok, rules = pcall(function()
+		return game:GetService("HttpService"):JSONDecode(attr("GiftRules", "{}"))
+	end)
+	if not ok or type(rules) ~= "table" then
+		return
+	end
+	for name, rocks in rules do
+		local row = make("Frame", { Name = tostring(name), Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, rulesList)
+		make("TextLabel", {
+			Size = UDim2.new(1, -40, 1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 15,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextColor3 = WHITE,
+			Text = string.format("%s → %s rocks", tostring(name), Format.commas(tonumber(rocks) or 0)),
+			ZIndex = 12,
+		}, row)
+		local remove = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.fromOffset(34, 30),
+			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
+			Font = FONT,
+			TextSize = 16,
+			TextColor3 = WHITE,
+			Text = "✕",
+			ZIndex = 12,
+		}, row)
+		rounded(remove, 8)
+		remove.Activated:Connect(function()
+			send("setGiftRule", { gift = tostring(name) })
+		end)
+	end
+end
+State:GetAttributeChangedSignal("GiftRules"):Connect(refreshRules)
+refreshRules()
+
 panelLabel("TEST GIFTS (no TikTok needed)")
 panelButtons({
 	{ "Rose 1", function() send("testGift", { coins = 1, count = 1, name = "Rose" }) end },
@@ -450,18 +526,35 @@ local function refreshPanelFields()
 	textColourBox.Text = attr("WinTextColor", "#FFFFFF")
 	backgroundBox.Text = attr("WinBackgroundColor", "#2B2140")
 	stoneBoxInput.Text = Format.commas(attr("NextStartingStone", Config.StartingStone))
+	perCoinBox.Text = tostring(attr("PerCoin", Config.StonePerCoin))
+	perLikeBox.Text = "Like: " .. tostring(attr("PerLike", Config.StonePerLike))
+	perFollowBox.Text = "Follow: " .. tostring(attr("PerFollow", Config.StonePerFollow))
+	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
 end
 
-gear.Activated:Connect(function()
+-- The settings panel is hidden: the owner presses Y to open or close it.
+local isAdmin = false
+UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+	if processed or input.KeyCode ~= Enum.KeyCode.Y or not isAdmin then
+		return
+	end
 	panel.Visible = not panel.Visible
 	if panel.Visible then
 		refreshPanelFields()
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	end
+end)
+RunService.RenderStepped:Connect(function()
+	-- First person locks the mouse; free it while the panel is open.
+	if panel.Visible then
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		UserInputService.MouseIconEnabled = true
 	end
 end)
 
 local function refreshAdmin()
-	gear.Visible = player:GetAttribute("DiamondRushAdmin") == true
-	if not gear.Visible then
+	isAdmin = player:GetAttribute("DiamondRushAdmin") == true
+	if not isAdmin then
 		panel.Visible = false
 	end
 end
@@ -538,17 +631,35 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	end
 end)
 
--- Digging: click a rock block to dig it out with your hands.
+-- Digging: hold the dig button (left mouse / touch) and your hands tear
+-- through the rock you aim at, about DigPerSecond rocks a second.
 local mouse = player:GetMouse()
+local digging = false
+local digClock = 0
+local function isDigInput(input: InputObject): boolean
+	return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
+end
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-	if processed then
+	if not processed and isDigInput(input) then
+		digging = true
+		digClock = 1
+	end
+end)
+UserInputService.InputEnded:Connect(function(input: InputObject)
+	if isDigInput(input) then
+		digging = false
+	end
+end)
+RunService.Heartbeat:Connect(function(dt: number)
+	if not digging or panel.Visible then
 		return
 	end
-	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+	digClock += dt
+	if digClock < 0.1 then
 		return
 	end
+	digClock = 0
 	local character = player.Character
-	-- Dig with bare hands: click a rock block within reach.
 	local tool = character and character:FindFirstChildOfClass("Tool")
 	if tool == nil and mouse.Target ~= nil and mouse.Target.Name == "Stone" then
 		Request:FireServer("mine", mouse.Target)

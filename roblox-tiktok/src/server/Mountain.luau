@@ -191,6 +191,16 @@ function Mountain.blast(self: Mountain, count: number): Vector3?
 	return centre
 end
 
+-- Digs up to `count` rocks by hand around an uncovered rock. Returns how many broke.
+function Mountain.dig(self: Mountain, key: number, count: number): number
+	if count <= 0 or not self:isExposed(key) then
+		return 0
+	end
+	local keys = self.grid:blast(count, key)
+	self:_settle(keys, self:keyPosition(key))
+	return #keys
+end
+
 -- Digs out one uncovered rock by hand. Returns true when it broke.
 function Mountain.mine(self: Mountain, key: number): boolean
 	if not self:isExposed(key) then

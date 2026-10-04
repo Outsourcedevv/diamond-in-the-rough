@@ -4,10 +4,13 @@
 local Config = {
 	-- Stone -----------------------------------------------------------------
 	StartingStone = 250000, -- (live) rocks in the mountain at the start of a round (one rock = one stone, max 1,500,000)
-	StonePerCoin = 100, -- stone removed per TikTok coin gifted (a Rose is 1 coin)
-	StonePerLike = 2,
-	StonePerFollow = 500,
-	StonePerShare = 300,
+	StonePerCoin = 100, -- (live) rocks removed per TikTok coin, for gifts without their own rule
+	-- (live) Gift rules: gift name -> rocks removed per gift. Change them in the
+	-- settings panel (press Y) while playing.
+	GiftRules = {} :: { [string]: number },
+	StonePerLike = 2, -- (live)
+	StonePerFollow = 500, -- (live)
+	StonePerShare = 300, -- (live)
 
 	-- The diamond -----------------------------------------------------------
 	HoldSeconds = 15, -- real seconds the diamond must be held to win
@@ -22,7 +25,8 @@ local Config = {
 	WinBackgroundColor = "#2B2140",
 
 	-- Rocks -----------------------------------------------------------------------
-	BlockSize = 1, -- size of one rock in studs (the diamond is the same size)
+	BlockSize = 0.4, -- size of one rock in studs (the diamond is the same size)
+	DigPerSecond = 100, -- rocks dug per second while the dig button is held
 
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)

@@ -43,6 +43,11 @@ local settings = {
 	showWins = true,
 	best = 0,
 	startingStone = Config.StartingStone,
+	perCoin = Config.StonePerCoin,
+	perLike = Config.StonePerLike,
+	perFollow = Config.StonePerFollow,
+	perShare = Config.StonePerShare,
+	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 }
 local saved = Store.load()
 if saved then
@@ -51,6 +56,13 @@ if saved then
 			settings[key] = value
 		end
 	end
+	local rules: { [string]: number } = {}
+	for name, rocks in settings.giftRules do
+		if type(name) == "string" and type(rocks) == "number" then
+			rules[string.lower(name)] = rocks
+		end
+	end
+	settings.giftRules = rules
 end
 
 local function publishSettings()
@@ -62,6 +74,11 @@ local function publishSettings()
 	State:SetAttribute("ShowWins", settings.showWins)
 	State:SetAttribute("BestTime", settings.best)
 	State:SetAttribute("NextStartingStone", settings.startingStone)
+	State:SetAttribute("PerCoin", settings.perCoin)
+	State:SetAttribute("PerLike", settings.perLike)
+	State:SetAttribute("PerFollow", settings.perFollow)
+	State:SetAttribute("PerShare", settings.perShare)
+	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
 end
 
 local function saveSettings()
@@ -432,17 +449,18 @@ local function onTikTok(event: TikTokFeed.Event)
 	if event.type == "gift" then
 		local count = math.max(1, math.floor(event.count or 1))
 		local coins = math.max(1, event.coins or 1)
-		amount = coins * count * Config.StonePerCoin
+		local rule = settings.giftRules[string.lower(event.gift or "")]
+		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
 		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
-		amount = likes * Config.StonePerLike
+		amount = likes * settings.perLike
 		text = string.format("%s liked x%d", who, likes)
 	elseif event.type == "follow" then
-		amount = Config.StonePerFollow
+		amount = settings.perFollow
 		text = who .. " followed"
 	elseif event.type == "share" then
-		amount = Config.StonePerShare
+		amount = settings.perShare
 		text = who .. " shared the live"
 	end
 	if amount <= 0 then
@@ -517,6 +535,19 @@ local function applySetting(player: Player, action: string, value: any)
 		settings.showWins = value
 	elseif action == "setStartingStone" and type(value) == "number" then
 		settings.startingStone = math.clamp(math.floor(value), 100, 1500000)
+	elseif (action == "setPerCoin" or action == "setPerLike" or action == "setPerFollow" or action == "setPerShare") and type(value) == "number" then
+		local field = ({ setPerCoin = "perCoin", setPerLike = "perLike", setPerFollow = "perFollow", setPerShare = "perShare" })[action]
+		settings[field] = math.clamp(math.floor(value), 0, 1500000)
+	elseif action == "setGiftRule" and type(value) == "table" and type(value.gift) == "string" then
+		local name = string.lower((string.gsub(string.sub(value.gift, 1, 40), "^%s*(.-)%s*$", "%1")))
+		if name == "" then
+			return
+		end
+		if type(value.rocks) == "number" then
+			settings.giftRules[name] = math.clamp(math.floor(value.rocks), 0, 1500000)
+		else
+			settings.giftRules[name] = nil
+		end
 	elseif action == "resetBest" then
 		settings.best = 0
 	elseif action == "newRound" then
@@ -540,12 +571,16 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		return
 	end
 	if action == "mine" then
+		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
+		-- DigPerSecond allows for the time since the last dig.
 		local current = mountain
 		if current == nil or phase == "Won" or typeof(value) ~= "Instance" then
 			return
 		end
 		local now = os.clock()
-		if now - (mineCooldown[player] or 0) < 0.18 then
+		local since = now - (mineCooldown[player] or 0)
+		local allowed = math.min(math.floor(since * Config.DigPerSecond), math.ceil(Config.DigPerSecond / 4))
+		if allowed < 1 then
 			return
 		end
 		local key = current:keyForPart(value)
@@ -558,7 +593,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 			return
 		end
 		mineCooldown[player] = now
-		if current:mine(key) then
+		if current:dig(key, allowed) > 0 then
 			refreshStone()
 			settleDiamond()
 		end

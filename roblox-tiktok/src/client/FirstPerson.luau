@@ -49,10 +49,17 @@ function FirstPerson.start()
 	local swing = 0
 	local punchSide = 1
 	local bob = 0
+	local held = false
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if not processed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+			held = true
 			swing = 1
 			punchSide = -punchSide
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			held = false
 		end
 	end)
 
@@ -80,7 +87,12 @@ function FirstPerson.start()
 		local moving = humanoid.MoveDirection.Magnitude > 0.1 and humanoid.FloorMaterial ~= Enum.Material.Air
 		bob += dt * (if moving then 9 else 2)
 		local sway = if moving then 0.05 else 0.015
-		swing = math.max(0, swing - dt * 4)
+		swing = math.max(0, swing - dt * 7)
+		-- Holding dig keeps both hands tearing at the rock in turn.
+		if held and swing <= 0 then
+			swing = 1
+			punchSide = -punchSide
+		end
 		local strike = math.sin(swing * math.pi)
 		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
 		for _, h in hands do
