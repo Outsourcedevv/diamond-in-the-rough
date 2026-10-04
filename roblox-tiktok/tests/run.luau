@@ -3,6 +3,7 @@ local HoldTimer = require("../src/shared/HoldTimer")
 local Format = require("../src/shared/Format")
 local Grid = require("../src/server/Grid")
 local RockStyle = require("../src/server/RockStyle")
+local GiftTier = require("../src/shared/GiftTier")
 
 local passed, failed = 0, 0
 local function check(condition: boolean, message: string)
@@ -13,6 +14,12 @@ local function check(condition: boolean, message: string)
 		print("FAIL " .. message)
 	end
 end
+
+-- Coin tiers apply to total gift value, independent of custom rock-removal rules.
+for _, case in { {1, 1}, {9, 1}, {10, 2}, {99, 2}, {100, 3}, {999, 3}, {1000, 4}, {9999, 4}, {10000, 5}, {34999, 5}, {1000000000, 5} } do
+	check(GiftTier.forCoins(case[1]) == case[2], "gift tier boundary " .. case[1])
+end
+check(GiftTier.forCoins(30 * 40) == 4, "gift combos scale by their total coin value")
 
 -- Hold countdown: 15 real seconds shown as 10 -> 0, slowing near the end.
 check(HoldTimer.display(0, 15, 10, 0.6) == 10, "countdown starts at 10")

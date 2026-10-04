@@ -243,7 +243,7 @@ local function reveal()
 end
 
 -- One rock is one stone: blast exactly that many rocks.
-local function applyStone(amount: number)
+local function applyStone(amount: number): Vector3?
 	amount = math.floor(amount)
 	if amount <= 0 then
 		return
@@ -267,6 +267,7 @@ local function applyStone(amount: number)
 	end
 	refreshStone()
 	settleDiamond()
+	return centre
 end
 
 local function teleportHome(player: Player)
@@ -492,10 +493,16 @@ local function onTikTok(event: TikTokFeed.Event)
 		amount = settings.perShare
 		text = who .. " shared the live"
 	end
-	if amount <= 0 then
-		return
+	if amount <= 0 and event.type ~= "gift" then return end
+	local centre = applyStone(amount)
+	if event.type == "gift" then
+		Notify:FireAllClients("giftEffect", {
+			coins = math.max(1, event.coins or 1) * math.max(1, math.floor(event.count or 1)),
+			position = centre or Vector3.new(0, 8, 0),
+			name = who,
+			gift = event.gift or "Gift",
+		})
 	end
-	applyStone(amount)
 	Notify:FireAllClients("feed", { text = text, stone = amount, kind = event.type })
 end
 

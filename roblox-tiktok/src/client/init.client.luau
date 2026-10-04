@@ -17,6 +17,8 @@ local State = ReplicatedStorage:WaitForChild("DiamondRushState") :: Configuratio
 local Remotes = ReplicatedStorage:WaitForChild("DiamondRushRemotes")
 local Notify = Remotes:WaitForChild("Notify") :: RemoteEvent
 local Request = Remotes:WaitForChild("Request") :: RemoteEvent
+local GiftEffects = require(script:WaitForChild("GiftEffects"))
+GiftEffects.start(player:WaitForChild("PlayerGui"))
 
 local FONT = Enum.Font.FredokaOne
 local WHITE = Color3.fromRGB(255, 255, 255)
@@ -627,7 +629,9 @@ RunService.RenderStepped:Connect(function(dt: number)
 end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
-	if kind == "feed" and type(data) == "table" then
+	if kind == "giftEffect" and type(data) == "table" then
+		GiftEffects.play(data)
+	elseif kind == "feed" and type(data) == "table" then
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
 	elseif kind == "win" and type(data) == "table" then
 		showWin(data)
