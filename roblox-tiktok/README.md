@@ -11,6 +11,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 - **Scenery.** Rolling hills, a ring of snowy peaks, a lake, a pine forest, boulders, clouds and a campfire at the camp.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and ⭐ NEW BEST! when you beat it). Then a fresh mountain appears.
+- **Aim at stone.** A small dot marks the centre of the screen. The surface rock directly under it gets a white outline; the outline follows the same target used for digging and disappears when aiming away or opening settings.
 - **Dig with your hands.** First-person view with two hands: hold the left mouse button on the mountain and your hands alternate between reaching, scooping and pulling rubble back, removing about 100 rocks a second. Fingers curl during the scoop; the animation pauses when you aim away from reachable stone.
 
 ## What you need

@@ -638,7 +638,61 @@ end)
 
 -- Digging: hold the dig button (left mouse / touch) and your hands tear
 -- through the rock you aim at, about DigPerSecond rocks a second.
-local mouse = player:GetMouse()
+-- A separate full-viewport layer keeps the dot aligned with the camera ray,
+-- regardless of the HUD inset or the screen's aspect ratio.
+local aimGui = make("ScreenGui", {
+	Name = "DiamondRushAim",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 5,
+}, player:WaitForChild("PlayerGui"))
+local aimDot = make("Frame", {
+	Name = "Dot",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(5, 5),
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
+	Active = false,
+}, aimGui)
+rounded(aimDot, 5)
+outline(aimDot, 1)
+local rockOutline = make("Highlight", {
+	Name = "AimedRock",
+	FillTransparency = 1,
+	OutlineColor = WHITE,
+	OutlineTransparency = 0.15,
+	DepthMode = Enum.HighlightDepthMode.Occluded,
+	Enabled = false,
+}, workspace)
+local aimTarget: BasePart? = nil
+local aimParams = RaycastParams.new()
+aimParams.FilterType = Enum.RaycastFilterType.Exclude
+RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value + 3, function()
+	local camera = workspace.CurrentCamera
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local phase = attr("Phase", "Digging")
+	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
+		and not panel.Visible and phase ~= "Won"
+		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
+	aimDot.Visible = active
+	UserInputService.MouseIconEnabled = not active
+	aimTarget = nil
+	if active and camera then
+		aimParams.FilterDescendantsInstances = if character then { character } else {}
+		local viewport = camera.ViewportSize
+		local ray = camera:ViewportPointToRay(viewport.X / 2, viewport.Y / 2)
+		local result = workspace:Raycast(ray.Origin, ray.Direction * 500, aimParams)
+		if result then aimTarget = result.Instance end
+	end
+	local mountain = workspace:FindFirstChild("Mountain")
+	local target = aimTarget
+	local stone = target ~= nil and mountain ~= nil and target:IsDescendantOf(mountain)
+		and target.Name == "Stone" and not target:GetAttribute("BackingRock")
+	rockOutline.Adornee = if stone then target else nil
+	rockOutline.Enabled = stone
+end)
 local digging = false
 local digClock = 0
 local function isDigInput(input: InputObject): boolean
@@ -647,7 +701,7 @@ end
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if not processed and isDigInput(input) then
 		-- A fresh click on the diamond goes to its ClickDetector, never to digging.
-		if mouse.Target == workspace:FindFirstChild("Diamond") then
+		if aimTarget == workspace:FindFirstChild("Diamond") then
 			digging = false
 			return
 		end
@@ -666,7 +720,7 @@ end)
 RunService.Heartbeat:Connect(function(dt: number)
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-	local target = mouse.Target
+	local target = aimTarget
 	local allowed = digging and not panel.Visible and phase ~= "Won"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	local onRock = allowed and root ~= nil and root:IsA("BasePart")
@@ -683,7 +737,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 	digClock = 0
 	local character = player.Character
 	local tool = character and character:FindFirstChildOfClass("Tool")
-	if tool == nil and mouse.Target ~= nil and mouse.Target.Name == "Stone" then
-		Request:FireServer("mine", mouse.Target)
+	if tool == nil and onRock then
+		Request:FireServer("mine", target)
 	end
 end)
