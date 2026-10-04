@@ -1,12 +1,13 @@
 # Diamond Rush: TikTok Live Roblox game
 
-A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 tiny rocks** (one rock is one stone) is shown counting down at the top of the screen. Every gift, like, follow and share from your viewers blasts stone out of it. Somewhere inside is **one diamond**. Once it is exposed, grab it and **hold it for 15 seconds** to win.
+A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 tiny rocks** (one rock is one stone; each rock is a small rounded pebble) is shown counting down at the top of the screen. Every gift, like, follow and share from your viewers blasts stone out of it. Somewhere inside is **one diamond**. Once it is exposed, grab it and **hold it for 15 seconds** to win.
 
 - **Stone counter.** The top of the screen shows how much stone is left (250,000 to start), with a progress bar.
 - **Gifts blast the mountain.** Each TikTok coin removes 100 rocks, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. The counter always equals the rocks really left. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
-- **Hold the diamond.** When it is uncovered, a banner says "THE DIAMOND IS EXPOSED — GRAB IT!". Walk into it (or press E) and your character raises it to the sky with both arms; in first person you see your hands lift it overhead.
+- **Hold the diamond.** When it is uncovered, a banner says "THE DIAMOND IS EXPOSED — GRAB IT!". Walk into it (or press E) and your character holds it up to the sky with one arm and your view locks, looking up at it, until the countdown ends.
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
   - If you fall or leave, the diamond drops.
+- **Scenery.** Rolling hills, a ring of snowy peaks, a lake, a pine forest, boulders, clouds and a campfire at the camp.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and ⭐ NEW BEST! when you beat it). Then a fresh mountain appears.
 - **Dig with your hands.** First-person view with two hands: hold the left mouse button on the mountain and your hands tear out about 100 rocks a second.

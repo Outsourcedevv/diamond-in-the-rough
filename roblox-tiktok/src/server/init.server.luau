@@ -95,15 +95,6 @@ local blockSize = Config.BlockSize
 -- A cone of about this many rocks reaches out roughly this far.
 local spawnDistance = math.ceil((math.min(Config.StartingStone, 1500000) * 1.06 / 0.94) ^ (1 / 3)) * blockSize + 30
 
-local ground = Instance.new("Part")
-ground.Name = "Ground"
-ground.Anchored = true
-ground.Size = Vector3.new(800, 4, 800)
-ground.Position = Vector3.new(0, -2, 0)
-ground.Material = Enum.Material.Grass
-ground.Color = Color3.fromRGB(96, 150, 78)
-ground.TopSurface = Enum.SurfaceType.Smooth
-ground.Parent = workspace
 
 local spawn = Instance.new("SpawnLocation")
 spawn.Name = "Camp"
@@ -115,6 +106,9 @@ spawn.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, spawnDistance), Vector3.new(0, 
 spawn.Material = Enum.Material.WoodPlanks
 spawn.Color = Color3.fromRGB(150, 110, 70)
 spawn.Parent = workspace
+
+-- Hills, distant peaks, a lake, a pine forest, boulders and a campfire.
+require(script.Scenery).build(spawnDistance - 30, spawn.Position)
 
 Lighting.ClockTime = 14.5
 Lighting.Brightness = 2.2
@@ -297,11 +291,12 @@ local function teleportHome(player: Player)
 	end
 end
 
--- Raises both arms straight up to the sky (R15 and R6 rigs) while holding.
+-- Raises the right arm straight up to the sky (R15 and R6 rigs) while holding.
 local raisedArms: { [Motor6D]: CFrame } = {}
 local function raiseArms(character: Model)
 	local motors: { { motor: Motor6D, up: CFrame } } = {}
-	for _, spec in { { "RightUpperArm", "RightShoulder" }, { "LeftUpperArm", "LeftShoulder" }, { "Torso", "Right Shoulder" }, { "Torso", "Left Shoulder" } } do
+	-- One arm up: only the right shoulder lifts.
+	for _, spec in { { "RightUpperArm", "RightShoulder" }, { "Torso", "Right Shoulder" } } do
 		local parent = character:FindFirstChild(spec[1])
 		local motor = parent and parent:FindFirstChild(spec[2])
 		if motor ~= nil and motor:IsA("Motor6D") then
@@ -381,7 +376,8 @@ local function grab(player: Player)
 	diamond.Anchored = false
 	diamond.Massless = true
 	diamond.CanCollide = false
-	diamond.CFrame = head.CFrame * CFrame.new(0, 3.4, 0) * DIAMOND_TILT
+	-- Above the raised right hand.
+	diamond.CFrame = head.CFrame * CFrame.new(1.4, 3.6, 0) * DIAMOND_TILT
 	local weld = Instance.new("WeldConstraint")
 	weld.Part0 = head
 	weld.Part1 = diamond
