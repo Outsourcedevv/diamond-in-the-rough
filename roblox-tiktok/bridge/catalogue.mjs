@@ -1,9 +1,16 @@
 export const KEYS = ['', 'F6', 'F7', 'F8', 'J', 'K', 'L', 'U', 'I', 'O', 'P', 'B', 'N', 'M'];
+export async function fetchCatalogue(Client, username) {
+ const client = new Client(username, {});
+ await client.fetchRoomId();
+ return normalizeGifts(await client.fetchAvailableGifts());
+}
 export const STARTER = [['Rose',1],['Finger Heart',5],['Doughnut',30],['Hand Hearts',100],['Money Gun',500],['Galaxy',1000],['Lion',29999],['TikTok Universe',34999]].map(([name,coins])=>({id:name,name,coins}));
 export function normalizeGifts(raw) {
  const list = Array.isArray(raw) ? raw : raw?.gifts ?? raw?.data?.gifts ?? [];
  const unique = new Map();
+ if (!Array.isArray(list)) return [];
  for (const gift of list) {
+  if (!gift || typeof gift !== "object") continue;
   const name=String(gift.name ?? '').trim().slice(0,40), coins=Number(gift.diamond_count ?? gift.diamondCount ?? gift.coins);
   if (!name || !Number.isFinite(coins) || coins<1) continue;
   const id=String(gift.id ?? name); unique.set(id,{id,name,coins:Math.floor(coins)});

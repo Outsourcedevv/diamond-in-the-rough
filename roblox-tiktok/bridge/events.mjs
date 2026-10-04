@@ -25,6 +25,13 @@ export function createEventQueue(limit = 1000) {
   };
 }
 
+export function rebuildTestEvent(blocks) {
+  if (![1000, 10000, 100000, 1500000].includes(blocks)) {
+    throw new Error('Choose a supported rebuild test amount.');
+  }
+  return { type: 'gift', user: 'tester', name: 'Test viewer', gift: 'Rebuild test', coins: 1, count: 1, rocks: -blocks };
+}
+
 function who(user) {
   return {
     user: String(user?.uniqueId ?? user?.userId ?? 'someone').slice(0, 40),

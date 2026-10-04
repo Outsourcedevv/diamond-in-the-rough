@@ -4,11 +4,11 @@
 // games can receive them through Roblox Open Cloud MessagingService.
 // Open http://localhost:8787 for the control page (connect + test gifts).
 import http from 'node:http';
-import { KEYS, STARTER, normalizeGifts, validateRule } from './catalogue.mjs';
+import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue } from './catalogue.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createEventQueue, createGiftTracker, likeEvent, socialEvent, packMessages } from './events.mjs';
+import { createEventQueue, createGiftTracker, likeEvent, socialEvent, packMessages, rebuildTestEvent } from './events.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const configPath = path.join(here, 'config.json');
@@ -51,7 +51,7 @@ function emit(event) {
   if (!event) return;
   if(event.type === 'gift') {
     const rule=config.giftRules?.[String(event.gift).toLowerCase()];
-    if(rule) event={...event,rocks:rule.rocks};
+    if(rule && event.rocks === undefined) event={...event,rocks:rule.rocks};
   }
   const stamped = queue.push(event);
   outbox.push(stamped);
@@ -67,16 +67,17 @@ let catalogue = STARTER;
 let catalogueStatus = 'Starter gifts. Refresh to load all gifts available for your TikTok LIVE.';
 try { const cached=JSON.parse(fs.readFileSync(cataloguePath,'utf8')); const rows=normalizeGifts(cached); if(rows.length){catalogue=rows;catalogueStatus='Saved TikTok catalogue';} } catch {}
 let catalogueLoading = null;
-async function refreshCatalogue() {
+async function refreshCatalogue(username = config.tiktokUsername) {
  if(catalogueLoading) return catalogueLoading;
  catalogueLoading=(async()=>{
-  if(!config.tiktokUsername) throw new Error('Enter your TikTok username first.');
+  username = String(username ?? '').trim().replace(/^@/, '');
+  if(!username) throw new Error('Enter your TikTok username first.');
   const { TikTokLiveConnection }=await import('tiktok-live-connector');
-  const client=connection ?? new TikTokLiveConnection(config.tiktokUsername);
-  const gifts=normalizeGifts(await client.fetchAvailableGifts());
+  const gifts=await fetchCatalogue(TikTokLiveConnection, username);
   if(!gifts.length) throw new Error('TikTok returned no gifts. Try refreshing while your account is LIVE.');
   catalogue=gifts; catalogueStatus=`${gifts.length} gifts loaded from TikTok`;
   fs.writeFileSync(cataloguePath,JSON.stringify(gifts,null,2));
+  config.tiktokUsername=username; saveConfig();
  })().finally(()=>{catalogueLoading=null;});
  return catalogueLoading;
 }
@@ -187,7 +188,7 @@ const server = http.createServer(async (request, response) => {
     return sendJson(response,200,{gifts:catalogue,status:catalogueStatus,rules:config.giftRules ?? {},keys:KEYS});
   }
   if (request.method === 'POST' && url.pathname === '/catalogue/refresh') {
-    try { await refreshCatalogue(); return sendJson(response,200,{ok:true}); }
+    try { const body=await readBody(request); await refreshCatalogue(body.username || config.tiktokUsername); return sendJson(response,200,{ok:true}); }
     catch(error) { catalogueStatus=error.message; return sendJson(response,400,{error:error.message}); }
   }
   if (request.method === 'POST' && url.pathname === '/catalogue/rule') {
@@ -225,6 +226,12 @@ const server = http.createServer(async (request, response) => {
     config.openCloud.universeId = String(body.universeId ?? '').trim();
     saveConfig();
     return sendJson(response, 200, { ok: true });
+  }
+  if (request.method === 'POST' && url.pathname === '/test/rebuild') {
+    try {
+      emit(rebuildTestEvent((await readBody(request)).blocks));
+      return sendJson(response, 200, { ok: true });
+    } catch (error) { return sendJson(response, 400, { error: error.message }); }
   }
   if (request.method === 'POST' && url.pathname === '/test') {
     const body = await readBody(request);

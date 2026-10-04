@@ -86,6 +86,10 @@
     <h2>2 · Test without going live</h2>
     <p>These send pretend gifts to the game, exactly like real ones.</p>
     <div class="grid" id="tests"></div>
+    <h2 style="margin-top:20px">Rebuild test gifts</h2>
+    <p>Dig or send a destructive gift first. These refill dug spaces up to the original mountain size without changing your gift rules.</p>
+    <div class="grid" id="rebuildTests"></div>
+    <p id="testMessage" role="status"></p>
   </section>
 
   <section>
@@ -125,6 +129,24 @@ const tests = [
   ['↗️ Share', { type: 'share' }],
 ];
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+for (const blocks of [1000, 10000, 100000, 1500000]) {
+  const button = document.createElement('button');
+  button.textContent = blocks === 1500000 ? 'Refill mountain' : `+${blocks.toLocaleString()} blocks`;
+  button.style.background = '#24734b';
+  button.onclick = async () => {
+    button.disabled = true;
+    const message = document.getElementById('testMessage');
+    try {
+      const response = await post('/test/rebuild', {blocks});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      message.textContent = 'Rebuild test sent. The mountain refills when the game receives it.';
+      await refresh();
+    } catch(error) { message.textContent = error.message; }
+    finally { button.disabled = false; }
+  };
+  document.getElementById('rebuildTests').append(button);
+}
 const box = document.getElementById('tests');
 for (const [label, body] of tests) {
   const button = document.createElement('button');
@@ -172,7 +194,7 @@ function chooseGift(gift) {
 async function loadCatalogue() {
  const data=await (await fetch('/catalogue')).json();
  giftCatalogue=data.gifts;giftRules=data.rules;
- document.getElementById('catalogueStatus').textContent=data.status;
+ document.getElementById('catalogueStatus').textContent=`${data.gifts.length.toLocaleString()} gifts · ${data.status}`;
  const keys=document.getElementById('giftKey');const previous=keys.value;
  keys.replaceChildren(...data.keys.map(key=>{const option=document.createElement('option');option.value=key;option.textContent=key||'No keybind';return option;}));
  keys.value=previous;drawCatalogue();
@@ -193,7 +215,7 @@ document.getElementById('giftEditor').onsubmit=event=>{event.preventDefault();sa
 document.getElementById('testChosenGift').onclick=()=>saveChosen(true);
 document.getElementById('refreshCatalogue').onclick=async event=>{
  event.target.disabled=true;document.getElementById('catalogueStatus').textContent='Loading gifts from TikTok…';
- try { const response=await post('/catalogue/refresh',{});const data=await response.json();if(!response.ok)throw new Error(data.error);await loadCatalogue(); }
+ try { const response=await post('/catalogue/refresh',{username:document.getElementById('username').value});const data=await response.json();if(!response.ok)throw new Error(data.error);await loadCatalogue(); }
  catch(error){document.getElementById('catalogueStatus').textContent=error.message;}
  finally {event.target.disabled=false;}
 };
@@ -207,6 +229,7 @@ loadCatalogue().catch(()=>{document.getElementById('catalogueStatus').textConten
 
 let filled = false;
 function describe(event) {
+  if (event.type === 'gift' && event.rocks < 0) return `${event.name} sent ${event.gift} · rebuild up to ${Math.abs(event.rocks * event.count).toLocaleString()} blocks`;
   if (event.type === 'gift') return `${event.name} sent ${event.gift} x${event.count} · ${event.coins * event.count} coins`;
   if (event.type === 'like') return `${event.name} liked x${event.likes}`;
   return `${event.name} ${event.type === 'follow' ? 'followed' : 'shared the live'}`;

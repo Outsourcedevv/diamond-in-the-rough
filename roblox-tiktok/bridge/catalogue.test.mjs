@@ -1,6 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeGifts, validateRule } from './catalogue.mjs';
+import { normalizeGifts, validateRule, fetchCatalogue } from './catalogue.mjs';
+
+test('catalogue resolves the LIVE room before retrieving every gift', async () => {
+ let resolved = false;
+ class Client {
+  constructor(username, options) { assert.equal(username, 'Swillplays'); assert.deepEqual(options, {}); }
+  async fetchRoomId() { resolved = true; }
+  async fetchAvailableGifts() {
+   assert.equal(resolved, true);
+   return {gifts: Array.from({length: 1000}, (_, id) => ({id, name: `Gift ${id}`, diamond_count: id + 1}))};
+  }
+ }
+ assert.equal((await fetchCatalogue(Client, 'Swillplays')).length, 1000);
+});
 test('catalogue accepts TikTok and cached gift formats, deduplicates IDs, and sorts prices',()=>{
  const rows=normalizeGifts([{id:2,name:'Galaxy',diamond_count:1000},{id:1,name:'Rose',coins:1},{id:1,name:'Rose',diamondCount:1},{id:3,name:'Bad',coins:NaN}]);
  assert.deepEqual(rows.map(g=>g.name),['Rose','Galaxy']);assert.equal(rows[1].coins,1000);
