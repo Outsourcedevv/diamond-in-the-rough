@@ -65,6 +65,73 @@ return Config
       </Item>
       <Item class="ModuleScript" referent="5">
         <Properties>
+          <string name="Name">DiamondShape</string>
+          <string name="Source"><![CDATA[--!strict
+-- An eight-sided brilliant-cut gem, made from native triangular facets.
+local DiamondShape = {}
+function DiamondShape.attach(root: BasePart)
+	root.Transparency = 1
+	local scale = root.Size.X
+	local facets = Instance.new("Folder")
+	facets.Name = "Facets"
+	facets.Parent = root
+	local function triangle(a: Vector3, b: Vector3, c: Vector3, shade: number)
+		local ab, ac, bc = b - a, c - a, c - b
+		if ab.Magnitude > ac.Magnitude and ab.Magnitude > bc.Magnitude then c, a = a, c
+		elseif ac.Magnitude > bc.Magnitude then a, b = b, a end
+		ab, ac, bc = b - a, c - a, c - b
+		local right = ac:Cross(ab).Unit
+		local up = bc:Cross(right).Unit
+		local back = bc.Unit
+		local height = math.abs(ab:Dot(up))
+		for _, spec in { { (a + b) / 2, right, back, math.abs(ab:Dot(back)) }, { (a + c) / 2, -right, -back, math.abs(ac:Dot(back)) } } do
+			if spec[4] < 0.0001 then continue end
+			local face = Instance.new("WedgePart")
+			face.Name = "Facet"
+			face.Size = Vector3.new(0.005, height, spec[4]) * scale
+			face.CFrame = root.CFrame * CFrame.fromMatrix(spec[1] * scale, spec[2], up, spec[3])
+			face.Color = Color3.fromRGB(100 + shade * 100, 195 + shade * 50, 245)
+			face.Material = Enum.Material.Glass
+			face.Reflectance = 0.18
+			face.Transparency = 0.08
+			face.CanCollide = false
+			face.CanQuery = false
+			face.CanTouch = false
+			face.Massless = true
+			face.CastShadow = false
+			face.Parent = facets
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = root
+			weld.Part1 = face
+			weld.Parent = face
+		end
+	end
+	for i = 0, 7 do
+		local a, b = i * math.pi / 4, (i + 1) * math.pi / 4
+		local rimA = Vector3.new(math.cos(a) * 0.5, 0.08, math.sin(a) * 0.5)
+		local rimB = Vector3.new(math.cos(b) * 0.5, 0.08, math.sin(b) * 0.5)
+		local topA = Vector3.new(math.cos(a) * 0.26, 0.34, math.sin(a) * 0.26)
+		local topB = Vector3.new(math.cos(b) * 0.26, 0.34, math.sin(b) * 0.26)
+		triangle(Vector3.new(0, -0.55, 0), rimA, rimB, 0.25 + i % 3 * 0.2)
+		triangle(rimA, topA, topB, 0.55 + i % 2 * 0.3)
+		triangle(rimA, topB, rimB, 0.4 + i % 3 * 0.2)
+		triangle(Vector3.new(0, 0.34, 0), topB, topA, 0.9)
+	end
+end
+function DiamondShape.visible(root: BasePart, visible: boolean)
+	if root:GetAttribute("GemVisible") == visible then return end
+	root:SetAttribute("GemVisible", visible)
+	root.Transparency = 1
+	for _, face in root.Facets:GetChildren() do
+		(face :: BasePart).Transparency = if visible then 0.08 else 1
+	end
+end
+return DiamondShape
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="6">
+        <Properties>
           <string name="Name">Format</string>
           <string name="Source"><![CDATA[--!strict
 local Format = {}
@@ -115,7 +182,7 @@ return Format
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="6">
+      <Item class="ModuleScript" referent="7">
         <Properties>
           <string name="Name">GiftTier</string>
           <string name="Source"><![CDATA[--!strict
@@ -131,7 +198,7 @@ return GiftTier
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="7">
+      <Item class="ModuleScript" referent="8">
         <Properties>
           <string name="Name">HoldTimer</string>
           <string name="Source"><![CDATA[--!strict
@@ -164,11 +231,11 @@ return HoldTimer
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="8">
+  <Item class="ServerScriptService" referent="9">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="9">
+    <Item class="Script" referent="10">
       <Properties>
         <string name="Name">DiamondRushServer</string>
         <token name="RunContext">0</token>
@@ -330,6 +397,7 @@ local _ = makePickaxe
 local _ = StarterPack
 
 -- The one diamond -----------------------------------------------------------------
+local DiamondShape = require(Shared:WaitForChild("DiamondShape"))
 local diamond = Instance.new("Part")
 diamond.Name = "Diamond"
 -- The diamond is the same size as a rock.
@@ -342,6 +410,7 @@ diamond.CanCollide = false
 diamond.CanTouch = false
 diamond.CanQuery = false
 diamond.Parent = workspace
+DiamondShape.attach(diamond)
 local glow = Instance.new("PointLight")
 glow.Color = Color3.fromRGB(140, 230, 255)
 glow.Range = 4
@@ -353,7 +422,7 @@ click.Name = "ClickToPickUp"
 click.MaxActivationDistance = 0
 click.Parent = diamond
 
-local DIAMOND_TILT = CFrame.Angles(math.rad(45), 0, math.rad(35))
+local DIAMOND_TILT = CFrame.Angles(0, math.rad(22.5), 0)
 
 -- Round state -------------------------------------------------------------------
 local mountain: Mountain.Mountain? = nil
@@ -386,7 +455,7 @@ local function refreshStone()
 end
 
 local function showDiamond(visible: boolean)
-	diamond.Transparency = if visible then 0.12 else 1
+	DiamondShape.visible(diamond, visible)
 	diamond.CanQuery = visible and phase == "Revealed"
 	-- No through-rock outline, beacon or floating location label while searching.
 	glow.Enabled = visible and phase == "Holding"
@@ -439,7 +508,7 @@ local function applyStone(amount: number): Vector3?
 		return
 	end
 	local current = mountain
-	if phase == "Won" or current == nil then
+	if phase == "Won" or phase == "Rebuilding" or current == nil then
 		-- Gifts during the win screen count towards the next mountain.
 		pendingStone += amount
 		return
@@ -495,7 +564,12 @@ local function lowerArms()
 	table.clear(raisedArms)
 end
 
-local function newRound()
+local rebuilding = false
+local function newRound(animated: boolean?)
+	if rebuilding then return end
+	rebuilding = true
+	setPhase("Rebuilding")
+	showDiamond(false)
 	stopSettling()
 	if mountain ~= nil then
 		mountain:destroy()
@@ -506,9 +580,11 @@ local function newRound()
 		holdWeld:Destroy()
 		holdWeld = nil
 	end
+	for _, player in Players:GetPlayers() do
+		teleportHome(player)
+	end
 	startingStone = math.clamp(settings.startingStone, 100, 1500000)
-	setPhase("Digging")
-	local created = Mountain.new(workspace, startingStone, blockSize, reveal)
+	local created = Mountain.new(workspace, startingStone, blockSize, reveal, animated == true)
 	mountain = created
 	startingStone = created:total()
 	diamond.Anchored = true
@@ -520,9 +596,38 @@ local function newRound()
 	State:SetAttribute("HolderUserId", 0)
 	State:SetAttribute("HoldStart", 0)
 	refreshStone()
-	for _, player in Players:GetPlayers() do
-		teleportHome(player)
+	if animated then
+		local layers = {}
+		local samples = {}
+		for _, part in created.parts do
+			local layer = math.clamp(math.floor(part.Position.Y / (created.grid.height * blockSize) * 16) + 1, 1, 16)
+			layers[layer] = layers[layer] or {}
+			table.insert(layers[layer], part)
+		end
+		for layer = 1, 16 do
+			local bucket = layers[layer] or {}
+			local taken = 0
+			for _, part in bucket do
+				if not part:GetAttribute("BackingRock") then
+					table.insert(samples, { frame = part.CFrame, size = part.Size, colour = part.Color, layer = layer })
+					taken += 1
+					if taken >= 5 then break end
+				end
+			end
+		end
+		local start = workspace:GetServerTimeNow() + 0.5
+		Notify:FireAllClients("rebuild", { stones = samples, start = start })
+		task.wait(0.5)
+		for layer = 1, 16 do
+			task.wait(0.15)
+			for _, part in layers[layer] or {} do part.Transparency = 0 end
+		end
+		created.folder:SetAttribute("Building", false)
 	end
+	rebuilding = false
+	setPhase("Digging")
+	roundStart = workspace:GetServerTimeNow()
+	State:SetAttribute("RoundStart", roundStart)
 	local carried = pendingStone
 	pendingStone = 0
 	applyStone(carried)
@@ -618,7 +723,7 @@ local function win(player: Player)
 		best = settings.best,
 		newBest = newBest,
 	})
-	task.delay(Config.WinScreenSeconds, newRound)
+	task.delay(Config.WinScreenSeconds, function() newRound(true) end)
 end
 
 click.MouseClick:Connect(grab)
@@ -782,7 +887,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
 		local current = mountain
-		if current == nil or phase == "Won" or holder == player or typeof(value) ~= "Instance" or value == diamond then
+		if current == nil or phase == "Won" or phase == "Rebuilding" or holder == player or typeof(value) ~= "Instance" or value == diamond then
 			return
 		end
 		local now = os.clock()
@@ -891,7 +996,7 @@ State:SetAttribute("TikTok", "Starting…")
 newRound()
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="10">
+      <Item class="ModuleScript" referent="11">
         <Properties>
           <string name="Name">Grid</string>
           <string name="Source"><![CDATA[--!strict
@@ -1264,7 +1369,7 @@ return Grid
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="11">
+      <Item class="ModuleScript" referent="12">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
@@ -1284,7 +1389,7 @@ local ROCK = {
 	Color3.fromRGB(128, 124, 116),
 	Color3.fromRGB(146, 140, 130),
 }
-local FLYING_LIMIT = 40
+local FLYING_LIMIT = 8
 
 export type Mountain = typeof(setmetatable(
 	{} :: {
@@ -1302,7 +1407,7 @@ export type Mountain = typeof(setmetatable(
 	Mountain
 ))
 
-function Mountain.new(parent: Instance, stones: number, blockSize: number, onDiamondCell: () -> ()): Mountain
+function Mountain.new(parent: Instance, stones: number, blockSize: number, onDiamondCell: () -> (), building: boolean?): Mountain
 	local random = Random.new()
 	local function rand(a: number?, b: number?): number
 		if a ~= nil and b ~= nil then
@@ -1314,6 +1419,7 @@ function Mountain.new(parent: Instance, stones: number, blockSize: number, onDia
 	local diamondKey = grid:carveHiddenCell()
 	local folder = Instance.new("Folder")
 	folder.Name = "Mountain"
+	folder:SetAttribute("Building", building == true)
 	local self = setmetatable({
 		grid = grid,
 		folder = folder,
@@ -1331,8 +1437,9 @@ function Mountain.new(parent: Instance, stones: number, blockSize: number, onDia
 		local column = Grid.key(x, 0, z)
 		self.tops[column] = math.max(self.tops[column] or 0, y)
 	end
-	for _, key in grid.exposedList do
+	for index, key in grid.exposedList do
 		self:_drawShell(key)
+		if building and index % 300 == 0 then task.wait() end
 	end
 	grid:takeFresh()
 	folder.Parent = parent
@@ -1366,6 +1473,7 @@ function Mountain._draw(self: Mountain, key: number)
 	local style = RockStyle.forCell(key)
 	local part = Instance.new(if backing then "Part" else style.shape) :: BasePart
 	part.Name = "Stone"
+	part.Transparency = if self.folder:GetAttribute("Building") then 1 else 0
 	part.Anchored = true
 	part.CastShadow = false
 	part.Size = Vector3.new(style.x, style.y, style.z) * size
@@ -1522,7 +1630,7 @@ return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="12">
+      <Item class="ModuleScript" referent="13">
         <Properties>
           <string name="Name">RockStyle</string>
           <string name="Source"><![CDATA[--!strict
@@ -1568,7 +1676,7 @@ return RockStyle
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="13">
+      <Item class="ModuleScript" referent="14">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -1739,7 +1847,7 @@ return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="14">
+      <Item class="ModuleScript" referent="15">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -1815,7 +1923,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="15">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -1955,15 +2063,15 @@ return TikTokFeed
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="16">
+  <Item class="StarterPlayer" referent="17">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="17">
+    <Item class="StarterPlayerScripts" referent="18">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="18">
+      <Item class="LocalScript" referent="19">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -1985,6 +2093,7 @@ local State = ReplicatedStorage:WaitForChild("DiamondRushState") :: Configuratio
 local Remotes = ReplicatedStorage:WaitForChild("DiamondRushRemotes")
 local Notify = Remotes:WaitForChild("Notify") :: RemoteEvent
 local Request = Remotes:WaitForChild("Request") :: RemoteEvent
+local RebuildEffects = require(script:WaitForChild("RebuildEffects"))
 local GiftEffects = require(script:WaitForChild("GiftEffects"))
 GiftEffects.start(player:WaitForChild("PlayerGui"))
 
@@ -2607,7 +2716,11 @@ RunService.RenderStepped:Connect(function(dt: number)
 	else
 		countdown.Visible = false
 		lastCount = -1
-		banner.Visible = phase == "Revealed"
+		banner.Visible = phase == "Revealed" or phase == "Rebuilding"
+		if phase == "Rebuilding" then
+			banner.Text = "REBUILDING THE MOUNTAIN"
+			banner.TextTransparency = 0
+		end
 		if phase == "Revealed" then
 			banner.Text = "DIAMOND UNCOVERED — FIND IT AND CLICK IT"
 			banner.TextTransparency = 0.25 + 0.25 * math.sin(now * 6)
@@ -2616,7 +2729,9 @@ RunService.RenderStepped:Connect(function(dt: number)
 end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
-	if kind == "giftEffect" and type(data) == "table" then
+	if kind == "rebuild" and type(data) == "table" then
+		RebuildEffects.play(data)
+	elseif kind == "giftEffect" and type(data) == "table" then
 		GiftEffects.play(data)
 	elseif kind == "feed" and type(data) == "table" then
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
@@ -2665,7 +2780,7 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local phase = attr("Phase", "Digging")
 	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
-		and not panel.Visible and phase ~= "Won"
+		and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	aimDot.Visible = active
 	UserInputService.MouseIconEnabled = not active
@@ -2712,7 +2827,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	local target = aimTarget
-	local allowed = digging and not panel.Visible and phase ~= "Won"
+	local allowed = digging and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	local onRock = allowed and root ~= nil and root:IsA("BasePart")
 		and target ~= nil and target.Name == "Stone"
@@ -2734,7 +2849,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -2792,10 +2907,21 @@ function FirstPerson.start()
 	end
 
 	local State = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRushState")
+	local DiamondShape = require(game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush"):WaitForChild("DiamondShape"))
 	local worldDiamond = workspace:WaitForChild("Diamond") :: BasePart
+	local worldFacets = worldDiamond:WaitForChild("Facets")
+	local worldHidden = false
+	local function hideWorld(hidden: boolean)
+		if worldHidden == hidden then return end
+		worldHidden = hidden
+		for _, face in worldFacets:GetChildren() do
+			if face:IsA("BasePart") then face.LocalTransparencyModifier = if hidden then 1 else 0 end
+		end
+	end
 	local gem = part("HeldDiamond", worldDiamond.Size, worldDiamond.Color, Enum.Material.Glass)
 	gem.Reflectance = 0.35
-	gem.Transparency = 1
+	DiamondShape.attach(gem)
+	DiamondShape.visible(gem, false)
 	local shine = Instance.new("PointLight")
 	shine.Color = Color3.fromRGB(150, 235, 255)
 	shine.Range = 4
@@ -2857,7 +2983,7 @@ function FirstPerson.start()
 		if camera == nil or character == nil or humanoid == nil or humanoid.Health <= 0 then
 			rig.Parent = nil
 			restoreArms()
-			worldDiamond.LocalTransparencyModifier = 0
+			hideWorld(false)
 			return
 		end
 		rig.Parent = camera
@@ -2903,7 +3029,7 @@ function FirstPerson.start()
 		local scoop = math.sin(math.clamp((cycle - 0.38) / 0.62, 0, 1) * math.pi) * digBlend
 		-- While you hold the diamond your right hand lifts it to the sky.
 		lift += ((if holding then 1 else 0) - lift) * (1 - math.exp(-dt * 9))
-		worldDiamond.LocalTransparencyModifier = if holding then 1 else 0
+		hideWorld(holding)
 		local worldLight = worldDiamond:FindFirstChildOfClass("PointLight")
 		if worldLight then worldLight.Enabled = State:GetAttribute("Phase") == "Holding" and not holding end
 		local base = camera.CFrame * CFrame.new(math.sin(bob * 0.5) * sway * 0.4, -0.92 + math.sin(bob) * sway * 0.45, -1.6)
@@ -2941,10 +3067,10 @@ function FirstPerson.start()
 				* CFrame.Angles(math.rad(-35 * grip), math.rad(h.side * 20 * grip), math.rad(h.side * (15 + 35 * grip)))
 
 		end
-		gem.Transparency = if holding and lift > 0.3 then 0.1 else 1
+		DiamondShape.visible(gem, holding and lift > 0.3)
 		shine.Enabled = holding and lift > 0.3
 		local palm = hands[2].hand.CFrame
-		gem.CFrame = palm * CFrame.new(0, 0.25, -0.14) * CFrame.Angles(math.rad(45), 0, math.rad(35))
+		gem.CFrame = palm * CFrame.new(0, 0.25, -0.14) * CFrame.Angles(0, math.rad(22.5), 0)
 	end)
 end
 
@@ -2952,11 +3078,11 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
--- Local, non-physical spectacle. At most three sequences / 180 parts at once.
+-- Local, non-physical spectacle. At most two sequences / 80 parts at once.
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
@@ -3003,7 +3129,7 @@ function GiftEffects.play(data: any)
 	for i = #active, 1, -1 do
 		if active[i].folder.Parent == nil then table.remove(active, i) end
 	end
-	if #active >= 3 then
+	if #active >= 2 then
 		local weakest = 1
 		for i, entry in active do
 			if entry.tier < active[weakest].tier then weakest = i end
@@ -3020,7 +3146,7 @@ function GiftEffects.play(data: any)
 	local centre: Vector3 = data.position
 	local allocated = 0
 	local function piece(shape: Enum.PartType, size: Vector3, frame: CFrame): Part?
-		if folder.Parent == nil or allocated >= 60 then return nil end
+		if folder.Parent == nil or allocated >= 40 then return nil end
 		allocated += 1
 		local p = Instance.new("Part")
 		p.Shape = shape
@@ -3062,7 +3188,7 @@ function GiftEffects.play(data: any)
 			root.Transparency = 1
 			local points = {}
 			local beams = {}
-			for i = 1, 32 do
+			for i = 1, 16 do
 				local point = Instance.new("Attachment")
 				point.Parent = root
 				table.insert(points, point)
@@ -3077,18 +3203,18 @@ function GiftEffects.play(data: any)
 				beam.Parent = root
 				table.insert(beams, beam)
 			end
-			motion(root, 0.95, function(t)
-				local r = 0.5 + radius * (1 - (1 - t) ^ 3)
-				for i, point in points do
-					local angle = i * math.pi * 2 / #points
-					point.Position = Vector3.new(math.cos(angle) * r, 0, math.sin(angle) * r)
-				end
-				for _, beam in beams do
-					beam.Width0 = (0.35 + tier * 0.1) * (1 - t) + 0.03
-					beam.Width1 = beam.Width0
-					beam.Transparency = NumberSequence.new(t ^ 1.6)
-				end
-			end)
+			for i, point in points do
+				local angle = i * math.pi * 2 / #points
+				local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+				point.Position = direction * 0.5
+				TweenService:Create(point, TweenInfo.new(0.8, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Position = direction * radius }):Play()
+			end
+			for _, beam in beams do
+				beam.Width0 = 0.3 + tier * 0.08
+				beam.Width1 = beam.Width0
+				TweenService:Create(beam, TweenInfo.new(0.8), { Width0 = 0, Width1 = 0 }):Play()
+			end
+			Debris:AddItem(root, 0.85)
 		end)
 	end
 	local function pulse(at: Vector3, radius: number)
@@ -3100,8 +3226,8 @@ function GiftEffects.play(data: any)
 			orb.Transparency = 0.35
 			animate(orb, 0.3, { Size = Vector3.one * math.min(radius, 10), Transparency = 1 })
 		end
-		for i = 1, 8 + tier * 2 do
-			local angle = i * math.pi * 2 / (8 + tier * 2)
+		for i = 1, 4 + tier do
+			local angle = i * math.pi * 2 / (4 + tier)
 			local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
 			local shard = piece(Enum.PartType.Block, Vector3.new(0.16, 0.16, 0.55), CFrame.new(at))
 			if shard then
@@ -3155,12 +3281,12 @@ function GiftEffects.play(data: any)
 	end
 	if tier <= 2 then
 		pulse(centre, 3 + tier * 3)
-		for _ = 1, tier * 7 do
+		for _ = 1, tier * 3 do
 			local spark = piece(Enum.PartType.Ball, Vector3.one * 0.22, CFrame.new(centre))
 			if spark then animate(spark, random:NextNumber(0.5, 1.2), { Position = centre + Vector3.new(random:NextNumber(-7, 7), random:NextNumber(3, 12), random:NextNumber(-7, 7)), Transparency = 1 }) end
 		end
 	else
-		local count = if tier == 3 then 1 elseif tier == 4 then 3 else 4
+		local count = if tier == 3 then 1 elseif tier == 4 then 2 else 3
 		for i = 1, count do
 			local offset = if i == 1 then Vector3.zero else Vector3.new(random:NextNumber(-10, 10), 0, random:NextNumber(-10, 10))
 			meteor(centre + offset, (i - 1) * 0.3)
@@ -3203,10 +3329,94 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
+        <Item class="ModuleScript" referent="22">
+          <Properties>
+            <string name="Name">RebuildEffects</string>
+            <string name="Source"><![CDATA[--!strict
+-- A bounded stream of flying stones accompanies the server's layer reveal.
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local RebuildEffects = {}
+local current: Folder? = nil
+local connection: RBXScriptConnection? = nil
+function RebuildEffects.play(data: any)
+	if connection then connection:Disconnect(); connection = nil end
+	if current then current:Destroy() end
+	local folder = Instance.new("Folder")
+	folder.Name = "RebuildingStones"
+	folder.Parent = workspace
+	current = folder
+	local tracks = {}
+	for index, stone in data.stones do
+		if index > 80 then break end
+		local angle = index * 2.39996
+		local destination = stone.frame.Position
+		local start = destination + Vector3.new(math.cos(angle) * 10, -6, math.sin(angle) * 10)
+		table.insert(tracks, { stone = stone, start = CFrame.new(start) * CFrame.Angles(angle, angle, 0), arrive = data.start + stone.layer * 0.15, part = nil, done = false })
+	end
+	connection = RunService.RenderStepped:Connect(function()
+		local now = workspace:GetServerTimeNow()
+		local done = 0
+		for _, track in tracks do
+			local t = (now - (track.arrive - 0.55)) / 0.55
+			if t >= 1 then
+				if track.part then track.part:Destroy(); track.part = nil end
+				track.done = true
+				done += 1
+			elseif t >= 0 and not track.done then
+				if track.part == nil then
+					local p = Instance.new("WedgePart")
+					p.Size = track.stone.size * 1.8
+					p.Color = track.stone.colour
+					p.Material = Enum.Material.Slate
+					p.Anchored = true
+					p.CanCollide = false
+					p.CanQuery = false
+					p.CanTouch = false
+					p.CastShadow = false
+					p.Parent = folder
+					track.part = p
+				end
+				local eased = 1 - (1 - t) ^ 3
+				track.part.CFrame = track.start:Lerp(track.stone.frame, eased) + Vector3.new(0, math.sin(t * math.pi) * 2, 0)
+				track.part.Size = track.stone.size * (1 + 0.8 * (1 - eased))
+				track.part.Transparency = math.max(0, 1 - t * 8)
+			end
+		end
+		if done == #tracks then
+			if connection then connection:Disconnect(); connection = nil end
+			-- A short finishing glint travels upward from the completed peak.
+			local peak = Vector3.zero
+			for _, track in tracks do
+				if track.stone.frame.Position.Y > peak.Y then peak = track.stone.frame.Position end
+			end
+			for i = 1, 12 do
+				local p = Instance.new("Part")
+				p.Size = Vector3.new(0.08, 0.08, 0.45)
+				p.Anchored = true
+				p.CanQuery = false
+				p.CanCollide = false
+				p.CanTouch = false
+				p.Material = Enum.Material.Neon
+				p.Color = Color3.fromRGB(170, 240, 255)
+				p.Position = peak
+				p.Parent = folder
+				local angle = i * math.pi / 6
+				TweenService:Create(p, TweenInfo.new(0.65, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Position = peak + Vector3.new(math.cos(angle) * 5, 3, math.sin(angle) * 5), Transparency = 1 }):Play()
+			end
+			Debris:AddItem(folder, 0.7)
+		end
+	end)
+end
+return RebuildEffects
+]]></string>
+          </Properties>
+        </Item>
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="21">
+  <Item class="Workspace" referent="23">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>

@@ -1,5 +1,5 @@
 --!strict
--- Local, non-physical spectacle. At most three sequences / 180 parts at once.
+-- Local, non-physical spectacle. At most two sequences / 80 parts at once.
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
@@ -46,7 +46,7 @@ function GiftEffects.play(data: any)
 	for i = #active, 1, -1 do
 		if active[i].folder.Parent == nil then table.remove(active, i) end
 	end
-	if #active >= 3 then
+	if #active >= 2 then
 		local weakest = 1
 		for i, entry in active do
 			if entry.tier < active[weakest].tier then weakest = i end
@@ -63,7 +63,7 @@ function GiftEffects.play(data: any)
 	local centre: Vector3 = data.position
 	local allocated = 0
 	local function piece(shape: Enum.PartType, size: Vector3, frame: CFrame): Part?
-		if folder.Parent == nil or allocated >= 60 then return nil end
+		if folder.Parent == nil or allocated >= 40 then return nil end
 		allocated += 1
 		local p = Instance.new("Part")
 		p.Shape = shape
@@ -105,7 +105,7 @@ function GiftEffects.play(data: any)
 			root.Transparency = 1
 			local points = {}
 			local beams = {}
-			for i = 1, 32 do
+			for i = 1, 16 do
 				local point = Instance.new("Attachment")
 				point.Parent = root
 				table.insert(points, point)
@@ -120,18 +120,18 @@ function GiftEffects.play(data: any)
 				beam.Parent = root
 				table.insert(beams, beam)
 			end
-			motion(root, 0.95, function(t)
-				local r = 0.5 + radius * (1 - (1 - t) ^ 3)
-				for i, point in points do
-					local angle = i * math.pi * 2 / #points
-					point.Position = Vector3.new(math.cos(angle) * r, 0, math.sin(angle) * r)
-				end
-				for _, beam in beams do
-					beam.Width0 = (0.35 + tier * 0.1) * (1 - t) + 0.03
-					beam.Width1 = beam.Width0
-					beam.Transparency = NumberSequence.new(t ^ 1.6)
-				end
-			end)
+			for i, point in points do
+				local angle = i * math.pi * 2 / #points
+				local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+				point.Position = direction * 0.5
+				TweenService:Create(point, TweenInfo.new(0.8, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Position = direction * radius }):Play()
+			end
+			for _, beam in beams do
+				beam.Width0 = 0.3 + tier * 0.08
+				beam.Width1 = beam.Width0
+				TweenService:Create(beam, TweenInfo.new(0.8), { Width0 = 0, Width1 = 0 }):Play()
+			end
+			Debris:AddItem(root, 0.85)
 		end)
 	end
 	local function pulse(at: Vector3, radius: number)
@@ -143,8 +143,8 @@ function GiftEffects.play(data: any)
 			orb.Transparency = 0.35
 			animate(orb, 0.3, { Size = Vector3.one * math.min(radius, 10), Transparency = 1 })
 		end
-		for i = 1, 8 + tier * 2 do
-			local angle = i * math.pi * 2 / (8 + tier * 2)
+		for i = 1, 4 + tier do
+			local angle = i * math.pi * 2 / (4 + tier)
 			local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
 			local shard = piece(Enum.PartType.Block, Vector3.new(0.16, 0.16, 0.55), CFrame.new(at))
 			if shard then
@@ -198,12 +198,12 @@ function GiftEffects.play(data: any)
 	end
 	if tier <= 2 then
 		pulse(centre, 3 + tier * 3)
-		for _ = 1, tier * 7 do
+		for _ = 1, tier * 3 do
 			local spark = piece(Enum.PartType.Ball, Vector3.one * 0.22, CFrame.new(centre))
 			if spark then animate(spark, random:NextNumber(0.5, 1.2), { Position = centre + Vector3.new(random:NextNumber(-7, 7), random:NextNumber(3, 12), random:NextNumber(-7, 7)), Transparency = 1 }) end
 		end
 	else
-		local count = if tier == 3 then 1 elseif tier == 4 then 3 else 4
+		local count = if tier == 3 then 1 elseif tier == 4 then 2 else 3
 		for i = 1, count do
 			local offset = if i == 1 then Vector3.zero else Vector3.new(random:NextNumber(-10, 10), 0, random:NextNumber(-10, 10))
 			meteor(centre + offset, (i - 1) * 0.3)

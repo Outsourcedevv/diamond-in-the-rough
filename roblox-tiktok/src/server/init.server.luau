@@ -156,6 +156,7 @@ local _ = makePickaxe
 local _ = StarterPack
 
 -- The one diamond -----------------------------------------------------------------
+local DiamondShape = require(Shared:WaitForChild("DiamondShape"))
 local diamond = Instance.new("Part")
 diamond.Name = "Diamond"
 -- The diamond is the same size as a rock.
@@ -168,6 +169,7 @@ diamond.CanCollide = false
 diamond.CanTouch = false
 diamond.CanQuery = false
 diamond.Parent = workspace
+DiamondShape.attach(diamond)
 local glow = Instance.new("PointLight")
 glow.Color = Color3.fromRGB(140, 230, 255)
 glow.Range = 4
@@ -179,7 +181,7 @@ click.Name = "ClickToPickUp"
 click.MaxActivationDistance = 0
 click.Parent = diamond
 
-local DIAMOND_TILT = CFrame.Angles(math.rad(45), 0, math.rad(35))
+local DIAMOND_TILT = CFrame.Angles(0, math.rad(22.5), 0)
 
 -- Round state -------------------------------------------------------------------
 local mountain: Mountain.Mountain? = nil
@@ -212,7 +214,7 @@ local function refreshStone()
 end
 
 local function showDiamond(visible: boolean)
-	diamond.Transparency = if visible then 0.12 else 1
+	DiamondShape.visible(diamond, visible)
 	diamond.CanQuery = visible and phase == "Revealed"
 	-- No through-rock outline, beacon or floating location label while searching.
 	glow.Enabled = visible and phase == "Holding"
@@ -265,7 +267,7 @@ local function applyStone(amount: number): Vector3?
 		return
 	end
 	local current = mountain
-	if phase == "Won" or current == nil then
+	if phase == "Won" or phase == "Rebuilding" or current == nil then
 		-- Gifts during the win screen count towards the next mountain.
 		pendingStone += amount
 		return
@@ -321,7 +323,12 @@ local function lowerArms()
 	table.clear(raisedArms)
 end
 
-local function newRound()
+local rebuilding = false
+local function newRound(animated: boolean?)
+	if rebuilding then return end
+	rebuilding = true
+	setPhase("Rebuilding")
+	showDiamond(false)
 	stopSettling()
 	if mountain ~= nil then
 		mountain:destroy()
@@ -332,9 +339,11 @@ local function newRound()
 		holdWeld:Destroy()
 		holdWeld = nil
 	end
+	for _, player in Players:GetPlayers() do
+		teleportHome(player)
+	end
 	startingStone = math.clamp(settings.startingStone, 100, 1500000)
-	setPhase("Digging")
-	local created = Mountain.new(workspace, startingStone, blockSize, reveal)
+	local created = Mountain.new(workspace, startingStone, blockSize, reveal, animated == true)
 	mountain = created
 	startingStone = created:total()
 	diamond.Anchored = true
@@ -346,9 +355,38 @@ local function newRound()
 	State:SetAttribute("HolderUserId", 0)
 	State:SetAttribute("HoldStart", 0)
 	refreshStone()
-	for _, player in Players:GetPlayers() do
-		teleportHome(player)
+	if animated then
+		local layers = {}
+		local samples = {}
+		for _, part in created.parts do
+			local layer = math.clamp(math.floor(part.Position.Y / (created.grid.height * blockSize) * 16) + 1, 1, 16)
+			layers[layer] = layers[layer] or {}
+			table.insert(layers[layer], part)
+		end
+		for layer = 1, 16 do
+			local bucket = layers[layer] or {}
+			local taken = 0
+			for _, part in bucket do
+				if not part:GetAttribute("BackingRock") then
+					table.insert(samples, { frame = part.CFrame, size = part.Size, colour = part.Color, layer = layer })
+					taken += 1
+					if taken >= 5 then break end
+				end
+			end
+		end
+		local start = workspace:GetServerTimeNow() + 0.5
+		Notify:FireAllClients("rebuild", { stones = samples, start = start })
+		task.wait(0.5)
+		for layer = 1, 16 do
+			task.wait(0.15)
+			for _, part in layers[layer] or {} do part.Transparency = 0 end
+		end
+		created.folder:SetAttribute("Building", false)
 	end
+	rebuilding = false
+	setPhase("Digging")
+	roundStart = workspace:GetServerTimeNow()
+	State:SetAttribute("RoundStart", roundStart)
 	local carried = pendingStone
 	pendingStone = 0
 	applyStone(carried)
@@ -444,7 +482,7 @@ local function win(player: Player)
 		best = settings.best,
 		newBest = newBest,
 	})
-	task.delay(Config.WinScreenSeconds, newRound)
+	task.delay(Config.WinScreenSeconds, function() newRound(true) end)
 end
 
 click.MouseClick:Connect(grab)
@@ -608,7 +646,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
 		local current = mountain
-		if current == nil or phase == "Won" or holder == player or typeof(value) ~= "Instance" or value == diamond then
+		if current == nil or phase == "Won" or phase == "Rebuilding" or holder == player or typeof(value) ~= "Instance" or value == diamond then
 			return
 		end
 		local now = os.clock()

@@ -17,6 +17,7 @@ local State = ReplicatedStorage:WaitForChild("DiamondRushState") :: Configuratio
 local Remotes = ReplicatedStorage:WaitForChild("DiamondRushRemotes")
 local Notify = Remotes:WaitForChild("Notify") :: RemoteEvent
 local Request = Remotes:WaitForChild("Request") :: RemoteEvent
+local RebuildEffects = require(script:WaitForChild("RebuildEffects"))
 local GiftEffects = require(script:WaitForChild("GiftEffects"))
 GiftEffects.start(player:WaitForChild("PlayerGui"))
 
@@ -639,7 +640,11 @@ RunService.RenderStepped:Connect(function(dt: number)
 	else
 		countdown.Visible = false
 		lastCount = -1
-		banner.Visible = phase == "Revealed"
+		banner.Visible = phase == "Revealed" or phase == "Rebuilding"
+		if phase == "Rebuilding" then
+			banner.Text = "REBUILDING THE MOUNTAIN"
+			banner.TextTransparency = 0
+		end
 		if phase == "Revealed" then
 			banner.Text = "DIAMOND UNCOVERED — FIND IT AND CLICK IT"
 			banner.TextTransparency = 0.25 + 0.25 * math.sin(now * 6)
@@ -648,7 +653,9 @@ RunService.RenderStepped:Connect(function(dt: number)
 end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
-	if kind == "giftEffect" and type(data) == "table" then
+	if kind == "rebuild" and type(data) == "table" then
+		RebuildEffects.play(data)
+	elseif kind == "giftEffect" and type(data) == "table" then
 		GiftEffects.play(data)
 	elseif kind == "feed" and type(data) == "table" then
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
@@ -697,7 +704,7 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local phase = attr("Phase", "Digging")
 	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
-		and not panel.Visible and phase ~= "Won"
+		and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	aimDot.Visible = active
 	UserInputService.MouseIconEnabled = not active
@@ -744,7 +751,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	local target = aimTarget
-	local allowed = digging and not panel.Visible and phase ~= "Won"
+	local allowed = digging and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	local onRock = allowed and root ~= nil and root:IsA("BasePart")
 		and target ~= nil and target.Name == "Stone"

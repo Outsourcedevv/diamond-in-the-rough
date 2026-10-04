@@ -15,7 +15,7 @@ local ROCK = {
 	Color3.fromRGB(128, 124, 116),
 	Color3.fromRGB(146, 140, 130),
 }
-local FLYING_LIMIT = 40
+local FLYING_LIMIT = 8
 
 export type Mountain = typeof(setmetatable(
 	{} :: {
@@ -33,7 +33,7 @@ export type Mountain = typeof(setmetatable(
 	Mountain
 ))
 
-function Mountain.new(parent: Instance, stones: number, blockSize: number, onDiamondCell: () -> ()): Mountain
+function Mountain.new(parent: Instance, stones: number, blockSize: number, onDiamondCell: () -> (), building: boolean?): Mountain
 	local random = Random.new()
 	local function rand(a: number?, b: number?): number
 		if a ~= nil and b ~= nil then
@@ -45,6 +45,7 @@ function Mountain.new(parent: Instance, stones: number, blockSize: number, onDia
 	local diamondKey = grid:carveHiddenCell()
 	local folder = Instance.new("Folder")
 	folder.Name = "Mountain"
+	folder:SetAttribute("Building", building == true)
 	local self = setmetatable({
 		grid = grid,
 		folder = folder,
@@ -62,8 +63,9 @@ function Mountain.new(parent: Instance, stones: number, blockSize: number, onDia
 		local column = Grid.key(x, 0, z)
 		self.tops[column] = math.max(self.tops[column] or 0, y)
 	end
-	for _, key in grid.exposedList do
+	for index, key in grid.exposedList do
 		self:_drawShell(key)
+		if building and index % 300 == 0 then task.wait() end
 	end
 	grid:takeFresh()
 	folder.Parent = parent
@@ -97,6 +99,7 @@ function Mountain._draw(self: Mountain, key: number)
 	local style = RockStyle.forCell(key)
 	local part = Instance.new(if backing then "Part" else style.shape) :: BasePart
 	part.Name = "Stone"
+	part.Transparency = if self.folder:GetAttribute("Building") then 1 else 0
 	part.Anchored = true
 	part.CastShadow = false
 	part.Size = Vector3.new(style.x, style.y, style.z) * size

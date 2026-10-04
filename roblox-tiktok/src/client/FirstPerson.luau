@@ -53,10 +53,21 @@ function FirstPerson.start()
 	end
 
 	local State = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRushState")
+	local DiamondShape = require(game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush"):WaitForChild("DiamondShape"))
 	local worldDiamond = workspace:WaitForChild("Diamond") :: BasePart
+	local worldFacets = worldDiamond:WaitForChild("Facets")
+	local worldHidden = false
+	local function hideWorld(hidden: boolean)
+		if worldHidden == hidden then return end
+		worldHidden = hidden
+		for _, face in worldFacets:GetChildren() do
+			if face:IsA("BasePart") then face.LocalTransparencyModifier = if hidden then 1 else 0 end
+		end
+	end
 	local gem = part("HeldDiamond", worldDiamond.Size, worldDiamond.Color, Enum.Material.Glass)
 	gem.Reflectance = 0.35
-	gem.Transparency = 1
+	DiamondShape.attach(gem)
+	DiamondShape.visible(gem, false)
 	local shine = Instance.new("PointLight")
 	shine.Color = Color3.fromRGB(150, 235, 255)
 	shine.Range = 4
@@ -118,7 +129,7 @@ function FirstPerson.start()
 		if camera == nil or character == nil or humanoid == nil or humanoid.Health <= 0 then
 			rig.Parent = nil
 			restoreArms()
-			worldDiamond.LocalTransparencyModifier = 0
+			hideWorld(false)
 			return
 		end
 		rig.Parent = camera
@@ -164,7 +175,7 @@ function FirstPerson.start()
 		local scoop = math.sin(math.clamp((cycle - 0.38) / 0.62, 0, 1) * math.pi) * digBlend
 		-- While you hold the diamond your right hand lifts it to the sky.
 		lift += ((if holding then 1 else 0) - lift) * (1 - math.exp(-dt * 9))
-		worldDiamond.LocalTransparencyModifier = if holding then 1 else 0
+		hideWorld(holding)
 		local worldLight = worldDiamond:FindFirstChildOfClass("PointLight")
 		if worldLight then worldLight.Enabled = State:GetAttribute("Phase") == "Holding" and not holding end
 		local base = camera.CFrame * CFrame.new(math.sin(bob * 0.5) * sway * 0.4, -0.92 + math.sin(bob) * sway * 0.45, -1.6)
@@ -202,10 +213,10 @@ function FirstPerson.start()
 				* CFrame.Angles(math.rad(-35 * grip), math.rad(h.side * 20 * grip), math.rad(h.side * (15 + 35 * grip)))
 
 		end
-		gem.Transparency = if holding and lift > 0.3 then 0.1 else 1
+		DiamondShape.visible(gem, holding and lift > 0.3)
 		shine.Enabled = holding and lift > 0.3
 		local palm = hands[2].hand.CFrame
-		gem.CFrame = palm * CFrame.new(0, 0.25, -0.14) * CFrame.Angles(math.rad(45), 0, math.rad(35))
+		gem.CFrame = palm * CFrame.new(0, 0.25, -0.14) * CFrame.Angles(0, math.rad(22.5), 0)
 	end)
 end
 
