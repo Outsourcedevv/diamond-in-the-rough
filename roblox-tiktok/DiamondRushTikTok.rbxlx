@@ -48,7 +48,7 @@ local Config = {
 	WinBackgroundColor = "#2B2140",
 
 	-- Rocks -----------------------------------------------------------------------
-	BlockSize = 0.4, -- size of one rock in studs (the diamond is the same size)
+	BlockSize = 0.4, -- diggable cell size in studs; irregular rock chips overlap its edges
 	DigPerSecond = 100, -- rocks dug per second while the dig button is held
 
 	-- TikTok ------------------------------------------------------------------
@@ -323,42 +323,19 @@ diamond.Color = Color3.fromRGB(175, 240, 255)
 diamond.Reflectance = 0.35
 diamond.Anchored = true
 diamond.CanCollide = false
+diamond.CanTouch = false
+diamond.CanQuery = false
 diamond.Parent = workspace
 local glow = Instance.new("PointLight")
 glow.Color = Color3.fromRGB(140, 230, 255)
-glow.Range = 16
-glow.Brightness = 3
+glow.Range = 4
+glow.Brightness = 0.6
 glow.Parent = diamond
-local sparkles = Instance.new("Sparkles")
-sparkles.SparkleColor = Color3.fromRGB(200, 250, 255)
-sparkles.Parent = diamond
-local highlight = Instance.new("Highlight")
-highlight.FillColor = Color3.fromRGB(150, 240, 255)
-highlight.FillTransparency = 0.55
-highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-highlight.Parent = diamond
-local prompt = Instance.new("ProximityPrompt")
-prompt.ActionText = "Grab the diamond"
-prompt.ObjectText = "Diamond"
-prompt.HoldDuration = 0
-prompt.MaxActivationDistance = 14
-prompt.RequiresLineOfSight = false
-prompt.Parent = diamond
-local tag = Instance.new("BillboardGui")
-tag.Size = UDim2.fromOffset(220, 50)
-tag.StudsOffset = Vector3.new(0, 3.2, 0)
-tag.AlwaysOnTop = true
-tag.Parent = diamond
-local tagText = Instance.new("TextLabel")
-tagText.Size = UDim2.fromScale(1, 1)
-tagText.BackgroundTransparency = 1
-tagText.Font = Enum.Font.FredokaOne
-tagText.TextScaled = true
-tagText.TextColor3 = Color3.fromRGB(255, 255, 255)
-tagText.TextStrokeTransparency = 0.2
-tagText.Text = "💎 GRAB IT!"
-tagText.Parent = tag
+local PICKUP_DISTANCE = 12
+local click = Instance.new("ClickDetector")
+click.Name = "ClickToPickUp"
+click.MaxActivationDistance = 0
+click.Parent = diamond
 
 local DIAMOND_TILT = CFrame.Angles(math.rad(45), 0, math.rad(35))
 
@@ -373,6 +350,14 @@ local holdStarted = 0
 local holdWeld: WeldConstraint? = nil
 local mineCooldown: { [Player]: number } = {}
 local admins: { [Player]: boolean } = {}
+local settling: Tween? = nil
+
+local function stopSettling()
+	if settling then
+		settling:Cancel()
+		settling = nil
+	end
+end
 
 local function setPhase(value: string)
 	phase = value
@@ -386,12 +371,10 @@ end
 
 local function showDiamond(visible: boolean)
 	diamond.Transparency = if visible then 0.12 else 1
-	diamond.CanTouch = visible
-	glow.Enabled = visible
-	sparkles.Enabled = visible
-	highlight.Enabled = visible
-	tag.Enabled = visible and phase == "Revealed"
-	prompt.Enabled = visible and phase == "Revealed"
+	diamond.CanQuery = visible and phase == "Revealed"
+	-- No through-rock outline, beacon or floating location label while searching.
+	glow.Enabled = visible and phase == "Holding"
+	click.MaxActivationDistance = if visible and phase == "Revealed" then PICKUP_DISTANCE else 0
 end
 
 -- A loose diamond drops onto whatever rock (or ground) is left under it.
@@ -401,8 +384,10 @@ local function settleDiamond()
 	end
 	local rest = mountain:restingHeight(diamond.Position) + blockSize / 2
 	if rest < diamond.Position.Y - 0.1 then
+		stopSettling()
 		local target = CFrame.new(diamond.Position.X, rest, diamond.Position.Z) * DIAMOND_TILT
-		TweenService:Create(diamond, TweenInfo.new(0.4, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out), { CFrame = target }):Play()
+		settling = TweenService:Create(diamond, TweenInfo.new(0.4, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out), { CFrame = target })
+		settling:Play()
 	end
 end
 
@@ -485,6 +470,7 @@ local function lowerArms()
 end
 
 local function newRound()
+	stopSettling()
 	if mountain ~= nil then
 		mountain:destroy()
 	end
@@ -505,6 +491,7 @@ local function newRound()
 	roundStart = workspace:GetServerTimeNow()
 	State:SetAttribute("RoundStart", roundStart)
 	State:SetAttribute("Holder", "")
+	State:SetAttribute("HolderUserId", 0)
 	State:SetAttribute("HoldStart", 0)
 	refreshStone()
 	for _, player in Players:GetPlayers() do
@@ -526,24 +513,41 @@ local function grab(player: Player)
 	if head == nil or not head:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then
 		return
 	end
+	-- ClickDetector events can be forged: range and an unobstructed sightline
+	-- are checked again on the server before claiming the single diamond.
+	local direction = diamond.Position - head.Position
+	if direction.Magnitude > PICKUP_DISTANCE then
+		return
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character :: Model }
+	local hit = workspace:Raycast(head.Position, direction, params)
+	if hit == nil or hit.Instance ~= diamond then
+		return
+	end
+	stopSettling()
 	holder = player
 	holdStarted = os.clock()
+	State:SetAttribute("Holder", player.DisplayName)
+	State:SetAttribute("HolderUserId", player.UserId)
+	State:SetAttribute("HoldStart", workspace:GetServerTimeNow())
 	setPhase("Holding")
 	showDiamond(true)
-	-- Held high above the head, like a trophy, so the stream can see it.
+	-- The world diamond belongs to the real hand, including when that arm moves.
 	diamond.Anchored = false
 	diamond.Massless = true
 	diamond.CanCollide = false
-	-- Above the raised right hand.
-	diamond.CFrame = head.CFrame * CFrame.new(1.4, 3.6, 0) * DIAMOND_TILT
+	local hand = (character :: Model):FindFirstChild("RightHand") or (character :: Model):FindFirstChild("Right Arm")
+	local grip: BasePart = if hand and hand:IsA("BasePart") then hand else head
+	local offset = if grip == head then CFrame.new(0.8, 1.4, -0.6) else CFrame.new(0, -grip.Size.Y / 2 - blockSize * 0.25, -0.08)
+	diamond.CFrame = grip.CFrame * offset * DIAMOND_TILT
 	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = head
+	weld.Part0 = grip
 	weld.Part1 = diamond
 	weld.Parent = diamond
 	holdWeld = weld
 	raiseArms(character :: Model)
-	State:SetAttribute("Holder", player.DisplayName)
-	State:SetAttribute("HoldStart", workspace:GetServerTimeNow())
 	Notify:FireAllClients("grabbed", player.DisplayName)
 end
 
@@ -551,6 +555,7 @@ local function drop(reason: string)
 	if phase ~= "Holding" then
 		return
 	end
+	stopSettling()
 	local where = diamond.Position
 	local lost = holder
 	holder = nil
@@ -576,14 +581,14 @@ local function drop(reason: string)
 	setPhase("Revealed")
 	showDiamond(true)
 	State:SetAttribute("Holder", "")
+	State:SetAttribute("HolderUserId", 0)
 	State:SetAttribute("HoldStart", 0)
 	Notify:FireAllClients("dropped", { name = if lost then lost.DisplayName else "", reason = reason })
 end
 
 local function win(player: Player)
 	setPhase("Won")
-	tag.Enabled = false
-	prompt.Enabled = false
+	click.MaxActivationDistance = 0
 	local roundTime = workspace:GetServerTimeNow() - roundStart
 	local newBest = settings.best <= 0 or roundTime < settings.best
 	if newBest then
@@ -601,16 +606,7 @@ local function win(player: Player)
 	task.delay(Config.WinScreenSeconds, newRound)
 end
 
-prompt.Triggered:Connect(grab)
-diamond.Touched:Connect(function(hit)
-	if phase ~= "Revealed" then
-		return
-	end
-	local player = Players:GetPlayerFromCharacter(hit.Parent)
-	if player ~= nil then
-		grab(player)
-	end
-end)
+click.MouseClick:Connect(grab)
 
 RunService.Heartbeat:Connect(function()
 	if phase ~= "Holding" then
@@ -765,7 +761,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
 		local current = mountain
-		if current == nil or phase == "Won" or typeof(value) ~= "Instance" then
+		if current == nil or phase == "Won" or holder == player or typeof(value) ~= "Instance" then
 			return
 		end
 		local now = os.clock()
@@ -1243,6 +1239,7 @@ return Grid
 local Debris = game:GetService("Debris")
 
 local Grid = require(script.Parent.Grid)
+local RockStyle = require(script.Parent.RockStyle)
 
 local Mountain = {}
 Mountain.__index = Mountain
@@ -1252,14 +1249,6 @@ local ROCK = {
 	Color3.fromRGB(110, 106, 100),
 	Color3.fromRGB(128, 124, 116),
 	Color3.fromRGB(146, 140, 130),
-}
-local ORES = {
-	Color3.fromRGB(240, 196, 64), -- gold
-	Color3.fromRGB(46, 196, 120), -- emerald
-	Color3.fromRGB(224, 52, 76), -- ruby
-	Color3.fromRGB(60, 110, 230), -- sapphire
-	Color3.fromRGB(160, 90, 220), -- amethyst
-	Color3.fromRGB(205, 120, 60), -- copper
 }
 local FLYING_LIMIT = 40
 
@@ -1333,12 +1322,14 @@ function Mountain._draw(self: Mountain, key: number)
 	end
 	local x, y, z = Grid.coords(key)
 	local size = self.blockSize
-	local part = Instance.new("Part")
+	local style = RockStyle.forCell(key)
+	local part = Instance.new(style.shape) :: BasePart
 	part.Name = "Stone"
 	part.Anchored = true
 	part.CastShadow = false
-	part.Size = Vector3.new(size, size, size)
-	part.Position = self:cellPosition(x, y, z)
+	part.Size = Vector3.new(style.x, style.y, style.z) * size
+	part.CFrame = CFrame.new(self:cellPosition(x, y, z) + Vector3.new(style.ox, style.oy, style.oz) * size)
+		* CFrame.Angles(style.pitch, style.yaw, style.roll)
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
 	local height = self.grid.height
@@ -1351,24 +1342,16 @@ function Mountain._draw(self: Mountain, key: number)
 	elseif y == top and y <= height * 0.18 then
 		part.Material = Enum.Material.Grass
 		part.Color = Color3.fromRGB(88, 140, 70)
-	elseif (key * 2654435761) % 1000 < 60 then
-		part.Material = Enum.Material.Marble
-		part.Color = ORES[(key % #ORES) + 1]
+	elseif style.quartz then
+		part.Material = Enum.Material.Rock
+		part.Color = Color3.fromRGB(166, 161, 150)
 	else
 		part.Material = if shade > 0.5 then Enum.Material.Slate else Enum.Material.Rock
 		part.Color = ROCK[math.clamp(1 + math.floor(y / height * #ROCK + shade), 1, #ROCK)]
 	end
-	-- A rounded pebble instead of a cube: a slightly squashed sphere with a
-	-- random tilt, a little oversized so neighbours close the gaps.
-	local pebble = Instance.new("SpecialMesh")
-	pebble.MeshType = Enum.MeshType.Sphere
-	local r1 = ((key * 7919) % 97) / 97
-	local r2 = ((key * 104729) % 89) / 89
-	local r3 = ((key * 1299709) % 83) / 83
-	pebble.Scale = Vector3.new(1.18 + r1 * 0.22, 1.02 + r2 * 0.2, 1.18 + r3 * 0.22)
-	pebble.Parent = part
-	-- Only turn around the vertical axis so the collision boxes stay level to walk on.
-	part.CFrame = CFrame.new(part.Position) * CFrame.Angles(0, r2 * math.pi, 0)
+	part.Color = Color3.new(math.min(1, part.Color.R * style.shade), math.min(1, part.Color.G * style.shade), math.min(1, part.Color.B * style.shade))
+	-- Native stone facets need one instance each, without an extra mesh or light.
+	-- Colours stay close together: the one small diamond must be found by eye.
 	part.Parent = self.folder
 	self.parts[key] = part
 	self.keys[part] = key
@@ -1482,6 +1465,52 @@ return Mountain
         </Properties>
       </Item>
       <Item class="ModuleScript" referent="11">
+        <Properties>
+          <string name="Name">RockStyle</string>
+          <string name="Source"><![CDATA[--!strict
+-- Stable, irregular chips: neighbouring cells never look like a row of beads.
+-- Pure data keeps newly uncovered stones consistent with the mountain surface.
+local RockStyle = {}
+
+local function sample(key: number, salt: number): number
+	local value = bit32.bxor(key, salt)
+	value = (value * 1664525 + 1013904223) % 4294967296
+	value = bit32.bxor(value, bit32.rshift(value, 16))
+	value = (value * 1664525 + 1013904223) % 4294967296
+	value = bit32.bxor(value, bit32.lshift(value, 13))
+	value = bit32.bxor(value, bit32.rshift(value, 17))
+	value = bit32.bxor(value, bit32.lshift(value, 5))
+	return value / 4294967296
+end
+
+function RockStyle.forCell(key: number)
+	local a = sample(key, 7321441)
+	local b = sample(key, 92837163)
+	local c = sample(key, 517927)
+	local d = sample(key, 1812433253)
+	local shape = if a < 0.48 then "WedgePart" elseif a < 0.68 then "CornerWedgePart" else "Part"
+	return {
+		shape = shape,
+		-- Overlap closes seams while offsets, tilts and unequal axes break the grid.
+		x = 1.30 + b * 0.30,
+		y = 1.08 + c * 0.20,
+		z = 1.28 + d * 0.30,
+		ox = (c - 0.5) * 0.12,
+		oy = (a - 0.5) * 0.08,
+		oz = (b - 0.5) * 0.12,
+		pitch = (d - 0.5) * 0.34,
+		yaw = c * math.pi * 2,
+		roll = (b - 0.5) * 0.34,
+		shade = 0.82 + a * 0.28,
+		quartz = d > 0.975,
+	}
+end
+
+return RockStyle
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="12">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -1652,7 +1681,7 @@ return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="12">
+      <Item class="ModuleScript" referent="13">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -1728,7 +1757,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="13">
+      <Item class="ModuleScript" referent="14">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -1868,15 +1897,15 @@ return TikTokFeed
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="14">
+  <Item class="StarterPlayer" referent="15">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="15">
+    <Item class="StarterPlayerScripts" referent="16">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="16">
+      <Item class="LocalScript" referent="17">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -2025,9 +2054,9 @@ local banner = make("TextLabel", {
 outline(banner, 3)
 
 local countdown = make("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromOffset(420, 300),
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 10),
+	Size = UDim2.fromOffset(320, 144),
 	BackgroundTransparency = 1,
 	Visible = false,
 }, gui)
@@ -2035,17 +2064,19 @@ local countHolder = make("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 44),
 	BackgroundTransparency = 1,
 	Font = FONT,
-	TextSize = 36,
+	TextSize = 24,
+	TextScaled = true,
 	TextColor3 = WHITE,
 	Text = "",
 }, countdown)
+make("UITextSizeConstraint", { MinTextSize = 14, MaxTextSize = 24 }, countHolder)
 outline(countHolder, 3)
 local countNumber = make("TextLabel", {
 	Position = UDim2.fromOffset(0, 40),
-	Size = UDim2.new(1, 0, 0, 200),
+	Size = UDim2.new(1, 0, 0, 104),
 	BackgroundTransparency = 1,
 	Font = FONT,
-	TextSize = 180,
+	TextSize = 96,
 	TextColor3 = WHITE,
 	Text = "10",
 }, countdown)
@@ -2473,6 +2504,9 @@ RunService.RenderStepped:Connect(function(dt: number)
 	barFill.Size = UDim2.fromScale(math.clamp(shownStone / starting, 0, 1), 1)
 
 	local phase = attr("Phase", "Digging")
+	-- The hold counter takes the top-centre slot; the hand and gem stay unobscured.
+	stoneBox.Visible = phase ~= "Holding"
+	timerLabel.Visible = phase ~= "Holding"
 	local now = workspace:GetServerTimeNow()
 	local roundStart = attr("RoundStart", now)
 	timerLabel.Text = "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart)
@@ -2496,7 +2530,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 		lastCount = -1
 		banner.Visible = phase == "Revealed"
 		if phase == "Revealed" then
-			banner.Text = "💎 THE DIAMOND IS EXPOSED — GRAB IT!"
+			banner.Text = "DIAMOND UNCOVERED — FIND IT AND CLICK IT"
 			banner.TextTransparency = 0.25 + 0.25 * math.sin(now * 6)
 		end
 	end
@@ -2522,6 +2556,11 @@ local function isDigInput(input: InputObject): boolean
 end
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if not processed and isDigInput(input) then
+		-- A fresh click on the diamond goes to its ClickDetector, never to digging.
+		if mouse.Target == workspace:FindFirstChild("Diamond") then
+			digging = false
+			return
+		end
 		digging = true
 		digClock = 1
 	end
@@ -2531,8 +2570,13 @@ UserInputService.InputEnded:Connect(function(input: InputObject)
 		digging = false
 	end
 end)
+UserInputService.WindowFocusReleased:Connect(function()
+	digging = false
+end)
 RunService.Heartbeat:Connect(function(dt: number)
-	if not digging or panel.Visible then
+	local phase = attr("Phase", "Digging")
+	if not digging or panel.Visible or phase == "Won"
+		or (phase == "Holding" and attr("HolderUserId", 0) == player.UserId) then
 		return
 	end
 	digClock += dt
@@ -2548,7 +2592,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="17">
+        <Item class="ModuleScript" referent="18">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -2592,25 +2636,34 @@ function FirstPerson.start()
 		local hand = part("Hand", Vector3.new(0.4, 0.34, 0.45), SKIN_FALLBACK)
 		sleeve.Parent = rig
 		hand.Parent = rig
-		table.insert(hands, { side = side, sleeve = sleeve, hand = hand })
+		local fingers = {}
+		for index = 1, 4 do
+			local finger = part("Finger", Vector3.new(0.075, 0.11, 0.19), SKIN_FALLBACK)
+			finger.Parent = rig
+			table.insert(fingers, finger)
+		end
+		local thumb = part("Thumb", Vector3.new(0.12, 0.16, 0.21), SKIN_FALLBACK)
+		thumb.Parent = rig
+		table.insert(hands, { side = side, sleeve = sleeve, hand = hand, fingers = fingers, thumb = thumb })
 	end
-	local pickHandle = part("PickHandle", Vector3.new(0.12, 1.6, 0.12), Color3.fromRGB(122, 84, 52), Enum.Material.Wood)
-	local pickHead = part("PickHead", Vector3.new(1.1, 0.16, 0.16), Color3.fromRGB(150, 155, 160), Enum.Material.Metal)
-	pickHandle.Parent = rig
-	pickHead.Parent = rig
 
 	local State = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRushState")
-	local gem = part("HeldDiamond", Vector3.new(0.45, 0.45, 0.45), Color3.fromRGB(175, 240, 255), Enum.Material.Glass)
+	local worldDiamond = workspace:WaitForChild("Diamond") :: BasePart
+	local gem = part("HeldDiamond", worldDiamond.Size, worldDiamond.Color, Enum.Material.Glass)
 	gem.Reflectance = 0.35
 	gem.Transparency = 1
 	local shine = Instance.new("PointLight")
 	shine.Color = Color3.fromRGB(150, 235, 255)
-	shine.Range = 8
-	shine.Brightness = 2
+	shine.Range = 4
+	shine.Brightness = 0.7
 	shine.Enabled = false
 	shine.Parent = gem
 	gem.Parent = rig
 	local lift = 0 -- 0 = digging pose, 1 = diamond raised to the sky
+	local function isHolding(): boolean
+		-- Display names are not unique: only the actual holder gets this view.
+		return State:GetAttribute("Phase") == "Holding" and State:GetAttribute("HolderUserId") == player.UserId
+	end
 
 	-- While you hold the diamond the camera is locked, tilted up towards it.
 	local lockedYaw: number? = nil
@@ -2618,7 +2671,8 @@ function FirstPerson.start()
 		local camera = workspace.CurrentCamera
 		local character = player.Character
 		local head = character and character:FindFirstChild("Head")
-		local holding = State:GetAttribute("Phase") == "Holding" and State:GetAttribute("Holder") == player.DisplayName
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local holding = isHolding() and humanoid ~= nil and humanoid.Health > 0
 		if holding and camera and head and head:IsA("BasePart") then
 			if lockedYaw == nil then
 				local look = camera.CFrame.LookVector
@@ -2649,13 +2703,18 @@ function FirstPerson.start()
 			held = false
 		end
 	end)
+	UserInputService.WindowFocusReleased:Connect(function()
+		held = false
+	end)
 
-	RunService.RenderStepped:Connect(function(dt: number)
+	-- Position the hands after both Roblox's camera and our hold-camera update.
+	RunService:BindToRenderStep("DiamondRushHands", Enum.RenderPriority.Camera.Value + 2, function(dt: number)
 		local camera = workspace.CurrentCamera
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if camera == nil or character == nil or humanoid == nil or humanoid.Health <= 0 then
 			rig.Parent = nil
+			worldDiamond.LocalTransparencyModifier = 0
 			return
 		end
 		rig.Parent = camera
@@ -2663,7 +2722,7 @@ function FirstPerson.start()
 		local colours = character:FindFirstChildOfClass("BodyColors")
 		local skin = if colours then colours.RightArmColor3 else SKIN_FALLBACK
 		local tool = character:FindFirstChildOfClass("Tool")
-		-- Hide the third-person tool; the hands show their own pickaxe.
+		-- Keep any third-person tool from obscuring the local hand and diamond.
 		if tool then
 			for _, d in tool:GetDescendants() do
 				if d:IsA("BasePart") then
@@ -2676,40 +2735,50 @@ function FirstPerson.start()
 		local sway = if moving then 0.05 else 0.015
 		swing = math.max(0, swing - dt * 7)
 		-- Holding dig keeps both hands tearing at the rock in turn.
+		local holding = isHolding()
+		if holding then held = false end
 		if held and swing <= 0 then
 			swing = 1
 			punchSide = -punchSide
 		end
 		local strike = math.sin(swing * math.pi)
 		-- While you hold the diamond your right hand lifts it to the sky.
-		local holding = State:GetAttribute("Phase") == "Holding" and State:GetAttribute("Holder") == player.DisplayName
 		lift += ((if holding then 1 else 0) - lift) * math.min(1, dt * 8)
+		worldDiamond.LocalTransparencyModifier = if holding then 1 else 0
+		local worldLight = worldDiamond:FindFirstChildOfClass("PointLight")
+		if worldLight then worldLight.Enabled = State:GetAttribute("Phase") == "Holding" and not holding end
 		if lift > 0.01 then
 			strike = 0
 		end
 		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
 		for _, h in hands do
 			local hit = if h.side == punchSide then strike else 0
-			-- Right arm: reaches up and slightly in, pointing at the sky.
-			-- Left arm: drops out of view.
-			local raise = if h.side == 1 then lift else 0
-			local drop = if h.side == -1 then lift else 0
-			local arm = base
-				* CFrame.new(h.side * 0.75 - raise * 0.4, hit * 0.25 + raise * 1.5 - drop * 1.6, -hit * 0.4 + raise * 0.3)
-				* CFrame.Angles(math.rad(10 + hit * -55 + raise * 75), math.rad(-h.side * 8), math.rad(raise * 10))
+			local normal = base * CFrame.new(h.side * 0.75, hit * 0.25, -hit * 0.4)
+				* CFrame.Angles(math.rad(10 + hit * -55), math.rad(-h.side * 8), 0)
+			-- Camera-relative grip stays below the countdown, well inside the lens.
+			-- 62-degree camera tilt + 28-degree arm tilt still points up at the sky.
+			local raised = if h.side == 1
+				then camera.CFrame * CFrame.new(0.30, -0.56, -1.65) * CFrame.Angles(math.rad(28), math.rad(-8), math.rad(-10))
+				else normal * CFrame.new(0, -1.6, 0.3)
+			local arm = normal:Lerp(raised, lift)
 			h.sleeve.CFrame = arm * CFrame.new(0, 0, 0.55)
 			h.hand.CFrame = arm * CFrame.new(0, 0, -0.35)
 			h.hand.Color = skin
+			h.hand.LocalTransparencyModifier = 0
+			local grip = if h.side == 1 then lift else 0
+			for index, finger in h.fingers do
+				finger.Color = skin
+				finger.CFrame = h.hand.CFrame * CFrame.new((index - 2.5) * 0.09, grip * 0.16, -0.27 + grip * 0.16)
+					* CFrame.Angles(math.rad(-45 * grip), 0, 0)
+			end
+			h.thumb.Color = skin
+			h.thumb.CFrame = h.hand.CFrame * CFrame.new(-h.side * 0.21, grip * 0.16, -0.08)
+				* CFrame.Angles(math.rad(-25 * grip), 0, math.rad(h.side * 22))
 		end
-		gem.Transparency = if lift > 0.3 then 0.1 else 1
-		shine.Enabled = lift > 0.3
+		gem.Transparency = if holding and lift > 0.3 then 0.1 else 1
+		shine.Enabled = holding and lift > 0.3
 		local palm = hands[2].hand.CFrame
-		gem.CFrame = CFrame.new((palm * CFrame.new(0, 0.05, -0.45)).Position) * CFrame.Angles(math.rad(45), os.clock() * 2, math.rad(35))
-		pickHandle.Transparency = 1
-		pickHead.Transparency = pickHandle.Transparency
-		local grip = hands[2].hand.CFrame * CFrame.Angles(math.rad(-70), 0, 0)
-		pickHandle.CFrame = grip * CFrame.new(0, 0.55, 0)
-		pickHead.CFrame = pickHandle.CFrame * CFrame.new(0, 0.75, 0)
+		gem.CFrame = palm * CFrame.new(0, 0.34, -0.08) * CFrame.Angles(math.rad(45), 0, math.rad(35))
 	end)
 end
 
@@ -2720,7 +2789,7 @@ return FirstPerson
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="18">
+  <Item class="Workspace" referent="19">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>

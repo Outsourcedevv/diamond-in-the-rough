@@ -1,10 +1,11 @@
 # Diamond Rush: TikTok Live Roblox game
 
-A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 tiny rocks** (one rock is one stone; each rock is a small rounded pebble) is shown counting down at the top of the screen. Every gift, like, follow and share from your viewers blasts stone out of it. Somewhere inside is **one diamond**. Once it is exposed, grab it and **hold it for 15 seconds** to win.
+A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 tiny rocks** (one rock is one stone) is shown counting down at the top of the screen. Uneven slate chips, broken wedges and stone fragments overlap in muted rock colours: finding the one small diamond should feel like finding a needle in a haystack. Every gift, like, follow and share from your viewers blasts stone out of it. Once the diamond is exposed, find it, click it and **hold it for 15 seconds** to win.
 
 - **Stone counter.** The top of the screen shows how much stone is left (250,000 to start), with a progress bar.
 - **Gifts blast the mountain.** Each TikTok coin removes 100 rocks, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. The counter always equals the rocks really left. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
-- **Hold the diamond.** When it is uncovered, a banner says "THE DIAMOND IS EXPOSED — GRAB IT!". Walk into it (or press E) and your character holds it up to the sky with one arm and your view locks, looking up at it, until the countdown ends.
+- **Find and click the diamond.** The uncovered message tells you when it can be found, but there is no floating location label, through-rock outline or light beacon. Aim directly at the gem and left-click (tap on mobile) within 12 studs. Walking into it and pressing E do not pick it up; rocks cannot be clicked through.
+- **Hold the diamond.** Your character raises one arm and your view looks up. A visible palm, thumb and curled fingers grip the diamond in front of you. The countdown occupies the top-centre HUD while holding, leaving the hand and gem clear below it. Other players see the diamond attached to your avatar's hand.
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
   - If you fall or leave, the diamond drops.
 - **Scenery.** Rolling hills, a ring of snowy peaks, a lake, a pine forest, boulders, clouds and a campfire at the camp.

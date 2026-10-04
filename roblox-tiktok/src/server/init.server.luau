@@ -165,42 +165,19 @@ diamond.Color = Color3.fromRGB(175, 240, 255)
 diamond.Reflectance = 0.35
 diamond.Anchored = true
 diamond.CanCollide = false
+diamond.CanTouch = false
+diamond.CanQuery = false
 diamond.Parent = workspace
 local glow = Instance.new("PointLight")
 glow.Color = Color3.fromRGB(140, 230, 255)
-glow.Range = 16
-glow.Brightness = 3
+glow.Range = 4
+glow.Brightness = 0.6
 glow.Parent = diamond
-local sparkles = Instance.new("Sparkles")
-sparkles.SparkleColor = Color3.fromRGB(200, 250, 255)
-sparkles.Parent = diamond
-local highlight = Instance.new("Highlight")
-highlight.FillColor = Color3.fromRGB(150, 240, 255)
-highlight.FillTransparency = 0.55
-highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-highlight.Parent = diamond
-local prompt = Instance.new("ProximityPrompt")
-prompt.ActionText = "Grab the diamond"
-prompt.ObjectText = "Diamond"
-prompt.HoldDuration = 0
-prompt.MaxActivationDistance = 14
-prompt.RequiresLineOfSight = false
-prompt.Parent = diamond
-local tag = Instance.new("BillboardGui")
-tag.Size = UDim2.fromOffset(220, 50)
-tag.StudsOffset = Vector3.new(0, 3.2, 0)
-tag.AlwaysOnTop = true
-tag.Parent = diamond
-local tagText = Instance.new("TextLabel")
-tagText.Size = UDim2.fromScale(1, 1)
-tagText.BackgroundTransparency = 1
-tagText.Font = Enum.Font.FredokaOne
-tagText.TextScaled = true
-tagText.TextColor3 = Color3.fromRGB(255, 255, 255)
-tagText.TextStrokeTransparency = 0.2
-tagText.Text = "💎 GRAB IT!"
-tagText.Parent = tag
+local PICKUP_DISTANCE = 12
+local click = Instance.new("ClickDetector")
+click.Name = "ClickToPickUp"
+click.MaxActivationDistance = 0
+click.Parent = diamond
 
 local DIAMOND_TILT = CFrame.Angles(math.rad(45), 0, math.rad(35))
 
@@ -215,6 +192,14 @@ local holdStarted = 0
 local holdWeld: WeldConstraint? = nil
 local mineCooldown: { [Player]: number } = {}
 local admins: { [Player]: boolean } = {}
+local settling: Tween? = nil
+
+local function stopSettling()
+	if settling then
+		settling:Cancel()
+		settling = nil
+	end
+end
 
 local function setPhase(value: string)
 	phase = value
@@ -228,12 +213,10 @@ end
 
 local function showDiamond(visible: boolean)
 	diamond.Transparency = if visible then 0.12 else 1
-	diamond.CanTouch = visible
-	glow.Enabled = visible
-	sparkles.Enabled = visible
-	highlight.Enabled = visible
-	tag.Enabled = visible and phase == "Revealed"
-	prompt.Enabled = visible and phase == "Revealed"
+	diamond.CanQuery = visible and phase == "Revealed"
+	-- No through-rock outline, beacon or floating location label while searching.
+	glow.Enabled = visible and phase == "Holding"
+	click.MaxActivationDistance = if visible and phase == "Revealed" then PICKUP_DISTANCE else 0
 end
 
 -- A loose diamond drops onto whatever rock (or ground) is left under it.
@@ -243,8 +226,10 @@ local function settleDiamond()
 	end
 	local rest = mountain:restingHeight(diamond.Position) + blockSize / 2
 	if rest < diamond.Position.Y - 0.1 then
+		stopSettling()
 		local target = CFrame.new(diamond.Position.X, rest, diamond.Position.Z) * DIAMOND_TILT
-		TweenService:Create(diamond, TweenInfo.new(0.4, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out), { CFrame = target }):Play()
+		settling = TweenService:Create(diamond, TweenInfo.new(0.4, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out), { CFrame = target })
+		settling:Play()
 	end
 end
 
@@ -327,6 +312,7 @@ local function lowerArms()
 end
 
 local function newRound()
+	stopSettling()
 	if mountain ~= nil then
 		mountain:destroy()
 	end
@@ -347,6 +333,7 @@ local function newRound()
 	roundStart = workspace:GetServerTimeNow()
 	State:SetAttribute("RoundStart", roundStart)
 	State:SetAttribute("Holder", "")
+	State:SetAttribute("HolderUserId", 0)
 	State:SetAttribute("HoldStart", 0)
 	refreshStone()
 	for _, player in Players:GetPlayers() do
@@ -368,24 +355,41 @@ local function grab(player: Player)
 	if head == nil or not head:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then
 		return
 	end
+	-- ClickDetector events can be forged: range and an unobstructed sightline
+	-- are checked again on the server before claiming the single diamond.
+	local direction = diamond.Position - head.Position
+	if direction.Magnitude > PICKUP_DISTANCE then
+		return
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character :: Model }
+	local hit = workspace:Raycast(head.Position, direction, params)
+	if hit == nil or hit.Instance ~= diamond then
+		return
+	end
+	stopSettling()
 	holder = player
 	holdStarted = os.clock()
+	State:SetAttribute("Holder", player.DisplayName)
+	State:SetAttribute("HolderUserId", player.UserId)
+	State:SetAttribute("HoldStart", workspace:GetServerTimeNow())
 	setPhase("Holding")
 	showDiamond(true)
-	-- Held high above the head, like a trophy, so the stream can see it.
+	-- The world diamond belongs to the real hand, including when that arm moves.
 	diamond.Anchored = false
 	diamond.Massless = true
 	diamond.CanCollide = false
-	-- Above the raised right hand.
-	diamond.CFrame = head.CFrame * CFrame.new(1.4, 3.6, 0) * DIAMOND_TILT
+	local hand = (character :: Model):FindFirstChild("RightHand") or (character :: Model):FindFirstChild("Right Arm")
+	local grip: BasePart = if hand and hand:IsA("BasePart") then hand else head
+	local offset = if grip == head then CFrame.new(0.8, 1.4, -0.6) else CFrame.new(0, -grip.Size.Y / 2 - blockSize * 0.25, -0.08)
+	diamond.CFrame = grip.CFrame * offset * DIAMOND_TILT
 	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = head
+	weld.Part0 = grip
 	weld.Part1 = diamond
 	weld.Parent = diamond
 	holdWeld = weld
 	raiseArms(character :: Model)
-	State:SetAttribute("Holder", player.DisplayName)
-	State:SetAttribute("HoldStart", workspace:GetServerTimeNow())
 	Notify:FireAllClients("grabbed", player.DisplayName)
 end
 
@@ -393,6 +397,7 @@ local function drop(reason: string)
 	if phase ~= "Holding" then
 		return
 	end
+	stopSettling()
 	local where = diamond.Position
 	local lost = holder
 	holder = nil
@@ -418,14 +423,14 @@ local function drop(reason: string)
 	setPhase("Revealed")
 	showDiamond(true)
 	State:SetAttribute("Holder", "")
+	State:SetAttribute("HolderUserId", 0)
 	State:SetAttribute("HoldStart", 0)
 	Notify:FireAllClients("dropped", { name = if lost then lost.DisplayName else "", reason = reason })
 end
 
 local function win(player: Player)
 	setPhase("Won")
-	tag.Enabled = false
-	prompt.Enabled = false
+	click.MaxActivationDistance = 0
 	local roundTime = workspace:GetServerTimeNow() - roundStart
 	local newBest = settings.best <= 0 or roundTime < settings.best
 	if newBest then
@@ -443,16 +448,7 @@ local function win(player: Player)
 	task.delay(Config.WinScreenSeconds, newRound)
 end
 
-prompt.Triggered:Connect(grab)
-diamond.Touched:Connect(function(hit)
-	if phase ~= "Revealed" then
-		return
-	end
-	local player = Players:GetPlayerFromCharacter(hit.Parent)
-	if player ~= nil then
-		grab(player)
-	end
-end)
+click.MouseClick:Connect(grab)
 
 RunService.Heartbeat:Connect(function()
 	if phase ~= "Holding" then
@@ -607,7 +603,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
 		local current = mountain
-		if current == nil or phase == "Won" or typeof(value) ~= "Instance" then
+		if current == nil or phase == "Won" or holder == player or typeof(value) ~= "Instance" then
 			return
 		end
 		local now = os.clock()

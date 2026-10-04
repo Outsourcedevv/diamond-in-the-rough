@@ -2,6 +2,7 @@
 local HoldTimer = require("../src/shared/HoldTimer")
 local Format = require("../src/shared/Format")
 local Grid = require("../src/server/Grid")
+local RockStyle = require("../src/server/RockStyle")
 
 local passed, failed = 0, 0
 local function check(condition: boolean, message: string)
@@ -51,6 +52,25 @@ check(Format.parseHex("orange") == nil, "bad colour rejected")
 check(Format.wins("WINS", 3, 0) == "WINS: 3" and Format.wins("WINS", 3, 10) == "WINS: 3/10" and Format.wins("", 2, 0) == "2", "win counter text")
 
 -- Mountain grid
+-- Visual changes must remain deterministic when a blast uncovers a saved cell,
+-- use bounded per-cell geometry and avoid a repeating bead pattern.
+local styles = {}
+local previousShape = ""
+local changesInRow = 0
+for x = -128, 127 do
+	local key = Grid.key(x, 12, 17)
+	local rock = RockStyle.forCell(key)
+	local again = RockStyle.forCell(key)
+	check(rock.shape == again.shape and rock.yaw == again.yaw and rock.shade == again.shade, "uncovered rock keeps its appearance")
+	check(rock.x >= 1.3 and rock.x <= 1.6 and rock.y >= 1.08 and rock.y <= 1.28 and rock.z >= 1.28 and rock.z <= 1.58, "stone sizes stay within the compact rubble envelope")
+	check(math.abs(rock.ox) <= 0.06 and math.abs(rock.oz) <= 0.06 and math.abs(rock.oy) <= 0.04, "stone jitter stays tied to its diggable cell")
+	styles[rock.shape] = true
+	if rock.shape ~= previousShape then changesInRow += 1 end
+	previousShape = rock.shape
+end
+check(styles.Part and styles.WedgePart and styles.CornerWedgePart, "rubble mixes three native faceted shapes")
+check(changesInRow > 100, "adjacent rocks do not repeat the same shape in long grid rows")
+
 local seed = 0
 local function rand(a: number?, b: number?): number
 	seed = (seed * 1103515245 + 12345) % 2147483648

@@ -144,9 +144,9 @@ local banner = make("TextLabel", {
 outline(banner, 3)
 
 local countdown = make("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromOffset(420, 300),
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 10),
+	Size = UDim2.fromOffset(320, 144),
 	BackgroundTransparency = 1,
 	Visible = false,
 }, gui)
@@ -154,17 +154,19 @@ local countHolder = make("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 44),
 	BackgroundTransparency = 1,
 	Font = FONT,
-	TextSize = 36,
+	TextSize = 24,
+	TextScaled = true,
 	TextColor3 = WHITE,
 	Text = "",
 }, countdown)
+make("UITextSizeConstraint", { MinTextSize = 14, MaxTextSize = 24 }, countHolder)
 outline(countHolder, 3)
 local countNumber = make("TextLabel", {
 	Position = UDim2.fromOffset(0, 40),
-	Size = UDim2.new(1, 0, 0, 200),
+	Size = UDim2.new(1, 0, 0, 104),
 	BackgroundTransparency = 1,
 	Font = FONT,
-	TextSize = 180,
+	TextSize = 96,
 	TextColor3 = WHITE,
 	Text = "10",
 }, countdown)
@@ -592,6 +594,9 @@ RunService.RenderStepped:Connect(function(dt: number)
 	barFill.Size = UDim2.fromScale(math.clamp(shownStone / starting, 0, 1), 1)
 
 	local phase = attr("Phase", "Digging")
+	-- The hold counter takes the top-centre slot; the hand and gem stay unobscured.
+	stoneBox.Visible = phase ~= "Holding"
+	timerLabel.Visible = phase ~= "Holding"
 	local now = workspace:GetServerTimeNow()
 	local roundStart = attr("RoundStart", now)
 	timerLabel.Text = "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart)
@@ -615,7 +620,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 		lastCount = -1
 		banner.Visible = phase == "Revealed"
 		if phase == "Revealed" then
-			banner.Text = "💎 THE DIAMOND IS EXPOSED — GRAB IT!"
+			banner.Text = "DIAMOND UNCOVERED — FIND IT AND CLICK IT"
 			banner.TextTransparency = 0.25 + 0.25 * math.sin(now * 6)
 		end
 	end
@@ -641,6 +646,11 @@ local function isDigInput(input: InputObject): boolean
 end
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if not processed and isDigInput(input) then
+		-- A fresh click on the diamond goes to its ClickDetector, never to digging.
+		if mouse.Target == workspace:FindFirstChild("Diamond") then
+			digging = false
+			return
+		end
 		digging = true
 		digClock = 1
 	end
@@ -650,8 +660,13 @@ UserInputService.InputEnded:Connect(function(input: InputObject)
 		digging = false
 	end
 end)
+UserInputService.WindowFocusReleased:Connect(function()
+	digging = false
+end)
 RunService.Heartbeat:Connect(function(dt: number)
-	if not digging or panel.Visible then
+	local phase = attr("Phase", "Digging")
+	if not digging or panel.Visible or phase == "Won"
+		or (phase == "Holding" and attr("HolderUserId", 0) == player.UserId) then
 		return
 	end
 	digClock += dt

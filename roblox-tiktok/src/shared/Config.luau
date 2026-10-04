@@ -25,7 +25,7 @@ local Config = {
 	WinBackgroundColor = "#2B2140",
 
 	-- Rocks -----------------------------------------------------------------------
-	BlockSize = 0.4, -- size of one rock in studs (the diamond is the same size)
+	BlockSize = 0.4, -- diggable cell size in studs; irregular rock chips overlap its edges
 	DigPerSecond = 100, -- rocks dug per second while the dig button is held
 
 	-- TikTok ------------------------------------------------------------------

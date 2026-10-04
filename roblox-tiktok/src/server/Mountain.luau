@@ -5,6 +5,7 @@
 local Debris = game:GetService("Debris")
 
 local Grid = require(script.Parent.Grid)
+local RockStyle = require(script.Parent.RockStyle)
 
 local Mountain = {}
 Mountain.__index = Mountain
@@ -14,14 +15,6 @@ local ROCK = {
 	Color3.fromRGB(110, 106, 100),
 	Color3.fromRGB(128, 124, 116),
 	Color3.fromRGB(146, 140, 130),
-}
-local ORES = {
-	Color3.fromRGB(240, 196, 64), -- gold
-	Color3.fromRGB(46, 196, 120), -- emerald
-	Color3.fromRGB(224, 52, 76), -- ruby
-	Color3.fromRGB(60, 110, 230), -- sapphire
-	Color3.fromRGB(160, 90, 220), -- amethyst
-	Color3.fromRGB(205, 120, 60), -- copper
 }
 local FLYING_LIMIT = 40
 
@@ -95,12 +88,14 @@ function Mountain._draw(self: Mountain, key: number)
 	end
 	local x, y, z = Grid.coords(key)
 	local size = self.blockSize
-	local part = Instance.new("Part")
+	local style = RockStyle.forCell(key)
+	local part = Instance.new(style.shape) :: BasePart
 	part.Name = "Stone"
 	part.Anchored = true
 	part.CastShadow = false
-	part.Size = Vector3.new(size, size, size)
-	part.Position = self:cellPosition(x, y, z)
+	part.Size = Vector3.new(style.x, style.y, style.z) * size
+	part.CFrame = CFrame.new(self:cellPosition(x, y, z) + Vector3.new(style.ox, style.oy, style.oz) * size)
+		* CFrame.Angles(style.pitch, style.yaw, style.roll)
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
 	local height = self.grid.height
@@ -113,24 +108,16 @@ function Mountain._draw(self: Mountain, key: number)
 	elseif y == top and y <= height * 0.18 then
 		part.Material = Enum.Material.Grass
 		part.Color = Color3.fromRGB(88, 140, 70)
-	elseif (key * 2654435761) % 1000 < 60 then
-		part.Material = Enum.Material.Marble
-		part.Color = ORES[(key % #ORES) + 1]
+	elseif style.quartz then
+		part.Material = Enum.Material.Rock
+		part.Color = Color3.fromRGB(166, 161, 150)
 	else
 		part.Material = if shade > 0.5 then Enum.Material.Slate else Enum.Material.Rock
 		part.Color = ROCK[math.clamp(1 + math.floor(y / height * #ROCK + shade), 1, #ROCK)]
 	end
-	-- A rounded pebble instead of a cube: a slightly squashed sphere with a
-	-- random tilt, a little oversized so neighbours close the gaps.
-	local pebble = Instance.new("SpecialMesh")
-	pebble.MeshType = Enum.MeshType.Sphere
-	local r1 = ((key * 7919) % 97) / 97
-	local r2 = ((key * 104729) % 89) / 89
-	local r3 = ((key * 1299709) % 83) / 83
-	pebble.Scale = Vector3.new(1.18 + r1 * 0.22, 1.02 + r2 * 0.2, 1.18 + r3 * 0.22)
-	pebble.Parent = part
-	-- Only turn around the vertical axis so the collision boxes stay level to walk on.
-	part.CFrame = CFrame.new(part.Position) * CFrame.Angles(0, r2 * math.pi, 0)
+	part.Color = Color3.new(math.min(1, part.Color.R * style.shade), math.min(1, part.Color.G * style.shade), math.min(1, part.Color.B * style.shade))
+	-- Native stone facets need one instance each, without an extra mesh or light.
+	-- Colours stay close together: the one small diamond must be found by eye.
 	part.Parent = self.folder
 	self.parts[key] = part
 	self.keys[part] = key
