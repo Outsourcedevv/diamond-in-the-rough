@@ -46,13 +46,32 @@ function FirstPerson.start()
 	pickHandle.Parent = rig
 	pickHead.Parent = rig
 
+	local State = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRushState")
+	local gem = part("HeldDiamond", Vector3.new(0.45, 0.45, 0.45), Color3.fromRGB(175, 240, 255), Enum.Material.Glass)
+	gem.Reflectance = 0.35
+	gem.Transparency = 1
+	local shine = Instance.new("PointLight")
+	shine.Color = Color3.fromRGB(150, 235, 255)
+	shine.Range = 8
+	shine.Brightness = 2
+	shine.Enabled = false
+	shine.Parent = gem
+	gem.Parent = rig
+	local lift = 0 -- 0 = digging pose, 1 = diamond raised to the sky
 	local swing = 0
 	local punchSide = 1
 	local bob = 0
+	local held = false
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if not processed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+			held = true
 			swing = 1
 			punchSide = -punchSide
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			held = false
 		end
 	end)
 
@@ -80,18 +99,33 @@ function FirstPerson.start()
 		local moving = humanoid.MoveDirection.Magnitude > 0.1 and humanoid.FloorMaterial ~= Enum.Material.Air
 		bob += dt * (if moving then 9 else 2)
 		local sway = if moving then 0.05 else 0.015
-		swing = math.max(0, swing - dt * 4)
+		swing = math.max(0, swing - dt * 7)
+		-- Holding dig keeps both hands tearing at the rock in turn.
+		if held and swing <= 0 then
+			swing = 1
+			punchSide = -punchSide
+		end
 		local strike = math.sin(swing * math.pi)
-		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
+		-- While you hold the diamond both hands lift it up to the sky.
+		local holding = State:GetAttribute("Phase") == "Holding" and State:GetAttribute("Holder") == player.DisplayName
+		lift += ((if holding then 1 else 0) - lift) * math.min(1, dt * 8)
+		if lift > 0.01 then
+			strike = 0
+		end
+		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway + lift * 1.55, -1.6 + lift * 0.25)
 		for _, h in hands do
 			local hit = if h.side == punchSide then strike else 0
 			local arm = base
-				* CFrame.new(h.side * 0.75, hit * 0.25, -hit * 0.4)
-				* CFrame.Angles(math.rad(10 + hit * -55), math.rad(-h.side * 8), 0)
+				* CFrame.new(h.side * (0.75 - lift * 0.5), hit * 0.25, -hit * 0.4)
+				* CFrame.Angles(math.rad(10 + hit * -55 + lift * 70), math.rad(-h.side * (8 - lift * 30)), 0)
 			h.sleeve.CFrame = arm * CFrame.new(0, 0, 0.55)
 			h.hand.CFrame = arm * CFrame.new(0, 0, -0.35)
 			h.hand.Color = skin
 		end
+		gem.Transparency = if lift > 0.3 then 0.1 else 1
+		shine.Enabled = lift > 0.3
+		local between = hands[1].hand.CFrame.Position:Lerp(hands[2].hand.CFrame.Position, 0.5)
+		gem.CFrame = CFrame.new(between + camera.CFrame.UpVector * 0.35) * CFrame.Angles(math.rad(45), os.clock() * 2, math.rad(35))
 		pickHandle.Transparency = 1
 		pickHead.Transparency = pickHandle.Transparency
 		local grip = hands[2].hand.CFrame * CFrame.Angles(math.rad(-70), 0, 0)

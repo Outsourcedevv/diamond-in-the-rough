@@ -4,12 +4,12 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 
 - **Stone counter.** The top of the screen shows how much stone is left (250,000 to start), with a progress bar.
 - **Gifts blast the mountain.** Each TikTok coin removes 100 rocks, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. The counter always equals the rocks really left. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
-- **Hold the diamond.** When it is uncovered, a banner says "THE DIAMOND IS EXPOSED — GRAB IT!". Walk into it (or press E) to lift it above your head.
+- **Hold the diamond.** When it is uncovered, a banner says "THE DIAMOND IS EXPOSED — GRAB IT!". Walk into it (or press E) and your character raises it to the sky with both arms; in first person you see your hands lift it overhead.
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
   - If you fall or leave, the diamond drops.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and ⭐ NEW BEST! when you beat it). Then a fresh mountain appears.
-- **Dig with your hands.** First-person view with two hands: click a rock to punch it out (one rock each).
+- **Dig with your hands.** First-person view with two hands: hold the left mouse button on the mountain and your hands tear out about 100 rocks a second.
 
 ## What you need
 
@@ -42,7 +42,7 @@ If Studio says HTTP requests are off, use **Home → Game Settings → Security 
 
 ## Customise the win counter
 
-While playing, click **⚙ Settings** under the win counter (only you, the owner, can see it). From there you can change:
+While playing, press **Y** to open the hidden settings panel (only you, the owner, can open it; press Y again to close it). From there you can change:
 
 - the title
 - the number of wins (or press +1 / −1)
@@ -51,6 +51,16 @@ While playing, click **⚙ Settings** under the win counter (only you, the owner
 - whether the counter is shown
 
 The same panel can start a new round, reset the best time, change the starting stone, and send test gifts.
+
+## Change what each gift does
+
+In the **Y** panel:
+
+- **Rocks per coin** sets what any gift without its own rule does (default 100 rocks per coin).
+- **Rocks per like / follow / share** set those amounts.
+- **Gift rules** give a gift its own amount: type the gift's name exactly as TikTok shows it (for example `Rose`, `Galaxy`) and how many rocks it removes per gift, then press **Add / change gift rule**. Press ✕ to delete a rule. Names are not case-sensitive.
+
+Everything is saved with your other settings.
 
 You can also type these in the Roblox chat:
 
@@ -79,7 +89,8 @@ In Studio, open **ReplicatedStorage → DiamondRush → Config**:
 | `HoldCountFrom` | 10 | Number the countdown starts at |
 | `HoldSlowdown` | 0.6 | 0 = even countdown, 1 = slows down a lot at the end |
 | `WinScreenSeconds` | 4 | How long the win screen shows |
-| `BlockSize` | 1 | Size of one rock in studs; the diamond is the same size |
+| `BlockSize` | 0.4 | Size of one rock in studs; the diamond is the same size |
+| `DigPerSecond` | 100 | Rocks dug per second while holding the dig button |
 
 With the defaults, clearing the whole mountain takes 2,500 coins of gifts. The diamond often shows up before that, depending on where the blasts land.
 
