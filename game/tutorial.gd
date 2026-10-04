@@ -5,7 +5,7 @@ signal changed(data: Dictionary)
 
 const MountainScript = preload("res://game/mountain.gd")
 const STEP_COUNT := 7
-const TITLES := ["Find your footing", "Break into the mountain", "Sell your ore", "Buy a steel pickaxe", "Dig out a find", "Turn a find in the light", "Keep crystals safe"]
+const TITLES := ["Find your footing", "Break into the mountain", "Sell your ore", "Buy a steel pickaxe", "Dig out a find", "Turn a find in the light", "Keep finds safe"]
 
 var game: Node
 var test_mode := false
@@ -225,7 +225,7 @@ func _nearest_ore() -> Vector3:
 					best = at
 	return best
 
-## Nearest buried crystal or fossil close to the surface.
+## Nearest buried fossil or curio close to the surface.
 func _nearest_find() -> Vector3:
 	var grid = game.state.mountain
 	var here: Vector3 = game.player.position
@@ -252,7 +252,7 @@ func data() -> Dictionary:
 		if _finished_time > 0.0:
 			if _established_completion:
 				result.title = "Mountain searched"
-				result.instruction = "Every find is already dug out. Inspect stored candidates and test them at the bench. How to play has the controls."
+				result.instruction = "Every find is already dug out. Pick stored finds from the tray to shelve or sell them. How to play has the controls."
 				result.key = "E at tray  /  Right click to inspect"
 				if game.state.certified:
 					result.title = "Diamond already certified"
@@ -260,7 +260,7 @@ func data() -> Dictionary:
 					result.key = "Tab: journal"
 			else:
 				result.title = "You are ready"
-				result.instruction = "Blast deeper for richer ore. The diamond hides in the core among clear crystals; the bench confirms the real one. Replay from How to play."
+				result.instruction = "Blast deeper for richer ore. The one real diamond is buried deep in the core; bring it to the certification bench. Replay from How to play."
 			result.progress = 1.0
 		return result
 	result.title = TITLES[step]
@@ -293,16 +293,16 @@ func data() -> Dictionary:
 			if positions is Dictionary: result.target = positions.get("steel_pick",result.target)
 			result.target_label = "Steel pickaxe"
 		4:
-			result.instruction = "Glittering white veins hold crystals; pale seams hold fossils. Mine one and walk over what falls out."
+			result.instruction = "Pale seams in the rock hold fossils and curios. Mine one and walk over what falls out."
 			result.key = "Hold left click  /  walk over it"
 			result.target = _nearest_find()
-			result.target_label = "Crystal or fossil" if result.target != Vector3.ZERO else ""
+			result.target_label = "Buried fossil" if result.target != Vector3.ZERO else ""
 		5:
-			result.instruction = "Inspect a held find and turn it in the light. Compare mist, edges and bubbles. Wheel selects another find."
-			if game.state.held_ids().is_empty(): result.instruction = "Pick up a crystal or fossil, then right click to inspect it and move the mouse to turn it."
+			result.instruction = "Inspect a held find and turn it in the light. Wheel selects another find."
+			if game.state.held_ids().is_empty(): result.instruction = "Pick up a fossil or curio, then right click to inspect it and move the mouse to turn it."
 			result.key = "Right click  /  Mouse"
 		6:
-			result.instruction = "Store your finds in the inspection tray. Crystals stay safe there until you test them at the bench."
+			result.instruction = "Store your finds in the inspection tray. They stay safe there until you shelve or sell them."
 			if game.state.held_ids().is_empty(): result.instruction = "Pick up a find and place it in the inspection tray. Stored finds stay safe."
 			result.key = "E at the tray"
 			result.target = _station("tray")

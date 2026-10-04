@@ -12,15 +12,15 @@ A playable native first-person 3D mining game built with Godot 4.6.2. Start with
 
 ## Features
 
-- A 72 × 64 m mountain rising about 39 m to a snowy summit: grassy foothills, bare rocky upper slopes and cliffs. Underneath its smooth surface are about 29,000 diggable 1 m cells of soil, stone, granite and bedrock, so tunnels and blast craters carve smooth pits into the rock.
-- Nine ores in veins that get richer with depth: coal, copper, iron, silver, gold, amethyst, emerald, sapphire and ruby.
-- One genuine diamond buried deep in the core among about 150 look-alike clear crystals, plus fossils and curiosities to collect.
+- A 144 × 128 m mountain rising about 70 m to a snowy summit: grassy foothills, three rocky shoulders, bare upper slopes and cliffs. Underneath its smooth surface are about 228,000 diggable 1 m cells of soil, stone, granite and bedrock, so tunnels and blast craters carve smooth pits into the rock.
+- Fourteen ores in veins that get richer with depth: coal, tin, copper, iron, silver, turquoise, gold, topaz, amethyst, opal, emerald, sapphire, platinum and ruby.
+- Exactly one diamond, buried at least 28 m deep in the core, with no look-alikes, plus 180 fossils and curiosities to collect.
 - Hold-to-mine pickaxe with crack feedback, then a steel pickaxe and a power drill.
 - Three thrown explosives with real fuses, physics and craters: dynamite, TNT and the Mountain Buster.
-- An ore satchel, an ore magnet, crystal sonar that pings veins through rock, and a loupe for inspection clues.
+- An ore satchel, an ore magnet, treasure sonar that pings the diamond and fossils through rock, and an assay loupe that raises ore prices by 25%.
 - Physical equipment models with attached names and prices at the camp outfitter: point at a model and press E to buy it.
 - A seven-step playable tutorial, attached station signs and a compact UI that adapts to screen proportions.
-- Collectibles, cosmetic rewards, harmless pranks and three-step diamond certification.
+- Collectibles, cosmetic rewards, harmless pranks and diamond certification at the camp bench.
 - Host-authoritative ENet co-op for up to four players with shared funds and progression.
 - Spatial push-to-talk voice: full volume within 2 metres, fading to silence at 12 metres.
 - Automatic solo/host saves, disconnect recovery and a Lost & Found station.

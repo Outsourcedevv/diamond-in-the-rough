@@ -1,6 +1,30 @@
 # Windows game verification
 
-## Mining update
+## Big mountain update
+
+Verified on 4 October 2026 with the official Godot 4.6.2 Linux editor binary, headless and in a native OpenGL window (Mesa software rendering under a virtual display). The release workflow reruns the solo and tutorial suites on the exported Windows executable before it publishes, and now requires 78 and 101 checks.
+
+The mountain grid grew from 72 × 42 × 64 to 144 × 72 × 128 cells. The generated mountain rises 70 m and holds 227,917 rock cells, about eight times as many as before, with 40,391 ore cells across fourteen ore kinds. The 149 look-alike clear crystals are gone, along with the CERTIFIED DIAMOND label prank. The diamond is the only crystal block and the only crystal find; the other 180 finds are fossils and curios. A new world builds in about one second on this four-core machine, because chunk surfaces now build on every core instead of one.
+
+The solo progression suite passed **78 checks** headless and in the rendered window. New checks confirm:
+
+- No fake diamonds are generated, and only the diamond's block glitters.
+- The diamond lies at least 28 m deep (40 m in the tested world).
+- All fourteen ore kinds occur.
+- The assay loupe pays 25% more for ore.
+- The treasure sonar pings fossils, and the diamond through 12 m of rock, but not from 30 m away.
+- The bench refuses a fossil.
+- Bringing the diamond to the bench certifies it in one step, with the $1,000 grant.
+
+The tutorial and layout suite passed **101 checks**, including 33 collision probes spread across the larger footprint. Their tolerance is now 0.75 m: across all 11,192 mountain columns the largest gap between the collision surface and the smooth height was 0.68 m, on sharp ridge crests.
+
+The native co-op suite passed **25 host and 20 client checks**, the proximity voice pair **42 host and 41 client checks**, and the loopback HTTP updater suite **56 checks**.
+
+A save from the previous build is not loaded. It is copied to `<save>.v2.old`, and a fresh claim starts with a message explaining that the mountain has grown. A client refuses a host snapshot from a different save schema.
+
+The screenshots in `screenshots/` of the camp, the overview, dynamite, a Mountain Buster crater and the diamond under inspection were rendered from this build and reviewed. Windows rendering performance on the larger mountain and internet co-op remain unverified.
+
+## Mining update (previous build)
 
 Verified on 3 October 2026 with the official Godot 4.6.2 Linux editor binary, headless and in a native OpenGL window (Mesa software rendering under a virtual display). The Windows export was not rebuilt for this update; the release workflow runs the solo and tutorial suites on the exported Windows executable before it publishes.
 
