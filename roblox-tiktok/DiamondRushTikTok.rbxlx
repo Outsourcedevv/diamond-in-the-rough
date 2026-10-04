@@ -393,16 +393,32 @@ local function showDiamond(visible: boolean)
 	click.MaxActivationDistance = if visible and phase == "Revealed" then PICKUP_DISTANCE else 0
 end
 
--- A loose diamond drops onto whatever rock (or ground) is left under it.
-local function settleDiamond()
-	if phase ~= "Revealed" or mountain == nil or not diamond.Anchored then
-		return
+-- Use the actual stone/terrain surface, including the enlarged rock facets.
+-- The grid's cell height can put a tilted diamond inside the visible stone.
+local function diamondLanding(where: Vector3): Vector3
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local ignore: { Instance } = { diamond }
+	for _, player in Players:GetPlayers() do
+		if player.Character then table.insert(ignore, player.Character) end
 	end
-	local rest = mountain:restingHeight(diamond.Position) + blockSize / 2
-	if rest < diamond.Position.Y - 0.1 then
+	params.FilterDescendantsInstances = ignore
+	local origin = Vector3.new(where.X, math.max(where.Y + blockSize * 2, 2), where.Z)
+	local hit = workspace:Raycast(origin, Vector3.new(0, -2000, 0), params)
+	-- Bounding sphere covers every corner of the rotated gem, plus a small gap.
+	local clearance = diamond.Size.Magnitude / 2 + 0.04
+	local surface = if hit then math.max(0, hit.Position.Y) else 0
+	return Vector3.new(where.X, surface + clearance, where.Z)
+end
+
+local function settleDiamond()
+	if phase ~= "Revealed" or mountain == nil or not diamond.Anchored then return end
+	local landing = diamondLanding(diamond.Position)
+	if math.abs(landing.Y - diamond.Position.Y) > 0.02 then
 		stopSettling()
-		local target = CFrame.new(diamond.Position.X, rest, diamond.Position.Z) * DIAMOND_TILT
-		settling = TweenService:Create(diamond, TweenInfo.new(0.4, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out), { CFrame = target })
+		settling = TweenService:Create(diamond, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			CFrame = CFrame.new(landing) * DIAMOND_TILT,
+		})
 		settling:Play()
 	end
 end
@@ -430,15 +446,8 @@ local function applyStone(amount: number): Vector3?
 	end
 	local count = math.min(amount, current:remaining())
 	local centre = current:blast(count)
-	if centre ~= nil and count >= 200 then
-		local blast = Instance.new("Explosion")
-		blast.Position = centre
-		blast.BlastRadius = math.min(40, 2 + count ^ (1 / 3) * 1.6)
-		blast.BlastPressure = 0
-		blast.DestroyJointRadiusPercent = 0
-		blast.ExplosionType = Enum.ExplosionType.NoCraters
-		blast.Parent = workspace
-	end
+	-- Gift spectacle is rendered by GiftEffects on each client. Never create a
+	-- physics Explosion: blasts may remove grid stones, never the diamond or rigs.
 	refreshStone()
 	settleDiamond()
 	return centre
@@ -583,18 +592,7 @@ local function drop(reason: string)
 	end
 	diamond.Anchored = true
 	diamond.AssemblyLinearVelocity = Vector3.zero
-	local params = RaycastParams.new()
-	local ignore: { Instance } = { diamond }
-	for _, player in Players:GetPlayers() do
-		if player.Character then
-			table.insert(ignore, player.Character)
-		end
-	end
-	params.FilterDescendantsInstances = ignore
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	local hit = workspace:Raycast(where, Vector3.new(0, -400, 0), params)
-	local y = if hit then hit.Position.Y + blockSize / 2 else blockSize / 2
-	diamond.CFrame = CFrame.new(where.X, math.max(y, blockSize / 2), where.Z) * DIAMOND_TILT
+	diamond.CFrame = CFrame.new(diamondLanding(where)) * DIAMOND_TILT
 	setPhase("Revealed")
 	showDiamond(true)
 	State:SetAttribute("Holder", "")
@@ -784,7 +782,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
 		local current = mountain
-		if current == nil or phase == "Won" or holder == player or typeof(value) ~= "Instance" then
+		if current == nil or phase == "Won" or holder == player or typeof(value) ~= "Instance" or value == diamond then
 			return
 		end
 		local now = os.clock()
