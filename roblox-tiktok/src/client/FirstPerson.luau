@@ -41,9 +41,11 @@ function FirstPerson.start()
 		hand.Parent = rig
 		local fingers = {}
 		for index = 1, 4 do
-			local finger = part("Finger", Vector3.new(0.075, 0.11, 0.19), SKIN_FALLBACK)
+			local finger = part("FingerBase", Vector3.new(0.075, 0.11, 0.14), SKIN_FALLBACK)
+			local tip = part("FingerTip", Vector3.new(0.072, 0.10, 0.13), SKIN_FALLBACK)
 			finger.Parent = rig
-			table.insert(fingers, finger)
+			tip.Parent = rig
+			table.insert(fingers, { base = finger, tip = tip })
 		end
 		local thumb = part("Thumb", Vector3.new(0.12, 0.16, 0.21), SKIN_FALLBACK)
 		thumb.Parent = rig
@@ -62,6 +64,15 @@ function FirstPerson.start()
 	shine.Enabled = false
 	shine.Parent = gem
 	gem.Parent = rig
+	local hiddenArms: { [BasePart]: number } = {}
+	local armNames = { RightHand = true, RightLowerArm = true, RightUpperArm = true, LeftHand = true, LeftLowerArm = true, LeftUpperArm = true, ["Right Arm"] = true, ["Left Arm"] = true }
+	local function restoreArms()
+		for limb, transparency in hiddenArms do
+			if limb.Parent then limb.LocalTransparencyModifier = transparency end
+		end
+		table.clear(hiddenArms)
+	end
+	player.CharacterRemoving:Connect(restoreArms)
 	local lift = 0 -- 0 = digging pose, 1 = diamond raised to the sky
 	local function isHolding(): boolean
 		-- Display names are not unique: only the actual holder gets this view.
@@ -106,10 +117,19 @@ function FirstPerson.start()
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if camera == nil or character == nil or humanoid == nil or humanoid.Health <= 0 then
 			rig.Parent = nil
+			restoreArms()
 			worldDiamond.LocalTransparencyModifier = 0
 			return
 		end
 		rig.Parent = camera
+		-- Scriptable cameras bypass the normal first-person transparency controller.
+		-- Hide the real limbs so they cannot float above the custom hands.
+		for _, limb in character:GetChildren() do
+			if limb:IsA("BasePart") and armNames[limb.Name] then
+				if hiddenArms[limb] == nil then hiddenArms[limb] = limb.LocalTransparencyModifier end
+				limb.LocalTransparencyModifier = 1
+			end
+		end
 		-- Skin tone from the avatar.
 		local colours = character:FindFirstChildOfClass("BodyColors")
 		local skin = if colours then colours.RightArmColor3 else SKIN_FALLBACK
@@ -131,7 +151,7 @@ function FirstPerson.start()
 		if holding then
 			cycle = 1
 		elseif cycle < 1 then
-			cycle = math.min(1, cycle + dt / 0.38)
+			cycle = math.min(1, cycle + dt / 0.46)
 		elseif digging then
 			cycle = 0
 			punchSide = -punchSide
@@ -143,17 +163,18 @@ function FirstPerson.start()
 		local extension = reach * (1 - pull) * digBlend
 		local scoop = math.sin(math.clamp((cycle - 0.38) / 0.62, 0, 1) * math.pi) * digBlend
 		-- While you hold the diamond your right hand lifts it to the sky.
-		lift += ((if holding then 1 else 0) - lift) * math.min(1, dt * 8)
+		lift += ((if holding then 1 else 0) - lift) * (1 - math.exp(-dt * 9))
 		worldDiamond.LocalTransparencyModifier = if holding then 1 else 0
 		local worldLight = worldDiamond:FindFirstChildOfClass("PointLight")
 		if worldLight then worldLight.Enabled = State:GetAttribute("Phase") == "Holding" and not holding end
-		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
+		local base = camera.CFrame * CFrame.new(math.sin(bob * 0.5) * sway * 0.4, -0.92 + math.sin(bob) * sway * 0.45, -1.6)
 		for _, h in hands do
 			local active = if h.side == punchSide then 1 - lift else 0
 			local hit = extension * active
 			local rake = scoop * active
 			local prep = wind * digBlend * active
-			local normal = base * CFrame.new(h.side * (0.58 - hit * 0.24), hit * 0.27 - rake * 0.19, -hit * 0.62 + prep * 0.12 + rake * 0.16)
+			local support = if h.side ~= punchSide then extension * (1 - lift) else 0
+			local normal = base * CFrame.new(h.side * (0.58 - hit * 0.24), hit * 0.27 - rake * 0.19 + support * 0.05, -hit * 0.62 + prep * 0.12 + rake * 0.16 - support * 0.08)
 				* CFrame.Angles(math.rad(10 - hit * 22 + rake * 34 + prep * 12), math.rad(-h.side * (8 + hit * 12)), math.rad(h.side * (rake * 16 - hit * 8)))
 			-- Camera-relative grip stays below the countdown, well inside the lens.
 			-- 62-degree camera tilt + 28-degree arm tilt still points up at the sky.
@@ -161,24 +182,30 @@ function FirstPerson.start()
 				then camera.CFrame * CFrame.new(0.30, -0.56, -1.65) * CFrame.Angles(math.rad(28), math.rad(-8), math.rad(-10))
 				else normal * CFrame.new(0, -1.6, 0.3)
 			local arm = normal:Lerp(raised, lift)
-			h.sleeve.CFrame = arm * CFrame.new(0, 0, 0.55)
+			h.sleeve.CFrame = arm * CFrame.new(0, 0, 0.46)
 			h.hand.CFrame = arm * CFrame.new(0, 0, -0.35)
 			h.hand.Color = skin
 			h.hand.LocalTransparencyModifier = 0
 			local grip = math.max(if h.side == 1 then lift else 0, rake * 0.85)
 			for index, finger in h.fingers do
-				finger.Color = skin
-				finger.CFrame = h.hand.CFrame * CFrame.new((index - 2.5) * 0.09, grip * 0.16, -0.27 + grip * 0.16)
-					* CFrame.Angles(math.rad(-45 * grip), 0, 0)
+				local curl = grip * (0.85 + index * 0.035)
+				local joint = h.hand.CFrame * CFrame.new((index - 2.5) * 0.09, 0, -0.20)
+					* CFrame.Angles(math.rad(-46 * curl), 0, 0)
+				finger.base.Color = skin
+				finger.tip.Color = skin
+				finger.base.CFrame = joint * CFrame.new(0, 0, -0.07)
+				finger.tip.CFrame = joint * CFrame.new(0, 0, -0.14)
+					* CFrame.Angles(math.rad(-54 * curl), 0, 0) * CFrame.new(0, 0, -0.065)
 			end
 			h.thumb.Color = skin
-			h.thumb.CFrame = h.hand.CFrame * CFrame.new(-h.side * 0.21, grip * 0.16, -0.08)
-				* CFrame.Angles(math.rad(-25 * grip), 0, math.rad(h.side * 22))
+			h.thumb.CFrame = h.hand.CFrame * CFrame.new(-h.side * 0.17, 0.015, -0.08)
+				* CFrame.Angles(math.rad(-35 * grip), math.rad(h.side * 20 * grip), math.rad(h.side * (15 + 35 * grip)))
+
 		end
 		gem.Transparency = if holding and lift > 0.3 then 0.1 else 1
 		shine.Enabled = holding and lift > 0.3
 		local palm = hands[2].hand.CFrame
-		gem.CFrame = palm * CFrame.new(0, 0.34, -0.08) * CFrame.Angles(math.rad(45), 0, math.rad(35))
+		gem.CFrame = palm * CFrame.new(0, 0.25, -0.14) * CFrame.Angles(math.rad(45), 0, math.rad(35))
 	end)
 end
 
