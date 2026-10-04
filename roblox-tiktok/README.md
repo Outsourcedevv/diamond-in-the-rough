@@ -25,6 +25,8 @@ Add gifts refill previously dug spaces, with stones flying and snapping into pla
 
 ## Rebuild tests
 
+Rebuilding any rocks during a diamond hold cancels that hold and clears the countdown. Nearby dug spaces under the holder refill first, from the bottom upwards. Players covered by restored rock are lifted onto the new surface. A rebuild that actually restores at least 10,000 rocks moves the former holder to the highest restored rock surface instead. The diamond is released beside the player, above the rock, ready to click again for a fresh countdown. A full-mountain gift that restores zero rocks does not interrupt the hold. During the countdown, the holder sees a larger bright outlined gem above their palm; other players see an outlined diamond in the raised hand.
+
 In the game's **Y settings panel**, scroll to **REBUILD TEST GIFTS**. Choose **+1,000**, **+10,000**, **+100,000**, or **Refill mountain**. These tests work offline and always rebuild, regardless of existing gift rules. They refill previously dug spaces, stop at the original mountain size, and preserve the round and wins. Dig first to see the effect. The localhost bridge page has the same four buttons.
 
 The gift catalogue refresh now accepts the username typed on the page directly, without first connecting live events. It loads every gift TikTok returns for that account, with no display limit, and caches the result. TikTok must be reachable and may require the account to be LIVE; the eight offline starter gifts are not a complete worldwide list.

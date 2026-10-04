@@ -150,8 +150,9 @@ function Mountain._drawShell(self: Mountain, key: number)
 end
 
 -- Reconcile only the changed cells and the two surrounding rock layers.
-function Mountain.restore(self: Mountain, count: number): (number, { any })
-	local restored = self.grid:restore(count)
+function Mountain.restore(self: Mountain, count: number, near: Vector3?): (number, { any })
+	local focus = if near then { x = near.X / self.blockSize, z = near.Z / self.blockSize, radius = 4 / self.blockSize } else nil
+	local restored = self.grid:restore(count, focus)
 	local affected = {}
 	for _, key in restored do
 		affected[key] = true

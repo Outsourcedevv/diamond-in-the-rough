@@ -209,7 +209,28 @@ function Grid.remove(self: Grid, key: number): boolean
 end
 
 -- Refill recently excavated cells in reverse order, never the sealed diamond cell.
-function Grid.restore(self: Grid, count: number): { number }
+function Grid.restore(self: Grid, count: number, focus: { x: number, z: number, radius: number }?): { number }
+	-- A rebuild during a hold fills the holder's column first, base upwards.
+	if focus then
+		local distant, nearby = {}, {}
+		for _, key in self.removedOrder do
+			local x, y, z = Grid.coords(key)
+			local distance = (x - focus.x) ^ 2 + (z - focus.z) ^ 2
+			if distance <= focus.radius ^ 2 then
+				table.insert(nearby, { key = key, y = y, distance = distance })
+			else
+				table.insert(distant, key)
+			end
+		end
+		-- restore pops from the end: closest column first, lowest cell first.
+		table.sort(nearby, function(a, b)
+			if a.distance ~= b.distance then return a.distance > b.distance end
+			if a.y ~= b.y then return a.y > b.y end
+			return a.key > b.key
+		end)
+		for _, cell in nearby do table.insert(distant, cell.key) end
+		self.removedOrder = distant
+	end
 	local restored = {}
 	local affected = {}
 	while #restored < count and #self.removedOrder > 0 do

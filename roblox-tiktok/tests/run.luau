@@ -88,6 +88,25 @@ local function rand(a: number?, b: number?): number
 	return unit
 end
 local t0 = os.clock()
+-- Rebuilds during a hold refill the player's column before distant holes.
+local focused = Grid.new(1234, 1, rand)
+local column = {}
+local distant: number? = nil
+for _, key in focused.order do
+	local x, y, z = Grid.coords(key)
+	if x == 0 and z == 0 then table.insert(column, { key = key, y = y }) end
+	if math.abs(x) > 2 then distant = key end
+end
+table.sort(column, function(a, b) return a.y < b.y end)
+check(#column >= 2 and distant ~= nil, "focused rebuild fixture has near and far cells")
+focused:remove(column[1].key)
+focused:remove(column[2].key)
+focused:remove(distant :: number)
+local nearRestore = focused:restore(2, { x = 0, z = 0, radius = 1 })
+check(nearRestore[1] == column[1].key and nearRestore[2] == column[2].key, "rebuild restores the holder column from bottom upwards")
+check(not focused:isSolid(distant :: number), "small rebuild leaves distant excavations unfilled")
+check(#focused:restore(100, { x = 10000, z = 10000, radius = 1 }) == 1, "focus outside mountain still restores available rocks")
+check(#focused:restore(100, { x = 0, z = 0, radius = 1 }) == 0, "full mountain rebuild is a no-op")
 local grid = Grid.new(250000, 3.7, rand)
 local hidden = grid:carveHiddenCell()
 print(string.format("mountain rocks %d, exposed %d, radius %d, built in %.2f s", grid.total, grid:exposedCount(), grid.radius, os.clock() - t0))

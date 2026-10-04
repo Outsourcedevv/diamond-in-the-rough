@@ -676,7 +676,7 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	elseif kind == "win" and type(data) == "table" then
 		showWin(data)
 	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then
-		addFeed(tostring(data.name) .. " dropped the diamond!", 0, "drop")
+		addFeed(tostring(data.name) .. (if data.reason == "rebuild" then " — rebuild cancelled the countdown! Pick up the diamond again." else " dropped the diamond!"), 0, "drop")
 	end
 end)
 

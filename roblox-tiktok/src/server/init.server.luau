@@ -177,6 +177,15 @@ glow.Color = Color3.fromRGB(140, 230, 255)
 glow.Range = 4
 glow.Brightness = 0.6
 glow.Parent = diamond
+local holdOutline = Instance.new("Highlight")
+holdOutline.Name = "CountdownDiamond"
+holdOutline.Adornee = diamond
+holdOutline.FillColor = Color3.fromRGB(135, 235, 255)
+holdOutline.FillTransparency = 0.8
+holdOutline.OutlineColor = Color3.new(1, 1, 1)
+holdOutline.OutlineTransparency = 0.15
+holdOutline.Enabled = false
+holdOutline.Parent = diamond
 local PICKUP_DISTANCE = 12
 local click = Instance.new("ClickDetector")
 click.Name = "ClickToPickUp"
@@ -220,6 +229,7 @@ local function showDiamond(visible: boolean)
 	diamond.CanQuery = visible and phase == "Revealed"
 	-- No through-rock outline, beacon or floating location label while searching.
 	glow.Enabled = visible and phase == "Holding"
+	holdOutline.Enabled = visible and phase == "Holding"
 	click.MaxActivationDistance = if visible and phase == "Revealed" then PICKUP_DISTANCE else 0
 end
 
@@ -263,6 +273,7 @@ local function reveal()
 end
 
 -- One rock is one stone: blast exactly that many rocks.
+local interruptRebuildHold: (number) -> () = function(_restored: number) end
 local function applyStone(amount: number): (Vector3?, number?)
 	amount = math.floor(amount)
 	if amount == 0 then return nil, 0 end
@@ -273,7 +284,11 @@ local function applyStone(amount: number): (Vector3?, number?)
 		return
 	end
 	if amount < 0 then
-		local restored, samples = current:restore(-amount)
+		local character = holder and holder.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local focus = if phase == "Holding" and root and root:IsA("BasePart") then root.Position else nil
+		local restored, samples = current:restore(-amount, focus)
+		if restored > 0 then interruptRebuildHold(restored) end
 		refreshStone()
 		if phase == "Revealed" then
 			stopSettling()
@@ -459,6 +474,7 @@ local function drop(reason: string)
 	local where = diamond.Position
 	local lost = holder
 	holder = nil
+	holdStarted = 0
 	lowerArms()
 	if holdWeld ~= nil then
 		holdWeld:Destroy()
@@ -473,6 +489,55 @@ local function drop(reason: string)
 	State:SetAttribute("HolderUserId", 0)
 	State:SetAttribute("HoldStart", 0)
 	Notify:FireAllClients("dropped", { name = if lost then lost.DisplayName else "", reason = reason })
+end
+
+interruptRebuildHold = function(restored: number)
+	local interrupted = if phase == "Holding" then holder else nil
+	if interrupted then drop("rebuild") end
+	local current = mountain
+	if current == nil then return end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { current.folder }
+	local height = current.grid.height * blockSize * 2 + 50
+	local function surface(x: number, z: number): RaycastResult?
+		return workspace:Raycast(Vector3.new(x, height, z), Vector3.new(0, -height - 100, 0), params)
+	end
+	-- Find the highest actual restored surface, including partially dug summits.
+	local summit: Vector3? = nil
+	if interrupted and restored >= 10000 then
+		local highest: BasePart? = nil
+		for _, part in current.parts do
+			if highest == nil or part.Position.Y > highest.Position.Y then highest = part end
+		end
+		if highest then
+			local hit = surface(highest.Position.X, highest.Position.Z)
+			if hit then summit = hit.Position end
+		end
+	end
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if character == nil or root == nil or not root:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then continue end
+		local ground = surface(root.Position.X, root.Position.Z)
+		local clearance = humanoid.HipHeight + root.Size.Y / 2
+		-- R6 rigs use zero HipHeight; account for their legs.
+		if humanoid.RigType == Enum.HumanoidRigType.R6 then clearance += 2 end
+		local destination = if player == interrupted then summit else nil
+		if destination == nil and ground and ground.Position.Y > root.Position.Y - clearance + 0.1 then destination = ground.Position end
+		if destination then
+			local target = destination + Vector3.new(0, clearance + 1, 0)
+			character:PivotTo(character:GetPivot() + (target - root.Position))
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+		end
+		if player == interrupted then
+			-- Leave the released diamond beside the player's safe landing point.
+			local where = root.Position + Vector3.new(1.2, 0, 0)
+			diamond.CFrame = CFrame.new(diamondLanding(Vector3.new(where.X, height, where.Z))) * DIAMOND_TILT
+		end
+	end
 end
 
 local function win(player: Player)
