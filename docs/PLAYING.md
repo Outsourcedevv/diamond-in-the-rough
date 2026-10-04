@@ -9,15 +9,17 @@ Choose New game for a fresh mountain, or Continue to return to your claim.
 New game replaces the current save. Settings offers mouse sensitivity, field
 of view, audio, proximity voice and fullscreen.
 
-Saves from the earlier scree-sorting builds cannot be carried into the
-mountain: Continue starts a fresh mountain the first time you play this build.
+The mountain grew much bigger in this build, so claims from earlier builds
+cannot be carried over: Continue stakes a fresh claim on the new mountain the
+first time you play it. The old save file is kept next to the new one with
+`.v2.old` added to its name.
 
 The first solo or hosted session starts a seven-step guide at the camp. It
 teaches movement, mining ore, selling, buying the steel pickaxe, digging out a
-crystal or fossil, close inspection and safe storage. Use How to play to replay
-or skip it. Completed guidance stays completed on your PC. Replays direct full
-hands to safe storage. A mountain with every find already dug out instead shows
-help for stored candidates and certification, preserving your progress.
+fossil, close inspection and safe storage. Use How to play to replay or skip
+it. Completed guidance stays completed on your PC. Replays direct full hands to
+safe storage. A mountain with every find already dug out instead shows help for
+the stored finds, preserving your progress.
 
 Your first shift: walk to the mountain behind the camp, aim at the rock and hold
 left click. Rock flecked with colour is ore; mining it puts it straight into your
@@ -44,9 +46,8 @@ C                    Keep the selected fossil or curiosity on display
 Tab / Esc            Journal / pause menu
 V                    Hold to talk to nearby players in co-op
 M                    Mute / unmute your microphone
-F                    Apply a fake label to your held find or a friend's finds
 G                    Polishing foam prank; aim at a friend
-R                    Give a friend a clear crystal as a wrapped present
+R                    Give a friend your selected find as a wrapped present
 H                    Cycle available hats
 ```
 
@@ -55,7 +56,9 @@ Pranks preserve the diamond, equipment and shared money.
 
 ## The mountain
 
-Grassy foothills rise into bare rock, cliffs and a snowy summit. You can walk up
+The mountain is about 144 metres across and rises about 70 metres from the
+valley floor: grassy foothills rise into bare rock, cliffs, three rocky
+shoulders and a snowy summit. You can walk up
 the lower slopes; the steep upper faces need digging or blasting. Each swing of
 the pickaxe breaks away about a metre of rock: soil near the surface, then
 stone. Deep inside is granite, which the old pickaxe cannot break, and the
@@ -66,18 +69,22 @@ your progress. Hold left click to keep swinging; chips fly off with each hit.
 Ore grows in veins and gets richer the deeper you dig:
 
 ```text
-Coal $2 · Copper ore $4 · Iron ore $6       near the surface
-Silver ore $11 · Gold nugget $20            a few metres down
-Amethyst $28 · Emerald $38                  deep
-Sapphire $45 · Ruby $55                     deepest, near the core
+Coal $2 · Tin ore $3 · Copper ore $4 · Iron ore $6       first 4 m
+Silver ore $11 · Turquoise $15 · Gold nugget $20          4 to 12 m down
+Topaz $24 · Amethyst $28 · Opal $33                       12 to 22 m down
+Emerald $38 · Sapphire $45 · Platinum ore $50             22 to 32 m down
+Ruby $55                                                  deepest, near the core
 ```
+
+Each band also holds some ore from the bands next to it. Fourteen kinds of ore
+fill about 18% of the mountain.
 
 Ore goes straight into your satchel. A full satchel will not take more ore:
 sell it at the exchange first. Explosions that find more ore than you can
 carry lose the excess, and the message says how much.
 
-Glittering white veins hold crystals; pale seams hold fossils and other
-curiosities. When you break one, the find pops out and drops onto the rock
+Pale seams hold fossils and other curiosities. When you break one, the find
+pops out and drops onto the rock
 below. Walk over it to pick it up, or aim at it and press E. Finds never get
 destroyed: if the rock beneath them is mined away, they settle further down.
 
@@ -90,12 +97,13 @@ opens.
 ```text
 $60    Steel pickaxe: mines twice as fast and cuts through granite.
 $110   Big satchel: carry 90 ore and 10 finds (instead of 30 and 4).
-$150   Loupe & lamp: clearer facet, inclusion and optical inspection clues.
+$150   Assay loupe: every ore sells for 25% more at the exchange.
 $180   Dynamite: press 2, left click to throw. Blasts a 2.4 m crater.
 $300   Ore magnet: pulls loose finds within 7 m into your hands.
 $420   Power drill: hold left click to drill through rock at speed.
 $750   TNT: press 3 to throw. Blasts a 3.9 m crater.
-$1000  Crystal sonar: pings buried crystal veins within 12 m through rock.
+$1000  Treasure sonar: pings the buried diamond and fossils within 16 m
+       through solid rock.
 $2400  Mountain Buster: press 4 to throw. Blasts a 6.5 m crater.
 ```
 
@@ -106,23 +114,22 @@ ore goes to the thrower's satchel, and released finds drop into the crater.
 
 ## Finding the diamond
 
-The one genuine diamond is buried deep in the mountain's core, hidden among
-about 150 clear quartz crystals that look identical in the rock. Dig or blast
-your way down and collect clear crystals as you go.
+There is exactly one diamond in the mountain and no fakes. It is buried in the
+core, at least 28 metres below the surface and just above the bedrock. Its
+block is the only glittering kimberlite in the mountain: when the crosshair
+prompt says "Glittering kimberlite", you have found it. The treasure sonar
+shows it through 16 metres of rock. Dig or blast your way down; explosions
+never destroy it.
 
 At the inspection tray, E places your carried finds into storage. Aim directly
-at a stone to pick it back up. With empty hands, use the wheel over the tray or
-press E on its tabletop to change storage pages; every candidate stays
-accessible. Right-click a held stone to rotate and inspect it. Look for
-fast-clearing breath mist, sharp facet junctions, no trapped bubbles, and a
-point behind the stone lost in haze. The loupe adds the decisive edge and
-inclusion clues. Clear crystals cannot be sold: the exchange always routes
-them safely to the tray.
+at a find to pick it back up. With empty hands, use the wheel over the tray or
+press E on its tabletop to change storage pages. Right-click a held find to
+rotate and inspect it. The diamond cannot be sold: the exchange always routes
+it safely to the tray.
 
-Bring a promising held crystal to the Certification Bench at the foot of the
-mountain. Aim at the bench and press E for each of its three tests. The final
-test gives the verdict. Imitations return unharmed; the genuine diamond earns
-the ending and a $1,000 discovery grant. You can keep mining afterwards.
+Carry the diamond to the Certification Bench at the foot of the mountain, aim
+at the bench and press E. It earns the ending and a $1,000 discovery grant. You
+can keep mining afterwards.
 
 Press C to display a fossil or curiosity. The Specimen Collection also shelves
 carried fossils when used. New collection entries earn a $12 museum grant and
@@ -185,11 +192,10 @@ host's world. The normal save is:
 %APPDATA%\Godot\app_userdata\DIAMOND IN THE ROUGH\rough_workshop.json
 
 Carried finds return to the inspection tray when a save loads or their owner
-disconnects. The diamond cannot be sold accidentally: clear crystals are
-redirected to the tray. Dropped finds remain recoverable. Use the Lost & Found
-bell by the entrance, or Recover lost finds in the Tab journal. The journal's
-Return to solid ground option brings you back to camp if you dig yourself into
-a hole. Recovery also resets an unfinished certification sequence.
+disconnects. The diamond cannot be sold accidentally: the exchange redirects it
+to the tray. Dropped finds remain recoverable. Use the Lost & Found bell by the
+entrance, or Recover lost finds in the Tab journal. The journal's Return to
+solid ground option brings you back to camp if you dig yourself into a hole.
 
 ## Screen sizes
 
@@ -200,7 +206,7 @@ Text retains its proportions; long settings and help pages scroll vertically.
 ## Prototype scope
 
 The mountain, camp, materials and sound effects are generated for this
-prototype. Digging works on about 29,000 cells of 1 metre under a smooth
+prototype. Digging works on about 228,000 cells of 1 metre under a smooth
 rock surface; only the parts touched by mining or a blast are rebuilt. There
 are no cave-ins: unsupported rock stays where it is. Explosions remove rock
 within a sphere and do not damage players. Prank reactions use brief

@@ -8,15 +8,17 @@ signal surface_settled
 
 const MountainScript = preload("res://game/mountain.gd")
 const CHUNK: int = 12
-const BATCH_CHUNKS: int = 3
+const BATCH_CHUNKS: int = 8
+const SONAR_RANGE: float = 16.0
 
 # Rock tone along a ramp: 0 soil, 0.5 stone, 0.8 granite, 1 bedrock.
 const ROCK_RAMP: Dictionary = {1: 0.42, 2: 0.55, 3: 0.0, 4: 0.5, 5: 0.8, 6: 1.0}
 # Ore speck styles: 1 dull, 2 metallic, 3 glinting gem.
 const ORE_STYLE: Dictionary = {
-	10: [1, Color("1d1d1f")], 11: [2, Color("c26d35")], 12: [2, Color("b98a6f")], 13: [2, Color("d9dde0")],
-	14: [2, Color("e8b93c")], 15: [3, Color("9a55c9")], 16: [3, Color("2aa868")], 17: [3, Color("3462d4")],
-	18: [3, Color("cf2a40")], 20: [3, Color("e6fbff")], 21: [1, Color("e3d3ad")]
+	10: [1, Color("1d1d1f")], 11: [2, Color("a9aca8")], 12: [2, Color("c26d35")], 13: [2, Color("b98a6f")],
+	14: [2, Color("d9dde0")], 15: [1, Color("3fbfb0")], 16: [2, Color("e8b93c")], 17: [3, Color("f0a23a")],
+	18: [3, Color("9a55c9")], 19: [3, Color("f2b9d6")], 20: [3, Color("2aa868")], 21: [3, Color("3462d4")],
+	22: [2, Color("bcc6d3")], 23: [3, Color("cf2a40")], 30: [3, Color("e6fbff")], 31: [1, Color("e3d3ad")]
 }
 const SHADER_CODE: String = """
 shader_type spatial;
@@ -62,7 +64,7 @@ void fragment() {
 	// Ore veins show as speckled patches in the exposed rock.
 	float layer = COLOR.a;
 	float wobble = (fbm(p * 0.8) - 0.5) * 0.3;
-	float meadow = layer > 0.25 && layer < 0.75 ? smoothstep(0.62, 0.84, n.y + wobble) * (1.0 - smoothstep(13.0, 19.0, p.y + wobble * 8.0)) : 0.0;
+	float meadow = layer > 0.25 && layer < 0.75 ? smoothstep(0.62, 0.84, n.y + wobble) * (1.0 - smoothstep(20.0, 30.0, p.y + wobble * 8.0)) : 0.0;
 	if (UV.x > 0.05) {
 		// Small mineral flecks: sparse where turf covers the ground, dense in bare rock.
 		float grain_mask = vnoise(p * 7.5 + vec3(UV.y * 5.1));
@@ -87,10 +89,10 @@ void fragment() {
 		albedo = mix(albedo, turf, meadow * 0.94);
 		rough = mix(rough, 1.0, meadow);
 	}
-	float snowy = layer > 0.75 ? 1.0 : smoothstep(20.0, 27.0, p.y + wobble * 6.0) * step(0.25, layer);
+	float snowy = layer > 0.75 ? 1.0 : smoothstep(38.0, 48.0, p.y + wobble * 6.0) * step(0.25, layer);
 	float snow = snowy * smoothstep(0.55, 0.78, n.y + wobble * 0.6);
 	// The summit keeps a proper snowcap even on its steeper faces.
-	snow = max(snow, smoothstep(27.0, 32.0, p.y + wobble * 5.0) * step(0.25, layer) * smoothstep(0.2, 0.45, n.y + wobble));
+	snow = max(snow, smoothstep(50.0, 58.0, p.y + wobble * 5.0) * step(0.25, layer) * smoothstep(0.2, 0.45, n.y + wobble));
 	albedo = mix(albedo, vec3(0.9, 0.92, 0.95) * (0.92 + detail * 0.1), snow);
 	rough = mix(rough, 0.75, snow);
 	// The foot of the mountain fades into the valley floor's colour.
@@ -117,6 +119,7 @@ var _chunk_heights: Dictionary = {}
 var _task: int = -1
 var _task_keys: Array = []
 var _task_results: Array = []
+var _results_lock := Mutex.new()
 
 func build(owner_game: Node) -> void:
 	game = owner_game
@@ -133,8 +136,9 @@ func build(owner_game: Node) -> void:
 	_natural_top.resize(MountainScript.SIZE_X * MountainScript.SIZE_Z)
 	for z: int in range(MountainScript.SIZE_Z):
 		for x: int in range(MountainScript.SIZE_X):
-			for y: int in range(grid.height(x, z)):
-				_host_codes[MountainScript.index(x, y, z)] = grid.base_code(x, y, z)
+			var top: int = grid.height(x, z)
+			for y: int in range(top):
+				_host_codes[MountainScript.index(x, y, z)] = MountainScript.layer_code(top, y)
 			# Vertical distance to the ground overstates true distance on steep slopes;
 			# scaling by the slope keeps the smoothed surface free of terrace bands.
 			var gx: float = (grid.smooth_height(x + 1, z) - grid.smooth_height(x - 1, z)) * 0.5
@@ -199,7 +203,7 @@ func mark_cells(list: PackedInt32Array) -> void:
 func _exit_tree() -> void:
 	# Never leave a surface computation running while the game shuts down.
 	if _task >= 0:
-		WorkerThreadPool.wait_for_task_completion(_task)
+		WorkerThreadPool.wait_for_group_task_completion(_task)
 		_task = -1
 
 ## True once every requested surface rebuild has been applied.
@@ -208,37 +212,66 @@ func idle() -> bool:
 
 func flush() -> void:
 	_finish_task()
-	for key: Vector3i in _dirty.keys():
-		_rebuild(key)
+	if _dirty.is_empty():
+		return
+	# Every core helps build a whole new mountain; results apply here in one go.
+	_task_keys = _dirty.keys()
 	_dirty.clear()
+	_task_results.clear()
+	_task_results.resize(_task_keys.size())
+	_task = WorkerThreadPool.add_group_task(_compute_one.bind(_task_keys.duplicate(), state.cells), _task_keys.size(), -1, true)
+	_finish_task()
 
 func _process(delta: float) -> void:
 	# Surfaces are computed on a worker thread so mining, blasts and joining never
 	# stall the game loop (and with it networking and voice); results apply here.
-	if _task >= 0 and WorkerThreadPool.is_task_completed(_task):
+	if _task >= 0 and WorkerThreadPool.is_group_task_completed(_task):
 		_finish_task()
 		if _dirty.is_empty():
 			surface_settled.emit()
 	if _task < 0 and not _dirty.is_empty():
-		_task_keys.clear()
-		for key: Vector3i in _dirty.keys():
-			_task_keys.append(key)
+		_task_keys = _nearest_dirty(BATCH_CHUNKS)
+		for key: Vector3i in _task_keys:
 			_dirty.erase(key)
-			if _task_keys.size() >= BATCH_CHUNKS:
-				break
 		_task_results.clear()
 		_task_results.resize(_task_keys.size())
-		_task = WorkerThreadPool.add_task(_compute_batch.bind(_task_keys.duplicate(), state.cells.duplicate()))
+		# Leave cores free for the game loop, networking and voice while this runs.
+		var helpers: int = maxi(1, OS.get_processor_count() / 2)
+		_task = WorkerThreadPool.add_group_task(_compute_one.bind(_task_keys.duplicate(), state.cells.duplicate()), _task_keys.size(), helpers, true)
 	_update_sonar(delta)
 
-func _compute_batch(keys: Array, cells: PackedByteArray) -> void:
-	for i: int in range(keys.size()):
-		_task_results[i] = _compute(keys[i], cells)
+## The dirty chunks closest to the player, so the rock around them appears first.
+func _nearest_dirty(count: int) -> Array:
+	var here: Vector3 = Vector3.ZERO
+	if is_instance_valid(game) and is_instance_valid(game.player):
+		here = game.player.position
+	var focus: Vector3 = (here - MountainScript.ORIGIN) / float(CHUNK)
+	var chosen: Array = []
+	var distances: Array[float] = []
+	for key: Vector3i in _dirty:
+		var distance: float = (Vector3(key) + Vector3(0.5, 0.5, 0.5)).distance_squared_to(focus)
+		var at: int = chosen.size()
+		while at > 0 and distances[at - 1] > distance:
+			at -= 1
+		if at >= count:
+			continue
+		chosen.insert(at, key)
+		distances.insert(at, distance)
+		if chosen.size() > count:
+			chosen.pop_back()
+			distances.pop_back()
+	return chosen
+
+func _compute_one(index: int, keys: Array, cells: PackedByteArray) -> void:
+	var result: Dictionary = _compute(keys[index], cells)
+	_results_lock.lock()
+	_task_results[index] = result
+	_results_lock.unlock()
 
 func _finish_task() -> void:
 	if _task < 0:
 		return
-	WorkerThreadPool.wait_for_task_completion(_task)
+	WorkerThreadPool.wait_for_group_task_completion(_task)
 	_task = -1
 	for i: int in range(_task_keys.size()):
 		# A chunk changed again while it was being computed is rebuilt once more later.
@@ -539,12 +572,15 @@ func _update_sonar(delta: float) -> void:
 	var here: Vector3 = game.player.position
 	var shown: int = 0
 	for gem: Dictionary in state.gems.values():
-		if str(gem.get("stage", "")) != "buried" or not str(gem.get("kind", "")) in ["suspect", "diamond"]:
+		if str(gem.get("stage", "")) != "buried":
 			continue
 		var at: Vector3 = MountainScript.cell_center(int(gem.get("cell", 0)))
-		if at.distance_to(here) > 12.0:
+		if at.distance_to(here) > SONAR_RANGE:
 			continue
-		var ping: Node3D = game.workshop.make_gem("suspect")
+		# The diamond pings bright blue-white; fossils and curios a soft amber.
+		var diamond: bool = str(gem.get("kind", "")) == "diamond"
+		var tone: Color = Color("8ff3ff") if diamond else Color("ffc46b")
+		var ping: Node3D = game.workshop.make_gem("diamond" if diamond else "collectible")
 		ping.position = at
 		ping.scale = Vector3.ONE * 0.46
 		for mesh: Node in ping.get_children():
@@ -552,10 +588,10 @@ func _update_sonar(delta: float) -> void:
 				var glow: StandardMaterial3D = mesh.material_override.duplicate()
 				glow.no_depth_test = true
 				glow.emission_enabled = true
-				glow.emission = Color("8ff3ff")
-				glow.emission_energy_multiplier = 1.4
+				glow.emission = tone
+				glow.emission_energy_multiplier = 1.4 if diamond else 0.9
 				glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-				glow.albedo_color = Color(0.6, 0.95, 1.0, 0.85)
+				glow.albedo_color = Color(tone.r, tone.g, tone.b, 0.85)
 				glow.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 				mesh.material_override = glow
 		_sonar_root.add_child(ping)

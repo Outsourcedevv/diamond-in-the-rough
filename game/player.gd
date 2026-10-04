@@ -145,7 +145,7 @@ func set_tool(next: String) -> void:
 
 func show_held(gem: Dictionary) -> void:
 	var next_id: int = int(gem.get("id", -1))
-	var signature: String=str(next_id)+str(gem.get("tag",false))+str(gem.get("clean",false))
+	var signature: String=str(next_id)+str(gem.get("clean",false))
 	if held_id == next_id and held_signature==signature:
 		return
 	held_id = next_id
@@ -162,17 +162,6 @@ func show_held(gem: Dictionary) -> void:
 			mesh.material_override.no_depth_test=true
 			mesh.material_override.render_priority=100
 	held_root.add_child(visual)
-	if gem.get("tag",false):
-		box(visual,Vector3(0.52,0.13,0.018),Vector3(0,0.11,0.42),Color("f1e4c5"))
-		var label:=Label3D.new()
-		label.text="CERTIFIED*"
-		label.font_size=22
-		label.pixel_size=0.002
-		label.position=Vector3(0,0.11,0.432)
-		label.modulate=Color("342f25")
-		label.outline_size=0
-		label.no_depth_test=true
-		visual.add_child(label)
 	visual_angle = Vector2.ZERO
 
 func _input(event: InputEvent) -> void:
@@ -206,7 +195,8 @@ func _physics_process(delta: float) -> void:
 		# Enough lift to climb one block of the mountain at a time.
 		velocity.y = 7.2
 	move_and_slide()
-	if position.y < -8 or absf(position.x) > 40 or position.z > 12 or position.z < -84:
+	# The claim is the camp terrace plus the mountain's footprint and a margin around it.
+	if position.y < -8 or absf(position.x) > 76 or position.z > 12 or position.z < -148:
 		game.unstuck()
 
 func _process(delta: float) -> void:

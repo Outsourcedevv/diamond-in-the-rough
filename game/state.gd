@@ -3,6 +3,7 @@ class_name RoughState
 
 ## The server owns every block, item transition and purchase. Clients submit intentions.
 ## IDs and the seeded diamond are preserved even after an item has been sold.
+## The mountain holds exactly one diamond; every other find is a fossil or curio.
 signal changed
 signal notice(text: String)
 signal peer_joined(id: int)
@@ -16,9 +17,12 @@ signal throw_spawned(peer_id: int, tier: String, position: Vector3, velocity: Ve
 signal blasted(fuse: int, position: Vector3, tier: String)
 
 const MountainScript = preload("res://game/mountain.gd")
-const SAVE_VERSION: int = 2
-const GEM_COUNT: int = 220
-const CRYSTAL_COUNT: int = 150
+const SAVE_VERSION: int = 3
+const GEM_COUNT: int = 181
+## How deep the diamond rests: in the bottom layers, well inside the core.
+const DIAMOND_MIN_DEPTH: int = 28
+## The assay loupe's bonus on every ore sale.
+const LOUPE_BONUS: float = 1.25
 const MAX_PLAYERS: int = 4
 const MINING_REACH: float = 5.6
 const VOICE_FRAME_BYTES: int = 320 # 20 ms of mono 16 kHz G.711 mu-law audio.
@@ -43,19 +47,17 @@ var certified: bool = false
 var searched: int = 0
 var players: Dictionary = {}
 var seed_value: int = 0
-var certification_step: int = 0
-var certification_id: int = -1
 var prices: Dictionary = {"steel_pick": 60, "satchel": 110, "loupe": 150, "dynamite": 180, "magnet": 300, "drill": 420, "tnt": 750, "sonar": 1000, "buster": 2400}
-var upgrade_names: Dictionary = {"steel_pick": "Steel pickaxe", "satchel": "Big satchel", "loupe": "Loupe & lamp", "dynamite": "Dynamite", "magnet": "Ore magnet", "drill": "Power drill", "tnt": "TNT", "sonar": "Crystal sonar", "buster": "Mountain Buster"}
+var upgrade_names: Dictionary = {"steel_pick": "Steel pickaxe", "satchel": "Big satchel", "loupe": "Assay loupe", "dynamite": "Dynamite", "magnet": "Ore magnet", "drill": "Power drill", "tnt": "TNT", "sonar": "Treasure sonar", "buster": "Mountain Buster"}
 var benefits: Dictionary = {
 	"steel_pick": "Mines twice as fast and cuts through granite.",
 	"satchel": "Carry 90 ore and 10 finds.",
-	"loupe": "Sharper optical clues under the inspection lamp.",
+	"loupe": "Every ore sells for 25% more at the exchange.",
 	"dynamite": "Press 2 to throw. Blasts a 2.4 m crater.",
 	"magnet": "Pulls loose finds within 7 m into your hands.",
 	"drill": "Hold left click to drill through rock at speed.",
 	"tnt": "Press 3 to throw. Blasts a 3.9 m crater.",
-	"sonar": "Pings buried crystal veins within 12 m through solid rock.",
+	"sonar": "Pings the buried diamond and fossils within 16 m through solid rock.",
 	"buster": "Press 4 to throw. Blasts a 6.5 m crater."
 }
 var station_positions: Dictionary = {}
@@ -79,6 +81,7 @@ var _fuses: Dictionary = {}
 var _next_fuse: int = 1
 var _throw_ready: Dictionary = {}
 var _save_dirty: bool = false
+var _outdated_save: bool = false
 var _last_save_ms: int = 0
 # Ephemeral transport data: microphone audio and these counters are never saved.
 var voice_sent_packets: int = 0
@@ -152,36 +155,30 @@ func new_game() -> void:
 	collection.clear()
 	certified = false
 	searched = 0
-	certification_step = 0
-	certification_id = -1
 	mined = MountainScript.empty_mined()
 	_damage.clear()
 	_fuses.clear()
 	for id in players:
 		players[id]["ore"] = {}
-	# The genuine diamond rests deep in the mountain's core, among many look-alikes.
+	# The one diamond rests deep in the mountain's core. There are no look-alikes.
 	var core: Array[int] = []
 	for z: int in range(MountainScript.SIZE_Z):
 		for x: int in range(MountainScript.SIZE_X):
-			for y: int in range(2, 7):
-				if mountain.natural_solid(x, y, z) and mountain.depth(x, y, z) >= 14:
+			for y: int in range(2, 9):
+				if mountain.natural_solid(x, y, z) and mountain.depth(x, y, z) >= DIAMOND_MIN_DEPTH:
 					core.append(MountainScript.index(x, y, z))
 	var diamond_cell: int = core[rng.randi_range(0, core.size() - 1)]
-	diamond_id = rng.randi_range(0, CRYSTAL_COUNT - 1)
+	diamond_id = rng.randi_range(0, GEM_COUNT - 1)
 	var used: Dictionary = {diamond_cell: true}
 	for id in range(GEM_COUNT):
 		var cell: int = diamond_cell if id == diamond_id else _random_find_cell(rng, used)
 		used[cell] = true
-		var gem: Dictionary = {"id": id, "cell": cell, "stage": "buried", "owner": 0, "pos": _vector_array(MountainScript.cell_center(cell)), "tag": false, "flagged": false, "searched": false}
-		if id < CRYSTAL_COUNT:
-			gem["kind"] = "suspect"
-			gem["name"] = "Clear crystal"
-			gem["value"] = 9
-			gem["clue"] = "Look closely: a doubled internal line, soft facet edges, or a tiny round bubble."
-			if id == diamond_id:
-				gem["kind"] = "diamond"
-				gem["value"] = 0
-				gem["clue"] = "Razor-sharp facets. One crisp internal edge, no round bubbles. Blue-white light stays bright as it turns."
+		var gem: Dictionary = {"id": id, "cell": cell, "stage": "buried", "owner": 0, "pos": _vector_array(MountainScript.cell_center(cell)), "flagged": false, "searched": false}
+		if id == diamond_id:
+			gem["kind"] = "diamond"
+			gem["name"] = "The diamond"
+			gem["value"] = 0
+			gem["clue"] = "Razor-sharp facets and blue-white fire. This is the one."
 		elif rng.randf() < 0.65:
 			gem["kind"] = "collectible"
 			gem["name"] = COLLECTIBLE_NAMES[rng.randi_range(0, COLLECTIBLE_NAMES.size() - 1)]
@@ -191,12 +188,17 @@ func new_game() -> void:
 			gem["kind"] = "oddity"
 			gem["name"] = ODDITY_NAMES[rng.randi_range(0, ODDITY_NAMES.size() - 1)]
 			gem["value"] = rng.randi_range(6, 14)
-			gem["clue"] = "Definitely not a diamond. Probably."
+			gem["clue"] = "A curious relic of the old miners."
 		gems[id] = gem
 	_rebuild_cells()
-	_commit("A fresh mountain. Somewhere deep inside sits one real diamond. Your pickaxe is ready.")
+	var welcome: String = "A fresh mountain. One real diamond is buried deep in its core. Your pickaxe is ready."
+	if _outdated_save:
+		_outdated_save = false
+		welcome = "The mountain has grown much bigger, so a fresh claim was staked. One real diamond is buried deep in its core."
+	_commit(welcome)
 
 
+## Fossils and curios lie at every depth, from just under the turf to the core.
 func _random_find_cell(rng: RandomNumberGenerator, used: Dictionary) -> int:
 	for _attempt: int in range(4000):
 		var x: int = rng.randi_range(0, MountainScript.SIZE_X - 1)
@@ -204,7 +206,7 @@ func _random_find_cell(rng: RandomNumberGenerator, used: Dictionary) -> int:
 		var top: int = mountain.height(x, z)
 		if top < 4:
 			continue
-		var y: int = rng.randi_range(1, top - 2)
+		var y: int = top - rng.randi_range(2, top - 1)
 		var cell: int = MountainScript.index(x, y, z)
 		if not used.has(cell):
 			return cell
@@ -238,6 +240,8 @@ func ore_value(peer_id: int = -1) -> int:
 	var ore: Dictionary = ore_of(peer_id)
 	for kind in ore:
 		total += int(MountainScript.ORE_VALUES.get(str(kind), 0)) * int(ore[kind])
+	if "loupe" in upgrades:
+		total = roundi(float(total) * LOUPE_BONUS)
 	return total
 
 
@@ -309,7 +313,7 @@ func blocks_mined() -> int:
 
 
 func snapshot() -> Dictionary:
-	return {"version": SAVE_VERSION, "seed": seed_value, "money": money, "gems": gems.duplicate(true), "upgrades": upgrades.duplicate(), "collection": collection.duplicate(), "diamond_id": diamond_id, "certified": certified, "searched": searched, "players": players.duplicate(true), "certification_step": certification_step, "certification_id": certification_id, "mined": Marshalls.raw_to_base64(mined)}
+	return {"version": SAVE_VERSION, "seed": seed_value, "money": money, "gems": gems.duplicate(true), "upgrades": upgrades.duplicate(), "collection": collection.duplicate(), "diamond_id": diamond_id, "certified": certified, "searched": searched, "players": players.duplicate(true), "mined": Marshalls.raw_to_base64(mined)}
 
 
 func save_game() -> bool:
@@ -362,7 +366,14 @@ func load_game() -> bool:
 	if not (parsed is Dictionary):
 		return false
 	var data: Dictionary = parsed
-	if int(data.get("version", -1)) != SAVE_VERSION or not _valid_saved_world(data):
+	var version: int = int(data.get("version", -1))
+	if version > 0 and version < SAVE_VERSION:
+		# Claims staked on the old, smaller mountain cannot fit the new one. Keep a
+		# copy of the old file and let the caller stake a fresh claim.
+		DirAccess.copy_absolute(path, _save_path + ".v%d.old" % version)
+		_outdated_save = true
+		return false
+	if version != SAVE_VERSION or not _valid_saved_world(data):
 		return false
 	_apply_snapshot(data)
 	_world_is_local = true
@@ -386,8 +397,6 @@ func load_game() -> bool:
 		elif stage == "loose" and not _valid_position(_array_vector(gem.get("pos", []))):
 			_to_tray(gem)
 	_rebuild_cells()
-	certification_step = 0 if not certified else 3
-	certification_id = -1 if not certified else diamond_id
 	_commit("Camp loaded. Carried finds were returned to the inspection tray.")
 	return true
 
@@ -585,15 +594,12 @@ func _execute_action(peer_id: int, kind: String, args: Dictionary) -> void:
 		"collect":
 			_collect(peer_id, int(args.get("id", -1)))
 		"certify":
-			_certify(peer_id, int(args.get("id", -1)), int(args.get("test", -1)))
+			_certify(peer_id, int(args.get("id", -1)))
 		"recover":
 			if not _near_station(peer_id, "recover", 4.5):
 				_reject(peer_id, "Use the lost & found bell by the camp entrance.")
 				return
 			var recovered: int = _recover_strays(true)
-			if not certified:
-				certification_step = 0
-				certification_id = -1
 			_commit("Recovered %d loose or stranded finds into the inspection tray." % recovered)
 		"prank":
 			_prank(peer_id, int(args.get("target", -1)), str(args.get("mode", "foam")), int(args.get("id", -1)))
@@ -895,7 +901,7 @@ func _sell(peer_id: int) -> void:
 	var sold: int = 0
 	for id in held_ids(peer_id):
 		var gem: Dictionary = gems[id]
-		if _suspicious(gem):
+		if _protected(gem):
 			_to_tray(gem)
 			protected += 1
 		else:
@@ -910,9 +916,9 @@ func _sell(peer_id: int) -> void:
 	if sold > 0:
 		parts.append("%d finds" % sold)
 	if parts.is_empty():
-		_commit("Nothing to sell. Mine some ore first.%s" % (" %d crystals went safely to the tray." % protected if protected > 0 else ""))
+		_commit("Nothing to sell. Mine some ore first.%s" % (" The diamond went safely to the tray." if protected > 0 else ""))
 		return
-	_commit("Sold %s for $%d.%s" % [" and ".join(parts), payout, " %d crystals went safely to the tray." % protected if protected > 0 else ""])
+	_commit("Sold %s for $%d.%s" % [" and ".join(parts), payout, " The diamond went safely to the tray." if protected > 0 else ""])
 
 
 func _buy(peer_id: int, upgrade: String) -> void:
@@ -956,44 +962,24 @@ func _collect(peer_id: int, id: int) -> void:
 	_commit("Shelf discovery: %s! %s" % [label, "$12 museum grant + a silly hat unlocked." if fresh else "A spare for your magnificent collection."])
 
 
-func _certify(peer_id: int, id: int, test: int) -> void:
+func _certify(peer_id: int, id: int) -> void:
 	if certified:
-		_reject(peer_id, "The genuine diamond is already certified. Keep blasting for treasure!")
+		_reject(peer_id, "The diamond is already certified. Keep blasting for treasure!")
 		return
 	if not _near_station(peer_id, "certify") or not _owns(peer_id, id):
-		_reject(peer_id, "Bring a held crystal to the certification bench.")
+		_reject(peer_id, "Bring the diamond to the certification bench.")
 		return
-	if not gems.has(id) or not _suspicious(gems[id]):
-		_reject(peer_id, "The bench needs a clear crystal candidate.")
+	if id != diamond_id or str(gems[id]["kind"]) != "diamond":
+		_reject(peer_id, "Only the diamond goes on the bench. Fossils belong on the specimen shelf.")
 		return
-	if certification_id != id:
-		if test != 0:
-			_reject(peer_id, "Start this candidate with test 1: optical inspection.")
-			return
-		certification_id = id
-		certification_step = 0
-	if test != certification_step or test < 0 or test > 2:
-		_reject(peer_id, "Complete the three bench tests in order.")
-		return
-	certification_step += 1
-	if certification_step == 1:
-		_commit("Test 1/3: optical inspection recorded. Next: facet and hardness test.")
-	elif certification_step == 2:
-		_commit("Test 2/3: facet response recorded. Next: final blue-light certification.")
-	elif id == diamond_id and str(gems[id]["kind"]) == "diamond":
-		certified = true
-		gems[id]["stage"] = "certified"
-		gems[id]["owner"] = 0
-		gems[id]["pos"] = _vector_array(_station_position("certify") + Vector3(0, 0.3, 0))
-		money += 1000
-		if not "THE GENUINE DIAMOND" in collection:
-			collection.append("THE GENUINE DIAMOND")
-		_commit("THE GENUINE DIAMOND! Certified after all three tests. $1,000 discovery grant. You found brilliance in the rough!")
-	else:
-		certification_step = 0
-		certification_id = -1
-		gems[id]["tag"] = true
-		_commit("Expert verdict: a very convincing quartz crystal. Candidate returned unharmed. Follow the sharp-edge, single-line clues.")
+	certified = true
+	gems[id]["stage"] = "certified"
+	gems[id]["owner"] = 0
+	gems[id]["pos"] = _vector_array(_station_position("certify") + Vector3(0, 0.3, 0))
+	money += 1000
+	if not "THE GENUINE DIAMOND" in collection:
+		collection.append("THE GENUINE DIAMOND")
+	_commit("THE GENUINE DIAMOND! Certified at the bench. $1,000 discovery grant. You found brilliance in the rough!")
 
 
 func _prank(peer_id: int, target: int, mode: String, item_id: int = -1) -> void:
@@ -1005,18 +991,10 @@ func _prank(peer_id: int, target: int, mode: String, item_id: int = -1) -> void:
 		players[peer_id]["hat"] = hats[(current + 1) % hats.size()]
 		_commit("Headwear: %s." % (str(players[peer_id]["hat"]) if not str(players[peer_id]["hat"]).is_empty() else "respectable hard hat"))
 		return
-	if target == peer_id and mode == "label":
-		var tagged: int = 0
-		for id in held_ids(peer_id):
-			if item_id < 0 or int(id) == item_id:
-				gems[id]["tag"] = true
-				tagged += 1
-		_commit("Applied %d absolutely unofficial CERTIFIED DIAMOND labels." % tagged)
-		return
 	if target == peer_id or not players.has(target) or _peer_position(peer_id).distance_to(_peer_position(target)) > 6.0:
 		_reject(peer_id, "Get within reach of a co-op friend.")
 		return
-	if not mode in ["foam", "scoop", "present", "label", "bucket"]:
+	if not mode in ["foam", "scoop", "present", "bucket"]:
 		return
 	var now: float = Time.get_unix_time_from_system()
 	if now - float(players[peer_id].get("last_prank", 0.0)) < 2.0:
@@ -1028,17 +1006,14 @@ func _prank(peer_id: int, target: int, mode: String, item_id: int = -1) -> void:
 		players[target]["foam_until"] = now + 5.0
 	elif mode == "bucket":
 		players[target]["hat"] = "Bucket hat"
-	elif mode == "label":
-		for id in held_ids(target):
-			gems[id]["tag"] = true
 	elif mode == "present":
-		for id in held_ids(peer_id):
-			if _suspicious(gems[id]):
-				if held_ids(target).size() < capacity():
-					_hold(gems[id], target)
-				else:
-					_to_tray(gems[id])
-				break
+		var gifts: Array = held_ids(peer_id)
+		if not gifts.is_empty():
+			var gift: int = int(item_id) if int(item_id) in gifts else int(gifts[0])
+			if held_ids(target).size() < capacity():
+				_hold(gems[gift], target)
+			else:
+				_to_tray(gems[gift])
 	elif mode == "scoop":
 		for id in held_ids(peer_id):
 			gems[id]["stage"] = "loose"
@@ -1076,7 +1051,7 @@ func _recover_strays(all_loose: bool = false) -> int:
 		var gem: Dictionary = gems[id]
 		var stage: String = str(gem["stage"])
 		var pos: Vector3 = _array_vector(gem["pos"])
-		var outside: bool = not _valid_position(pos) or absf(pos.x) > 37.0 or pos.z > 11.5 or pos.z < -80.0 or pos.y < -0.5
+		var outside: bool = not _valid_position(pos) or absf(pos.x) > absf(MountainScript.ORIGIN.x) + 1.0 or pos.z > 11.5 or pos.z < MountainScript.ORIGIN.z - 1.0 or pos.y < -0.5
 		if (stage == "held" and not players.has(int(gem["owner"]))) or (stage == "loose" and (all_loose or outside)):
 			_to_tray(gem)
 			recovered += 1
@@ -1093,15 +1068,16 @@ func _rebuild_cells() -> void:
 		if str(gem.get("stage", "")) == "buried":
 			var cell: int = int(gem.get("cell", -1))
 			_buried_by_cell[cell] = int(id)
-			specials[cell] = MountainScript.CRYSTAL if str(gem.kind) in ["suspect", "diamond"] else MountainScript.CURIO
+			specials[cell] = MountainScript.CRYSTAL if str(gem.kind) == "diamond" else MountainScript.CURIO
 	cells = mountain.build_cells(seed_value, mined, specials)
 	_cell_seed = seed_value
 	_damage.clear()
 	world_reset.emit()
 
 
-func _suspicious(gem: Dictionary) -> bool:
-	return str(gem.get("kind", "")) in ["diamond", "suspect"] or int(gem.get("id", -1)) == diamond_id
+## The diamond can never be sold.
+func _protected(gem: Dictionary) -> bool:
+	return str(gem.get("kind", "")) == "diamond" or int(gem.get("id", -1)) == diamond_id
 
 
 func _sale_value(gem: Dictionary) -> int:
@@ -1178,6 +1154,12 @@ func _reject(peer_id: int, message: String) -> void:
 func _receive_snapshot(data: Dictionary) -> void:
 	if is_authority():
 		return
+	if int(data.get("version", -1)) != SAVE_VERSION:
+		# A host on another build has a differently shaped mountain; never mix them.
+		leave()
+		connection_status.emit("The host is on a different version of the game. Both players need the latest update.")
+		notice.emit("The host is on a different version of the game. Both players need the latest update.")
+		return
 	_apply_snapshot(data)
 	changed.emit()
 
@@ -1205,13 +1187,17 @@ func _apply_snapshot(data: Dictionary) -> void:
 	var incoming_players: Dictionary = data.get("players", {})
 	for id in incoming_players:
 		players[int(id)] = incoming_players[id].duplicate(true)
-	certification_step = int(data.get("certification_step", 0))
-	certification_id = int(data.get("certification_id", -1))
 	var incoming_mined: PackedByteArray = Marshalls.base64_to_raw(str(data.get("mined", "")))
 	if incoming_mined.size() != MountainScript.empty_mined().size():
 		incoming_mined = MountainScript.empty_mined()
 	mined = incoming_mined
 	# Snapshots arrive after every shared transaction; only rebuild what changed.
+	if previous_seed == seed_value and mined == previous_mined and cells.size() == MountainScript.CELL_COUNT:
+		_buried_by_cell.clear()
+		for id in gems:
+			if str(gems[id].get("stage", "")) == "buried":
+				_buried_by_cell[int(gems[id].get("cell", -1))] = int(id)
+		return
 	if previous_seed != seed_value or cells.size() != MountainScript.CELL_COUNT or previous_mined.size() != mined.size():
 		_rebuild_cells()
 		return

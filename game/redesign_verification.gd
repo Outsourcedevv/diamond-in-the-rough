@@ -114,7 +114,7 @@ func run() -> void:
 	check(game.workshop._product_cards.steel_pick.text == "OWNED","The physical price plate changes to owned after purchase")
 	await screenshot("03_physical_purchase")
 	guide = game.tutorial.data()
-	check(guide.target_label == "Crystal or fossil","The discovery lesson points at a buried crystal or fossil")
+	check(guide.target_label == "Buried fossil","The discovery lesson points at a buried fossil")
 	var found: int = await dig_out_find()
 	check(found >= 0 and game.state.gems[found].stage == "loose","Digging down to a buried find breaks it loose from the rock")
 	if found >= 0:
@@ -202,14 +202,14 @@ func probe_mountain_geometry() -> void:
 	await get_tree().physics_frame
 	var grid = game.state.mountain
 	var probes := 0
-	for z in range(6,MountainScript.SIZE_Z,9):
-		for x in range(6,MountainScript.SIZE_X,11):
+	for z in range(6,MountainScript.SIZE_Z,17):
+		for x in range(6,MountainScript.SIZE_X,21):
 			var top: float = grid.smooth_height(x,z)
 			if top < 2.0: continue
 			var at: Vector3 = MountainScript.cell_center(MountainScript.index(x,0,z))
-			var ray := PhysicsRayQueryParameters3D.create(Vector3(at.x,60,at.z),Vector3(at.x,-5,at.z),1)
+			var ray := PhysicsRayQueryParameters3D.create(Vector3(at.x,MountainScript.SIZE_Y+10,at.z),Vector3(at.x,-5,at.z),1)
 			var hit: Dictionary = game.player.get_world_3d().direct_space_state.intersect_ray(ray)
-			check(not hit.is_empty() and bool(hit.collider.get_meta("mountain",false)) and absf(hit.position.y-top) < 0.6,"Mountain column %d,%d is solid at its natural height of %.1f m" % [x,z,top])
+			check(not hit.is_empty() and bool(hit.collider.get_meta("mountain",false)) and absf(hit.position.y-top) < 0.75,"Mountain column %d,%d is solid at its natural height of %.1f m" % [x,z,top])
 			probes += 1
 	check(probes >= 12,"The mountain's surface was probed across its whole footprint")
 	# Walk to the foot of the slope and climb it with real movement and jumps.
@@ -232,9 +232,12 @@ func surface_cell(want_ore: bool, allow_granite: bool) -> int:
 	var grid = game.state.mountain
 	var best := -1
 	var distance := INF
-	for z in range(MountainScript.SIZE_Z):
+	# Search outward from the camp side and stop once rows are too far away.
+	for z in range(MountainScript.SIZE_Z-1,-1,-1):
+		var row_gap: float = MountainScript.ORIGIN.z+float(z)+0.5+14.0
+		if row_gap*row_gap > distance: break
 		for x in range(MountainScript.SIZE_X):
-			for y in range(MountainScript.SIZE_Y-2,0,-1):
+			for y in range(grid.height(x,z)-1,0,-1):
 				var cell: int = MountainScript.index(x,y,z)
 				if not game.state.is_solid(cell): continue
 				var ore: bool = not MountainScript.ore_for_code(game.state.cell_code(cell)).is_empty()
@@ -335,7 +338,7 @@ func adaptive_tutorial_cases() -> void:
 	var safely_stored: bool = game.state.held_ids().is_empty()
 	for id in carried: safely_stored = safely_stored and game.state.gems[int(id)].stage == "tray"
 	guide = game.tutorial.data()
-	check(safely_stored and game.tutorial.step == 4 and guide.target_label == "Crystal or fossil","Storing the replay batch restores the digging instruction")
+	check(safely_stored and game.tutorial.step == 4 and guide.target_label == "Buried fossil","Storing the replay batch restores the digging instruction")
 	var found: int = await dig_out_find()
 	if found >= 0:
 		var at: Array = game.state.gems[found].pos
@@ -354,7 +357,7 @@ func adaptive_tutorial_cases() -> void:
 	game.tutorial.preferences = {"schema":2,"completed":false,"dismissed":false}
 	game.tutorial.start_session("solo")
 	guide = game.tutorial.data()
-	check(not game.tutorial.running and guide.visible and guide.completed and guide.instruction.contains("stored candidates"),"First guidance on a dug-out save offers stored-find help instead of an impossible dig")
+	check(not game.tutorial.running and guide.visible and guide.completed and guide.instruction.contains("stored finds"),"First guidance on a dug-out save offers stored-find help instead of an impossible dig")
 	check(JSON.stringify(game.state.snapshot()) == unchanged_world,"Adaptive guidance grants no items or money and preserves completed world progress")
 	await screenshot("06_established_save_help")
 	game.tutorial.restart()

@@ -282,7 +282,7 @@ func _process(delta: float) -> void:
 	else:
 		selection = posmod(selection, held.size())
 		var gem: Dictionary = state.gems[int(held[selection])]
-		if player.inspecting and player.held_id!=int(gem.id): ui.show_inspection(gem,state.upgrades.has("loupe"))
+		if player.inspecting and player.held_id!=int(gem.id): ui.show_inspection(gem)
 		player.show_held(gem)
 	ui.update_hud(state, tool_label(), state.capacity(), prompt, objective(), carry_text())
 	if ui.menu_visible: Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -336,7 +336,6 @@ func _input(event: InputEvent) -> void:
 			KEY_2: equip_explosive("dynamite")
 			KEY_3: equip_explosive("tnt")
 			KEY_4: equip_explosive("buster")
-			KEY_F: prank("label")
 			KEY_M:
 				set_setting("mic_muted",not bool(settings.mic_muted))
 				ui.toast("Microphone muted." if settings.mic_muted else "Microphone unmuted · hold V to talk.")
@@ -379,11 +378,11 @@ func current_gem() -> Dictionary:
 func toggle_inspection() -> void:
 	var gem := current_gem()
 	if gem.is_empty():
-		ui.toast("Pick up a crystal or fossil first. Right-click to inspect it closely.")
+		ui.toast("Pick up a find first. Right-click to inspect it closely.")
 		return
 	player.inspecting = not player.inspecting
 	if player.inspecting:
-		ui.show_inspection(gem,state.upgrades.has("loupe"))
+		ui.show_inspection(gem)
 		tutorial.on_action("inspect")
 	else:
 		ui.hide_inspection()
@@ -404,7 +403,7 @@ func cycle_candidate(direction: int) -> void:
 	var ids: Array = state.held_ids()
 	if not ids.is_empty():
 		selection = posmod(selection,ids.size())
-		if player.inspecting: ui.show_inspection(current_gem(),state.upgrades.has("loupe"))
+		if player.inspecting: ui.show_inspection(current_gem())
 
 func target_meta(key: String, fallback: Variant=null) -> Variant:
 	if selected_target.is_empty(): return fallback
@@ -445,22 +444,22 @@ func interaction_prompt() -> String:
 		if not ore.is_empty():
 			if state.ore_total()>=state.ore_capacity(): return "%s · satchel full · sell at the exchange" % block
 			return "%s · $%d · hold left click to mine%s" % [block,int(MountainScript.ORE_VALUES[ore]),progress_text(cell)]
-		if code == MountainScript.CRYSTAL: return "Crystal vein · something clear glints inside%s" % progress_text(cell)
+		if code == MountainScript.CRYSTAL: return "Glittering kimberlite · something brilliant glints inside%s" % progress_text(cell)
 		if code == MountainScript.CURIO: return "Fossil seam · something is buried here%s" % progress_text(cell)
 		return "%s · hold left click to mine%s" % [block,progress_text(cell)]
 	var station := str(target_meta("station",""))
 	match station:
-		"sell": return "[E] Sell ore and finds · clear crystals go safely to the tray"
+		"sell": return "[E] Sell ore and finds · the diamond goes safely to the tray"
 		"shop": return "Point at a tool to see its price. E: buy"
 		"tray": return "[E] Store finds / next empty-hand tray · [Wheel] storage %s/%s" % [tray_page+1,maxi(1,ceili(float(tray_count())/48))]
 		"certify":
-			var candidate:=current_gem()
-			var step: int=state.certification_step if int(candidate.get("id",-1))==state.certification_id else 0
-			return "[E] Certification · %s" % ["optical inspection","facet response test","blue-light test · reveal"][clampi(step,0,2)]
+			if state.certified: return "Certification bench · the diamond is certified"
+			if held_diamond()>=0: return "[E] Certify the diamond · $1,000 discovery grant"
+			return "Certification bench · bring the diamond here"
 		"recover": return "[E] Recover lost finds"
 		"collection": return "[E] Journal & specimen collection"
 	var peer: int = int(target_meta("peer_id",-1))
-	if peer >= 0: return "[F] Label   [G] Foam   [R] Wrapped present   [LMB] Dump your finds on them"
+	if peer >= 0: return "[G] Foam   [R] Wrapped present   [LMB] Dump your finds on them"
 	return ""
 
 func progress_text(cell: int) -> String:
@@ -479,10 +478,18 @@ func objective() -> String:
 	if not state.upgrades.has("steel_pick"):
 		if state.money < 10 and state.ore_total() == 0: return "Walk to the mountain and hold left click to mine ore."
 		return "Sell ore at the exchange. A steel pickaxe costs $60."
+	var diamond: Dictionary = state.gems.get(state.diamond_id,{})
+	match str(diamond.get("stage","")):
+		"held":
+			if int(diamond.get("owner",0))==state.local_id(): return "You have the diamond! Bring it to the certification bench."
+			return "A teammate has the diamond. Get it to the certification bench."
+		"loose": return "The diamond broke loose! Pick it up and bring it to the bench."
+		"tray": return "The diamond is safe in the tray. Take it to the certification bench."
 	if not state.upgrades.has("dynamite"): return "Save $180 for dynamite and blast your way in."
-	if not state.upgrades.has("loupe"): return "Keep clear crystals. The loupe ($150) reveals their clues."
+	if not state.upgrades.has("loupe"): return "The assay loupe ($150) makes every ore sell for 25% more."
 	if not state.upgrades.has("tnt"): return "TNT ($750) clears big craters. Dig towards the mountain's core."
-	return "The diamond lies deep in the core. Test clear crystals at the bench."
+	if not state.upgrades.has("sonar"): return "Treasure sonar ($1,000) pings the diamond through 16 m of rock."
+	return "The one real diamond lies deep in the core, near the bedrock. Blast your way down."
 
 func use_tool() -> void:
 	if action_cooldown>0 or player.inspecting: return
@@ -762,17 +769,23 @@ func interact() -> void:
 				refresh()
 				ui.toast("Storage tray %s/%s · point at a stone and press E. Wheel changes trays." % [tray_page+1,pages])
 		"certify":
-			var gem := current_gem()
-			if gem.is_empty(): ui.toast("Hold your chosen crystal, then run the three certification tests.")
+			var diamond: int=held_diamond()
+			if state.certified: ui.toast("The diamond is already certified. Keep blasting for treasure!")
+			elif diamond<0: ui.toast("Bring the diamond here. It is buried deep in the mountain's core.")
 			else:
-				var step: int=state.certification_step if state.certification_id==int(gem.id) else 0
-				state.action("certify",{"id":int(gem.id),"test":step})
+				state.action("certify",{"id":diamond})
 				sound.play("test")
 		"recover":
 			state.action("recover")
 		_:
 			if target_cell()>=0: use_tool()
 	action_cooldown=0.35
+
+## The diamond's id if the local player is carrying it, otherwise -1.
+func held_diamond() -> int:
+	for id in state.held_ids():
+		if str(state.gems[int(id)].get("kind",""))=="diamond": return int(id)
+	return -1
 
 func drop_selected() -> void:
 	var gem := current_gem()
@@ -786,17 +799,12 @@ func drop_selected() -> void:
 
 func prank(mode: String) -> void:
 	var target: int = int(target_meta("peer_id",-1))
-	if mode=="label" and target<0:
-		var g := current_gem()
-		if not g.is_empty():
-			state.action("prank",{"mode":"label","target":state.local_id(),"id":int(g.id)})
-			ui.toast("CERTIFIED DIAMOND label applied. The bench remains unimpressed.")
-			sound.play("prank")
-		return
 	if target<0:
 		ui.toast("Invite a friend to share the mountain — and the polishing foam.")
 		return
-	state.action("prank",{"target":target,"mode":mode})
+	var args := {"target":target,"mode":mode}
+	if mode=="present" and not current_gem().is_empty(): args["id"]=int(current_gem().id)
+	state.action("prank",args)
 	sound.play("prank")
 	if avatars.has(target):
 		burst(avatars[target].position+Vector3.UP*1.5, Color("f0f8e9"),14)
@@ -829,7 +837,7 @@ func refresh() -> void:
 		else: continue
 		var id: int=int(key)
 		desired[id]=true
-		var visual_signature: String=str(gem.get("flagged",false))+str(gem.get("tag",false))+str(gem.get("clean",false))
+		var visual_signature: String=str(gem.get("flagged",false))+str(gem.get("clean",false))
 		if gem_nodes.has(id) and is_instance_valid(gem_nodes[id]) and gem_nodes[id].get_meta("stage")==stage and gem_nodes[id].get_meta("visual","")==visual_signature:
 			if stage=="loose" and gem_nodes[id].get_meta("rest",p)!=p:
 				# Finds settle further when the rock beneath them is mined away.
@@ -863,7 +871,7 @@ func refresh() -> void:
 			var start: Vector3=previous if previous!=p else p+Vector3(0,0.6,0)
 			body.position=start
 			create_tween().tween_property(body,"position",p,0.45).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
-			if str(gem.kind) in ["suspect","diamond"]:
+			if str(gem.kind)=="diamond":
 				var glint:=OmniLight3D.new()
 				glint.light_color=Color("bff6ff")
 				glint.light_energy=0.6
@@ -874,16 +882,6 @@ func refresh() -> void:
 		if gem.get("flagged",false):
 			avatar_box(body,Vector3(0.035,0.19,0.035),Vector3(0,0.22,0),Color("38372f"))
 			avatar_box(body,Vector3(0.15,0.10,0.025),Vector3(0.055,0.28,0),Color("e1b04d"))
-		if gem.get("tag",false):
-			avatar_box(body,Vector3(0.27,0.07,0.015),Vector3(0,0.1,0.15),Color("ede3cd"))
-			var label:=Label3D.new()
-			label.text="CERTIFIED*"
-			label.position=Vector3(0,0.1,0.161)
-			label.font_size=18
-			label.pixel_size=0.0015
-			label.outline_size=0
-			label.modulate=Color("332c21")
-			body.add_child(label)
 	for id in gem_nodes.keys():
 		if not desired.has(id):
 			if is_instance_valid(gem_nodes[id]): gem_nodes[id].queue_free()

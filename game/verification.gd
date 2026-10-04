@@ -82,13 +82,16 @@ func station(id: String) -> Vector3:
 	return Vector3(pos.x,0.1,pos.z+1.8)
 
 ## An exposed block with open air above it, so a miner can stand on top of it.
+## Searches outward from the camp side of the mountain and stops once rows are too far.
 func surface_cell(want_ore: bool, allow_granite: bool) -> int:
 	var grid = game.state.mountain
 	var best := -1
 	var distance := INF
-	for z in range(MountainScript.SIZE_Z):
+	for z in range(MountainScript.SIZE_Z-1,-1,-1):
+		var row_gap: float=MountainScript.ORIGIN.z+float(z)+0.5+14.0
+		if row_gap*row_gap>distance: break
 		for x in range(MountainScript.SIZE_X):
-			for y in range(MountainScript.SIZE_Y-2,0,-1):
+			for y in range(grid.height(x,z)-1,0,-1):
 				var cell: int=MountainScript.index(x,y,z)
 				if not game.state.is_solid(cell): continue
 				var code: int=game.state.cell_code(cell)
@@ -112,6 +115,14 @@ func mine_out(cell: int) -> bool:
 		if not game.state.is_solid(cell): return true
 		await act("mine",{"cell":cell})
 	return not game.state.is_solid(cell)
+
+## A solid block d below the natural surface on the mountain's camp-facing slope,
+## at the first column (moving in from the front) that rises to at least rise metres.
+func front_rock(d: int, rise: int=14, x: int=MountainScript.SIZE_X/2) -> int:
+	var grid = game.state.mountain
+	for z in range(MountainScript.SIZE_Z-1,-1,-1):
+		if grid.height(x,z)>=rise: return MountainScript.index(x,grid.height(x,z)-d,z)
+	return -1
 
 ## Throws a real charge from near the target, then detonates it where it rests.
 func blast(tier: String, at: Vector3) -> int:
@@ -159,15 +170,15 @@ func rich_blast_point() -> Vector3:
 	var grid = game.state.mountain
 	for attempt in range(400):
 		_blast_index+=1
-		var x: int=4+(_blast_index*7)%64
-		var z: int=4+(_blast_index*11)%56
+		var x: int=8+(_blast_index*7)%(MountainScript.SIZE_X-16)
+		var z: int=8+(_blast_index*11)%(MountainScript.SIZE_Z-16)
 		var top: int=grid.height(x,z)
 		if top<10: continue
 		var y: int=top-8
 		var cell: int=MountainScript.index(x,y,z)
 		if game.state.is_solid(cell) and MountainScript.cell_center(cell).distance_to(MountainScript.cell_center(int(game.state.gems[game.state.diamond_id].cell)))>9.0:
 			return MountainScript.cell_center(cell)
-	return MountainScript.cell_center(MountainScript.index(37,6,30))
+	return MountainScript.cell_center(front_rock(8))
 
 func buy(id: String) -> void:
 	await fund(int(game.state.prices[id]))
@@ -211,28 +222,42 @@ func solo() -> void:
 	for gem in game.state.gems.values():
 		if gem.kind=="diamond": real_count+=1
 	check(real_count==1,"Exactly one genuine diamond generated")
+	var other_kinds:=true
+	for gem in game.state.gems.values():
+		if gem.kind!="diamond": other_kinds=other_kinds and gem.kind in ["collectible","oddity"]
+	check(other_kinds,"No fake diamonds: every other find is a fossil or curio")
 	var diamond_cell: int=int(game.state.gems[original_diamond].cell)
 	var dc: Vector3i=MountainScript.coords(diamond_cell)
-	check(game.state.gems[original_diamond].stage=="buried" and game.state.mountain.depth(dc.x,dc.y,dc.z)>=14,"The diamond is buried deep in the mountain's core")
-	check(game.state.cell_code(diamond_cell)==MountainScript.CRYSTAL,"The diamond's block looks like every other crystal vein")
+	check(game.state.gems[original_diamond].stage=="buried" and game.state.mountain.depth(dc.x,dc.y,dc.z)>=game.state.DIAMOND_MIN_DEPTH,"The diamond is buried deep in the mountain's core (%d m down)" % game.state.mountain.depth(dc.x,dc.y,dc.z))
 	var tallest:=0
+	var peak := Vector3i.ZERO
 	for z in range(MountainScript.SIZE_Z):
-		for x in range(MountainScript.SIZE_X): tallest=maxi(tallest,game.state.mountain.height(x,z))
+		for x in range(MountainScript.SIZE_X):
+			if game.state.mountain.height(x,z)>tallest:
+				tallest=game.state.mountain.height(x,z)
+				peak=Vector3i(x,0,z)
 	var solid:=0
 	var ore:=0
+	var glinting:=0
+	var kinds:={}
 	for code in game.state.cells:
-		if code!=0: solid+=1
-		if code>=10 and code<20: ore+=1
-	check(tallest>=30 and solid>20000,"The mountain is big: %d blocks tall and %d blocks of rock" % [tallest,solid])
-	check(ore>2000,"The mountain holds %d ore blocks across several ore types" % ore)
-	var peak := Vector3i(37,0,30)
+		if code==0: continue
+		solid+=1
+		if code==MountainScript.CRYSTAL: glinting+=1
+		var kind: String=MountainScript.ore_for_code(code)
+		if not kind.is_empty():
+			ore+=1
+			kinds[kind]=true
+	check(glinting==1 and game.state.cell_code(diamond_cell)==MountainScript.CRYSTAL,"Only the real diamond's block glitters in the rock")
+	check(tallest>=60 and solid>150000,"The mountain is huge: %d blocks tall and %d blocks of rock" % [tallest,solid])
+	check(ore>25000 and kinds.size()==MountainScript.ORE_ORDER.size() and kinds.size()>=14,"The mountain holds %d ore blocks across %d ore types" % [ore,kinds.size()])
 	var peak_top: float=game.state.mountain.smooth_height(peak.x,peak.z)
 	var probe: Vector3=MountainScript.cell_center(MountainScript.index(peak.x,0,peak.z))
 	await get_tree().physics_frame
 	await get_tree().physics_frame
-	var hit: Dictionary=game.player.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(probe.x,60,probe.z),Vector3(probe.x,-5,probe.z),1))
-	if hit.is_empty() or absf(hit.position.y-peak_top)>=0.6: print("SUMMIT_PROBE ",hit.get("position","none")," expected ",peak_top," collider ",hit.get("collider"))
-	check(not hit.is_empty() and bool(hit.collider.get_meta("mountain",false)) and absf(hit.position.y-peak_top)<0.6,"The summit is solid to walk on at its true height")
+	var hit: Dictionary=game.player.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(probe.x,MountainScript.SIZE_Y+10,probe.z),Vector3(probe.x,-5,probe.z),1))
+	if hit.is_empty() or absf(hit.position.y-peak_top)>=0.75: print("SUMMIT_PROBE ",hit.get("position","none")," expected ",peak_top," collider ",hit.get("collider"))
+	check(not hit.is_empty() and bool(hit.collider.get_meta("mountain",false)) and absf(hit.position.y-peak_top)<0.75,"The summit is solid to walk on at its true height")
 	await screenshot("01_mountain")
 	await go(Vector3(0.9,0.1,3.7))
 	game.player.yaw=0.0
@@ -273,10 +298,9 @@ func solo() -> void:
 	await go(Vector3(0,0.1,6.0))
 	check(game.mountain_view._chunks.size()>0 and game.state.exposed(MountainScript.index(MountainScript.coords(first_ore).x,MountainScript.coords(first_ore).y-1,MountainScript.coords(first_ore).z)),"Mining exposes the block underneath")
 	# Granite needs better tools.
-	var granite: int=-1
-	for y in range(4,12):
-		var cell: int=MountainScript.index(37,y,26)
-		if game.state.mountain.needs_steel(37,y,26): granite=cell; break
+	var granite: int=front_rock(8)
+	var granite_at: Vector3i=MountainScript.coords(granite)
+	if not game.state.mountain.needs_steel(granite_at.x,granite_at.y,granite_at.z): granite=-1
 	if granite>=0:
 		var shaft: Array=[]
 		var gc: Vector3i=MountainScript.coords(granite)
@@ -286,7 +310,7 @@ func solo() -> void:
 		await stand_on(granite)
 		for hit_index in range(8): await act("mine",{"cell":granite})
 		check(game.state.is_solid(granite),"The old pickaxe cannot break granite")
-	var bedrock: int=MountainScript.index(37,0,30)
+	var bedrock: int=MountainScript.index(peak.x,0,peak.z)
 	await sell_all()
 	var shop: Vector3=game.workshop.upgrade_positions["dynamite"]
 	await vantage("06_outfitter",shop+Vector3(-3.6,0.4,4.6),shop+Vector3(0,-0.2,-1.2))
@@ -297,6 +321,10 @@ func solo() -> void:
 	await buy("satchel")
 	check(game.state.capacity()==10 and game.state.ore_capacity()==90,"The big satchel carries 90 ore and 10 finds")
 	await buy("loupe")
+	var carried: Dictionary=game.state.ore_of(1).duplicate()
+	game.state.players[1]["ore"]={"iron":4}
+	check(game.state.ore_value()==30,"The assay loupe makes ore sell for 25%% more ($24 of iron pays $%d)" % game.state.ore_value())
+	game.state.players[1]["ore"]=carried
 	await buy("dynamite")
 	var cleared: int=await blast("dynamite",rich_blast_point())
 	check(cleared>=20,"Dynamite blasts a real crater (%d blocks)" % cleared)
@@ -311,14 +339,25 @@ func solo() -> void:
 	await vantage("04_tnt_crater",tnt_at+Vector3(0,9,12),tnt_at,1.2)
 	check(cleared>=100,"TNT clears a much larger crater (%d blocks)" % cleared)
 	await buy("sonar")
-	var near_crystal: Vector3=Vector3.ZERO
+	var near_fossil: Vector3=Vector3.ZERO
 	for gem in game.state.gems.values():
-		if gem.stage=="buried" and gem.kind=="suspect":
-			near_crystal=MountainScript.cell_center(int(gem.cell))
+		if gem.stage=="buried" and gem.kind!="diamond":
+			near_fossil=MountainScript.cell_center(int(gem.cell))
 			break
-	await go(near_crystal+Vector3(0,3,0))
+	await go(near_fossil+Vector3(0,3,0))
 	await get_tree().create_timer(1.2).timeout
-	check(game.mountain_view._sonar_root.get_child_count()>0,"Crystal sonar pings buried crystal veins through rock")
+	check(game.mountain_view._sonar_root.get_child_count()>0,"Treasure sonar pings buried fossils through rock")
+	var diamond_at: Vector3=MountainScript.cell_center(diamond_cell)
+	await go(diamond_at+Vector3(0,12,0))
+	await get_tree().create_timer(1.2).timeout
+	var pinged:=false
+	for ping in game.mountain_view._sonar_root.get_children(): pinged=pinged or ping.position.distance_to(diamond_at)<0.1
+	check(pinged,"Treasure sonar pings the buried diamond through 12 m of solid rock")
+	await go(diamond_at+Vector3(0,30,0))
+	await get_tree().create_timer(1.2).timeout
+	pinged=false
+	for ping in game.mountain_view._sonar_root.get_children(): pinged=pinged or ping.position.distance_to(diamond_at)<0.1
+	check(not pinged,"The diamond stays hidden from sonar beyond its range")
 	await buy("buster")
 	var buster_at: Vector3=rich_blast_point()
 	cleared=await blast("buster",buster_at)
@@ -344,7 +383,7 @@ func solo() -> void:
 		game.selection=0
 		game.toggle_inspection()
 		await get_tree().process_frame
-		check(game.player.inspecting and game.ui.inspecting,"Close inspection presents learnable identification clues")
+		check(game.player.inspecting and game.ui.inspecting,"Close inspection shows what a find is")
 		await screenshot("07_inspection")
 		game.toggle_inspection()
 		await go(station("tray"))
@@ -392,12 +431,18 @@ func solo() -> void:
 	check(game.state.diamond_id==original_diamond and game.state.money==money_before and game.state.upgrades.size()==9,"Save preserves diamond identity, money and equipment")
 	check(game.state.blocks_mined()==mined_before and game.state.cells==cells_before,"Save preserves every mined block (%d)" % mined_before)
 	await go(station("tray"))
+	var fossil:=-1
+	for gem in game.state.gems.values():
+		if gem.stage=="tray" and gem.kind!="diamond": fossil=int(gem.id); break
+	if fossil>=0: await act("pick",{"id":fossil})
 	await act("pick",{"id":original_diamond})
 	await go(station("certify"))
-	await act("certify",{"id":original_diamond,"test":2})
-	check(not game.state.certified,"Certification cannot skip inspection tests")
-	for step in range(3): await act("certify",{"id":original_diamond,"test":step})
-	check(game.state.certified and game.state.gems[original_diamond].stage=="certified","Three earned certification tests trigger the final discovery ending")
+	if fossil>=0:
+		await act("certify",{"id":fossil})
+		check(not game.state.certified and game.state.gems[fossil].stage=="held","The certification bench refuses anything but the diamond")
+	var money_before_bench: int=game.state.money
+	await act("certify",{"id":original_diamond})
+	check(game.state.certified and game.state.gems[original_diamond].stage=="certified" and game.state.money==money_before_bench+1000,"Bringing the diamond to the bench certifies it and pays the $1,000 grant")
 	await screenshot("08_certification")
 	await vantage("09_mountain_after",Vector3(0,6,4),Vector3(0,10,-45),0.5)
 	game.state.save_game()
@@ -497,7 +542,8 @@ func client_probe() -> void:
 	phase="mined"
 	write_report({"cell":cell})
 	var before: int=game.state.blocks_mined()
-	var target: Vector3=MountainScript.cell_center(MountainScript.index(26,8,36))
+	# Solid rock to the side of the slope the host has been mining.
+	var target: Vector3=MountainScript.cell_center(front_rock(6,16,MountainScript.SIZE_X/2-24))
 	await go(target+Vector3(0,3,2))
 	last_fuse=-1
 	var origin: Vector3=game.player.position+Vector3(0,1.4,0)

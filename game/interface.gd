@@ -626,7 +626,7 @@ func _process(delta: float) -> void:
 		if _toast_clock <= 0.0:
 			_toast_panel.hide()
 
-func show_inspection(gem: Dictionary, has_loupe: bool) -> void:
+func show_inspection(gem: Dictionary) -> void:
 	_clear_update_token()
 	inspecting = true
 	menu_visible = false
@@ -640,65 +640,30 @@ func show_inspection(gem: Dictionary, has_loupe: bool) -> void:
 	_prompt_panel.hide()
 	_inspection.show()
 	_clear(_inspection_body)
-	var kind: String = str(gem.get("kind","glass"))
-	var candidate: bool = kind in ["diamond","suspect","moissanite"]
-	_inspection_title.text = "Uncertified stone" if candidate else str(gem.get("name","Find"))
-	_inspection_tag.text = "Loupe and lamp" if has_loupe else "Naked-eye inspection"
-	for clue in _clues(gem,has_loupe):
+	var kind: String = str(gem.get("kind","oddity"))
+	var diamond: bool = kind == "diamond"
+	_inspection_title.text = "The diamond" if diamond else str(gem.get("name","Find"))
+	_inspection_tag.text = "The one real diamond" if diamond else ("Collectible" if kind == "collectible" else "Curio")
+	for clue in _clues(gem):
 		_inspection_body.add_child(_wrapped(clue,15,CREAM))
-	if not has_loupe and kind in ["diamond","suspect","glass","crystal","moissanite"]:
-		_inspection_body.add_child(_wrapped("For more detail, buy the loupe and lamp at the equipment display.",13,MUTED))
-	if candidate:
-		_inspection_body.add_child(_wrapped("Keep this stone. The certification bench can test it.",13,MINT))
+	if diamond:
+		_inspection_body.add_child(_wrapped("Take it to the certification bench for the $1,000 discovery grant.",13,MINT))
 	else:
 		_inspection_body.add_child(_wrapped("Clean value  $%s" % str(gem.get("value",0)),14,MINT))
-		if kind in ["collectible","oddity"]:
-			_inspection_body.add_child(_wrapped("C  Add to your collection",13,MINT))
+		_inspection_body.add_child(_wrapped("C  Add to your collection",13,MINT))
 	_layout()
 	call_deferred("_layout")
 
-func _clues(gem: Dictionary, loupe: bool) -> Array[String]:
-	var kind: String = str(gem.get("kind","glass"))
+func _clues(gem: Dictionary) -> Array[String]:
+	var kind: String = str(gem.get("kind","oddity"))
 	var result: Array[String] = []
 	match kind:
 		"diamond":
-			result = ["Breath mist clears almost immediately.","A point behind the stone breaks into a soft haze."]
-			if loupe:
-				result.append("Razor-clean facet junctions, even up close.")
-				result.append("No trapped round bubbles beneath the surface.")
-		"suspect", "moissanite":
-			result = ["Breath mist clears quickly. A promising sign.","The point behind the stone becomes difficult to read."]
-			if loupe:
-				var variant: int = abs(int(gem.get("id",0))) % 3
-				if variant == 0:
-					result.append("Very sharp facet junctions. A tiny doubled edge at the back.")
-					result.append("No obvious bubbles. A fine internal seam catches the light.")
-				elif variant == 1:
-					result.append("Mostly clean edges, with one rounded junction.")
-					result.append("A small circular inclusion hides near the base.")
-				else:
-					result.append("Crisp facets. Back facets split into paired reflections.")
-					result.append("No visible bubbles. Bright flashes carry a rainbow fringe.")
-		"glass":
-			result = ["Breath mist lingers on the surface.","A point behind the stone stays surprisingly readable."]
-			if loupe:
-				result.append("Slightly rounded facet edges.")
-				result.append("A round trapped bubble glints inside.")
-		"crystal":
-			result = ["Cool and clear. Breath mist clears fairly quickly.","The point behind the stone softens and shifts."]
-			if loupe:
-				result.append("Fine parallel growth lines run beneath a facet.")
-				result.append("A natural-looking seam follows an internal plane.")
-		"metal", "scrap":
-			result = ["Dense metal with scratched plating.","Suitable for the exchange."]
-		"cash":
-			result = ["Marked coins and notes.","Trade these at the exchange."]
+			result = ["Razor-clean facets throw blue-white fire as it turns.","There is only one of these in the whole mountain."]
 		"collectible":
-			result = ["A decorative imitation.","Keep this piece for your collection, or sell it."]
-		"oddity", "junk":
-			result = ["Worn surface. No visible crystal structure.","This material has no gem-like optical clues."]
+			result = [str(gem.get("clue","An excellent addition to the specimen shelf.")),"Keep it for your collection, or sell it."]
 		_:
-			result = [str(gem.get("clue","Turn it under the light and watch the surface.")),"Look carefully before deciding what to keep."]
+			result = [str(gem.get("clue","A curious relic of the old miners.")),"Sell it at the exchange or shelve it for fun."]
 	return result
 
 func hide_inspection() -> void:
@@ -735,7 +700,7 @@ func show_collection(state: Variant) -> void:
 	_modal_body.add_child(HSeparator.new())
 	_modal_body.add_child(_label("The diamond",20,CREAM,true))
 	var certified: bool = bool(_read(state,"certified",false))
-	_modal_body.add_child(_wrapped("Certified and saved." if certified else "Still buried deep in the mountain's core, hidden among clear quartz crystals. Mine crystal veins, then test promising stones at the certification bench.",15,MUTED))
+	_modal_body.add_child(_wrapped("Certified and saved." if certified else "Still buried deep in the mountain's core, near the bedrock. There is only one, and it glitters in its rock. Blast down to it, then take it to the certification bench.",15,MUTED))
 	_modal_body.add_child(HSeparator.new())
 	_modal_body.add_child(_label("Satchel & ore prices",20,CREAM,true))
 	var satchel: Dictionary = {}
@@ -755,7 +720,7 @@ func show_collection(state: Variant) -> void:
 		_modal_body.add_child(_button(str(entry.label),func(): request_action.emit(action,{})))
 
 func _show_controls() -> void:
-	_open_modal("How to play","Mine and blast the mountain, sell ore, and keep clear crystals for the bench.")
+	_open_modal("How to play","Mine and blast the mountain, sell ore, and dig out the one real diamond.")
 	_modal_body.add_child(_button("Start guided tutorial",func(): request_action.emit("tutorial_restart",{}),true))
 	if bool(_tutorial_data.get("visible",false)):
 		_modal_body.add_child(_button("Skip tutorial",func(): request_action.emit("tutorial_skip",{})))
@@ -772,8 +737,8 @@ func _show_controls() -> void:
 		["1 / 2 / 3 / 4","Pickaxe / dynamite / TNT / Mountain Buster"],
 		["Tab / Esc","Journal / pause"],
 		["V / M","Hold to talk / mute microphone"],
-		["C / R","Shelve a fossil / gift a crystal"],
-		["F / G / H","Label / foam / hat"]
+		["C / R","Shelve a fossil / gift a find"],
+		["G / H","Foam / hat"]
 	]
 	for entry in rows:
 		var row := HBoxContainer.new()
@@ -1034,7 +999,7 @@ func _setting_slider(title: String, key: String, value: float, minimum: float, m
 func show_ending() -> void:
 	_open_modal("Diamond certified","You found the real diamond.")
 	_modal_body.add_child(_label("Certificate of authenticity",20,MINT,true))
-	_modal_body.add_child(_wrapped("The stone passed all three tests. Your discovery, collection and equipment remain saved.",17,CREAM))
+	_modal_body.add_child(_wrapped("The one real diamond in the mountain is certified. Your discovery, collection and equipment remain saved.",17,CREAM))
 	_modal_body.add_child(_button("Continue exploring",_resume,true))
 	_modal_body.add_child(_button("Save game",func(): request_action.emit("save",{})))
 	_modal_body.add_child(_button("Return to title",func(): request_action.emit("menu",{})))

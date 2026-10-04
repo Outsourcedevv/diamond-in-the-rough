@@ -107,7 +107,7 @@ func _build_environment() -> void:
 	sunlight.shadow_enabled = true
 	sunlight.shadow_bias = 0.08
 	sunlight.shadow_normal_bias = 2.2
-	sunlight.directional_shadow_max_distance = 70.0
+	sunlight.directional_shadow_max_distance = 110.0
 	add_child(sunlight)
 
 func _omni(at: Vector3, color: Color, energy: float, reach: float) -> void:
@@ -121,16 +121,17 @@ func _omni(at: Vector3, color: Color, energy: float, reach: float) -> void:
 func _build_room() -> void:
 	# The sorting camp sits on a gravel terrace cut into an alpine mountainside.
 	_box(self, Vector3(0, -0.22, 0), Vector3(26.0, 0.44, 23.0), "floor", true)
-	_box(self, Vector3(0, -0.32, -40), Vector3(240.0, 0.6, 220.0), "floor_alt", true)
+	_box(self, Vector3(0, -0.32, -90), Vector3(1400.0, 0.6, 1400.0), "floor_alt", true)
 	# Distant peaks frame the mineable mountain without touching its blocks.
-	_mountain(Vector3(-82, -1.0, -80), 32.0, 36.0, 41, true)
-	_mountain(Vector3(84, -1.0, -86), 34.0, 40.0, 42, true)
-	_mountain(Vector3(-4, -1.0, -142), 48.0, 54.0, 21, true)
-	_mountain(Vector3(-64, -1.0, -20), 16.0, 14.0, 29, false)
-	_mountain(Vector3(66, -1.0, -24), 17.0, 16.0, 32, false)
+	_mountain(Vector3(-150, -1.0, -112), 42.0, 52.0, 41, true)
+	_mountain(Vector3(152, -1.0, -124), 46.0, 58.0, 42, true)
+	_mountain(Vector3(-10, -1.0, -252), 72.0, 84.0, 21, true)
+	_mountain(Vector3(-104, -1.0, -12), 22.0, 18.0, 29, false)
+	_mountain(Vector3(106, -1.0, -18), 23.0, 20.0, 32, false)
 	for side: int in [-1, 1]:
+		for n: int in range(12):
+			_pine(Vector3(side * _rng.randf_range(80.0, 94.0), -0.25, -150.0 + float(n) * 12.0), _rng.randf_range(4.0, 8.0))
 		for n: int in range(8):
-			_pine(Vector3(side * _rng.randf_range(40.0, 48.0), -0.25, -60.0 + float(n) * 9.0), _rng.randf_range(3.6, 7.0))
 			_pine(Vector3(side * _rng.randf_range(15.0, 24.0), -0.25, -9.0 + float(n) * 2.6), _rng.randf_range(3.6, 6.0))
 		for z: int in range(-10, 12, 3):
 			_box(self, Vector3(side * 12.1, 0.78, float(z)), Vector3(0.17, 1.55, 0.17), "wood_dark")
@@ -220,7 +221,9 @@ func _face_mesh(faces: Array) -> ArrayMesh:
 		var b: Vector3 = face[1]
 		var c: Vector3 = face[2]
 		var normal: Vector3 = (b - a).cross(c - a).normalized()
-		for point: Vector3 in [a, b, c]:
+		# Faces are listed counter-clockwise from outside; Godot draws clockwise
+		# front faces, so emit them reversed to keep the outside visible from above.
+		for point: Vector3 in [a, c, b]:
 			vertices.append(point)
 			normals.append(normal)
 	var arrays: Array = []
@@ -642,12 +645,9 @@ static func make_gem(kind: String) -> Node3D:
 		inner.material_override = _material(Color("b89a68"), 0.05, 0.75)
 		inner.position.y = 0.05
 		visual.add_child(inner)
-	elif kind in ["diamond", "suspect"]:
+	elif kind == "diamond":
 		mesh = gem_mesh()
 		material = _material(Color("c1eee6"), 0.43, 0.13)
-	elif kind == "crystal":
-		mesh = gem_mesh()
-		material = _material(Color("c58dc9"), 0.35, 0.18)
 	else:
 		mesh = gem_mesh()
 		material = _material(Color("82c6dc"), 0.3, 0.22)
