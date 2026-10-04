@@ -60,43 +60,48 @@ local function rand(a: number?, b: number?): number
 	end
 	return unit
 end
-local grid = Grid.new(15, 14, 3.7, rand)
-print("mountain blocks", grid.total, "exposed", grid:exposedCount())
-check(grid.total > 1500 and grid.total < 6000, "mountain has a sensible number of blocks")
+local t0 = os.clock()
+local grid = Grid.new(250000, 3.7, rand)
+local hidden = grid:carveHiddenCell()
+print(string.format("mountain rocks %d, exposed %d, radius %d, built in %.2f s", grid.total, grid:exposedCount(), grid.radius, os.clock() - t0))
+check(grid.total == 250000 - 1, "one rock per stone: exactly 250,000 cells, one carved for the diamond (" .. grid.total .. ")")
+check(Grid.new(1234, 1, rand).total == 1234, "any starting stone gives exactly that many rocks")
+check(grid:exposedCount() < 40000, "only the outer rocks need parts (" .. grid:exposedCount() .. ")")
 local x, y, z = Grid.coords(Grid.key(-15, 13, 7))
 check(x == -15 and y == 13 and z == 7, "keys round-trip coordinates")
-local hidden = grid:pickHiddenCell()
-check(grid:isSolid(hidden) and not grid:isExposed(hidden), "the diamond starts fully buried")
-local removed, centre = grid:blast(40)
-check(#removed == 40 and centre ~= nil, "a blast removes the requested number of blocks")
+check(not grid:isSolid(hidden) and not grid:isOpenAround(hidden), "the diamond starts sealed inside the rock")
+check(grid.exposedIndex[hidden] == nil, "rock around the diamond does not count as uncovered")
+grid:takeFresh()
+local removed, centre = grid:blast(400)
+check(#removed == 400 and centre ~= nil, "a blast removes exactly the requested number of rocks")
+check(#grid:takeFresh() > 0, "a blast uncovers new rocks to draw")
 local cx, cy, cz = Grid.coords(centre :: number)
 local far = 0
 for _, key in removed do
 	local bx, by, bz = Grid.coords(key)
-	if (bx - cx) ^ 2 + (by - cy) ^ 2 + (bz - cz) ^ 2 > 64 then
+	if (bx - cx) ^ 2 + (by - cy) ^ 2 + (bz - cz) ^ 2 > 100 then
 		far += 1
 	end
 end
-check(far <= 4, "blast blocks cluster into one crater (" .. far .. " far away)")
--- Exposure stays consistent with the solid cells after many blasts.
+check(far <= 20, "blast rocks cluster into one crater (" .. far .. " far away)")
 for _ = 1, 30 do
-	grid:blast(rand(1, 60))
+	grid:blast(rand(1, 3000))
 end
 local consistent = true
 for _, key in grid.order do
 	if grid:isSolid(key) then
-		local listed = grid.exposedIndex[key] ~= nil
-		if listed ~= grid:isExposed(key) then
+		if (grid.exposedIndex[key] ~= nil) ~= grid:isExposed(key) then
 			consistent = false
 		end
 	end
 end
-check(consistent, "exposed list matches the actual exposed blocks")
+check(consistent, "uncovered list matches the actual uncovered rocks")
 check(grid:remaining() == grid.total - grid.removed, "remaining count")
--- Blasting everything empties the mountain and reaches the diamond's cell.
-local all = grid:blast(grid.total)
+t0 = os.clock()
+grid:blast(grid.total)
+print(string.format("cleared the rest in %.2f s", os.clock() - t0))
 check(grid:remaining() == 0 and grid:exposedCount() == 0, "the whole mountain can be blasted away")
-check(not grid:isSolid(hidden), "the diamond's cell is eventually opened")
+check(grid:isOpenAround(hidden), "the diamond is reached once the rock around it is gone")
 check(grid:supportBelow(0, 5, 0) == -1, "nothing supports a find once the mountain is gone")
 
 print(string.format("%d passed, %d failed", passed, failed))
