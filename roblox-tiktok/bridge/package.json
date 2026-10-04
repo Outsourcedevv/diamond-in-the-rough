@@ -1,0 +1,18 @@
+{
+  "name": "diamond-rush-tiktok-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Connects a TikTok LIVE to the Diamond Rush Roblox game.",
+  "type": "module",
+  "main": "bridge.mjs",
+  "scripts": {
+    "start": "node bridge.mjs",
+    "test": "node --test events.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "tiktok-live-connector": "2.5.0"
+  }
+}

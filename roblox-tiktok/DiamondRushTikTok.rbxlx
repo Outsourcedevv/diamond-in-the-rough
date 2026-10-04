@@ -1,0 +1,2088 @@
+<roblox version="4">
+  <Item class="HttpService" referent="0">
+    <Properties>
+      <string name="Name">HttpService</string>
+      <bool name="HttpEnabled">true</bool>
+    </Properties>
+  </Item>
+  <Item class="Lighting" referent="1">
+    <Properties>
+      <string name="Name">Lighting</string>
+    </Properties>
+  </Item>
+  <Item class="ReplicatedStorage" referent="2">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="3">
+      <Properties>
+        <string name="Name">DiamondRush</string>
+      </Properties>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
+          <string name="Name">Config</string>
+          <string name="Source"><![CDATA[--!strict
+-- Everything a streamer may want to tune. Values marked (live) can also be
+-- changed in-game from the settings panel; the panel's values are saved.
+local Config = {
+	-- Stone -----------------------------------------------------------------
+	StartingStone = 250000, -- (live) stone in the mountain at the start of a round
+	StonePerCoin = 100, -- stone removed per TikTok coin gifted (a Rose is 1 coin)
+	StonePerLike = 2,
+	StonePerFollow = 500,
+	StonePerShare = 300,
+
+	-- The diamond -----------------------------------------------------------
+	HoldSeconds = 15, -- real seconds the diamond must be held to win
+	HoldCountFrom = 10, -- the number the on-screen countdown starts at
+	HoldSlowdown = 0.6, -- 0 = steady countdown, 1 = slows down a lot near the end
+	WinScreenSeconds = 4,
+
+	-- Win counter defaults (all live) ----------------------------------------
+	WinTitle = "WINS",
+	WinGoal = 0, -- 0 hides the goal ("WINS: 3" instead of "WINS: 3/10")
+	WinTextColor = "#FFFFFF",
+	WinBackgroundColor = "#2B2140",
+
+	-- Mountain shape ----------------------------------------------------------
+	MountainRadius = 15, -- in blocks
+	MountainHeight = 14, -- in blocks
+	BlockSize = 4, -- studs
+
+	-- TikTok ------------------------------------------------------------------
+	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
+	MessagingTopic = "DiamondRushTikTok", -- Open Cloud topic (published games)
+
+	-- Extra Roblox user ids allowed to change settings (the owner always can).
+	Admins = {} :: { number },
+}
+
+return Config
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="5">
+        <Properties>
+          <string name="Name">Format</string>
+          <string name="Source"><![CDATA[--!strict
+local Format = {}
+
+-- 250000 -> "250,000"
+function Format.commas(n: number): string
+	local whole = math.floor(math.abs(n) + 0.5)
+	local digits = tostring(whole)
+	local out = ""
+	while #digits > 3 do
+		out = "," .. string.sub(digits, -3) .. out
+		digits = string.sub(digits, 1, -4)
+	end
+	return (if n < 0 and whole > 0 then "-" else "") .. digits .. out
+end
+
+-- 83.46 -> "1:23.5"; an hour or more -> "1:02:03.0"
+function Format.duration(seconds: number): string
+	local tenths = math.floor(math.max(0, seconds) * 10 + 0.5)
+	local hours = tenths // 36000
+	local minutes = (tenths // 600) % 60
+	local secs = (tenths % 600) / 10
+	if hours > 0 then
+		return string.format("%d:%02d:%04.1f", hours, minutes, secs)
+	end
+	return string.format("%d:%04.1f", minutes, secs)
+end
+
+-- "#FF8800" or "FF8800" -> 255, 136, 0 (nil if it is not a colour)
+function Format.parseHex(text: string): (number?, number?, number?)
+	local hex = string.match(string.upper(text), "^%s*#?(%x%x%x%x%x%x)%s*$")
+	if hex == nil then
+		return nil, nil, nil
+	end
+	return tonumber(string.sub(hex, 1, 2), 16), tonumber(string.sub(hex, 3, 4), 16), tonumber(string.sub(hex, 5, 6), 16)
+end
+
+-- The win counter text: "WINS: 3" or "WINS: 3/10" when a goal is set.
+function Format.wins(title: string, wins: number, goal: number): string
+	local label = if title == "" then "" else title .. ": "
+	if goal > 0 then
+		return label .. tostring(wins) .. "/" .. tostring(goal)
+	end
+	return label .. tostring(wins)
+end
+
+return Format
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="6">
+        <Properties>
+          <string name="Name">HoldTimer</string>
+          <string name="Source"><![CDATA[--!strict
+-- The diamond must be held for HoldSeconds of real time, but the screen counts
+-- down from HoldCountFrom (10). The count runs quickly at first and slows near
+-- the end, so the last numbers hang on screen for longer.
+local HoldTimer = {}
+
+-- How much of the on-screen countdown has passed after a fraction p of the real
+-- hold time. slowdown 0 is linear; 1 is a full ease-out (4x slower at the end).
+function HoldTimer.progress(p: number, slowdown: number): number
+	p = math.clamp(p, 0, 1)
+	slowdown = math.clamp(slowdown, 0, 1)
+	return (1 - slowdown) * p + slowdown * (1 - (1 - p) * (1 - p))
+end
+
+-- The whole number to show after `elapsed` real seconds: countFrom at the start,
+-- never below 1 until the hold is complete, then 0.
+function HoldTimer.display(elapsed: number, holdSeconds: number, countFrom: number, slowdown: number): number
+	if elapsed >= holdSeconds then
+		return 0
+	end
+	local shown = countFrom * (1 - HoldTimer.progress(elapsed / holdSeconds, slowdown))
+	return math.max(1, math.ceil(shown - 1e-9))
+end
+
+return HoldTimer
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="7">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="8">
+      <Properties>
+        <string name="Name">DiamondRushServer</string>
+        <token name="RunContext">0</token>
+        <string name="Source"><![CDATA[--!strict
+-- DIAMOND RUSH: a TikTok Live mountain. Gifts, likes, follows and shares blast
+-- stone out of the mountain; whoever grabs the hidden diamond and holds it for
+-- 15 seconds wins the round.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local StarterPack = game:GetService("StarterPack")
+local TextService = game:GetService("TextService")
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
+local TextChatService = game:GetService("TextChatService")
+
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local Config = require(Shared:WaitForChild("Config"))
+local Format = require(Shared:WaitForChild("Format"))
+local Mountain = require(script.Mountain)
+local TikTokFeed = require(script.TikTokFeed)
+local Store = require(script.Store)
+
+-- Shared state lives in attributes, so every client sees it without extra code.
+local State = Instance.new("Configuration")
+State.Name = "DiamondRushState"
+State.Parent = ReplicatedStorage
+
+local Remotes = Instance.new("Folder")
+Remotes.Name = "DiamondRushRemotes"
+local Notify = Instance.new("RemoteEvent")
+Notify.Name = "Notify"
+Notify.Parent = Remotes
+local Request = Instance.new("RemoteEvent")
+Request.Name = "Request"
+Request.Parent = Remotes
+Remotes.Parent = ReplicatedStorage
+
+-- Saved settings --------------------------------------------------------------
+local settings = {
+	wins = 0,
+	title = Config.WinTitle,
+	goal = Config.WinGoal,
+	textColor = Config.WinTextColor,
+	backgroundColor = Config.WinBackgroundColor,
+	showWins = true,
+	best = 0,
+	startingStone = Config.StartingStone,
+}
+local saved = Store.load()
+if saved then
+	for key, value in saved do
+		if settings[key] ~= nil and type(value) == type(settings[key]) then
+			settings[key] = value
+		end
+	end
+end
+
+local function publishSettings()
+	State:SetAttribute("Wins", settings.wins)
+	State:SetAttribute("WinTitle", settings.title)
+	State:SetAttribute("WinGoal", settings.goal)
+	State:SetAttribute("WinTextColor", settings.textColor)
+	State:SetAttribute("WinBackgroundColor", settings.backgroundColor)
+	State:SetAttribute("ShowWins", settings.showWins)
+	State:SetAttribute("BestTime", settings.best)
+	State:SetAttribute("NextStartingStone", settings.startingStone)
+end
+
+local function saveSettings()
+	publishSettings()
+	Store.save(settings)
+end
+
+game:BindToClose(function()
+	Store.flush(settings)
+end)
+
+-- The world ---------------------------------------------------------------------
+local blockSize = Config.BlockSize
+local spawnDistance = Config.MountainRadius * blockSize + 40
+
+local ground = Instance.new("Part")
+ground.Name = "Ground"
+ground.Anchored = true
+ground.Size = Vector3.new(800, 4, 800)
+ground.Position = Vector3.new(0, -2, 0)
+ground.Material = Enum.Material.Grass
+ground.Color = Color3.fromRGB(96, 150, 78)
+ground.TopSurface = Enum.SurfaceType.Smooth
+ground.Parent = workspace
+
+local spawn = Instance.new("SpawnLocation")
+spawn.Name = "Camp"
+spawn.Anchored = true
+spawn.Neutral = true
+spawn.Duration = 0
+spawn.Size = Vector3.new(14, 1, 14)
+spawn.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, spawnDistance), Vector3.new(0, 0.5, 0))
+spawn.Material = Enum.Material.WoodPlanks
+spawn.Color = Color3.fromRGB(150, 110, 70)
+spawn.Parent = workspace
+
+Lighting.ClockTime = 14.5
+Lighting.Brightness = 2.2
+Lighting.OutdoorAmbient = Color3.fromRGB(140, 140, 150)
+if Lighting:FindFirstChildOfClass("Atmosphere") == nil then
+	local atmosphere = Instance.new("Atmosphere")
+	atmosphere.Density = 0.25
+	atmosphere.Haze = 1.2
+	atmosphere.Color = Color3.fromRGB(200, 215, 230)
+	atmosphere.Parent = Lighting
+end
+
+-- Every player carries a pickaxe to chip at the rock themselves.
+local function makePickaxe(): Tool
+	local tool = Instance.new("Tool")
+	tool.Name = "Pickaxe"
+	tool.CanBeDropped = false
+	tool.ToolTip = "Click rock to mine it"
+	tool.GripPos = Vector3.new(0, -1.3, 0)
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Vector3.new(0.35, 4, 0.35)
+	handle.Material = Enum.Material.Wood
+	handle.Color = Color3.fromRGB(122, 84, 52)
+	handle.CanCollide = false
+	handle.Massless = true
+	handle.Parent = tool
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Size = Vector3.new(3, 0.45, 0.45)
+	head.Material = Enum.Material.Metal
+	head.Color = Color3.fromRGB(150, 155, 160)
+	head.CanCollide = false
+	head.Massless = true
+	head.CFrame = handle.CFrame * CFrame.new(0, 1.8, 0)
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = handle
+	weld.Part1 = head
+	weld.Parent = head
+	head.Parent = tool
+	return tool
+end
+makePickaxe().Parent = StarterPack
+
+-- The one diamond -----------------------------------------------------------------
+local diamond = Instance.new("Part")
+diamond.Name = "Diamond"
+diamond.Size = Vector3.new(2.2, 2.2, 2.2)
+diamond.Material = Enum.Material.Glass
+diamond.Color = Color3.fromRGB(175, 240, 255)
+diamond.Reflectance = 0.35
+diamond.Anchored = true
+diamond.CanCollide = false
+diamond.Parent = workspace
+local glow = Instance.new("PointLight")
+glow.Color = Color3.fromRGB(140, 230, 255)
+glow.Range = 16
+glow.Brightness = 3
+glow.Parent = diamond
+local sparkles = Instance.new("Sparkles")
+sparkles.SparkleColor = Color3.fromRGB(200, 250, 255)
+sparkles.Parent = diamond
+local highlight = Instance.new("Highlight")
+highlight.FillColor = Color3.fromRGB(150, 240, 255)
+highlight.FillTransparency = 0.55
+highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+highlight.Parent = diamond
+local prompt = Instance.new("ProximityPrompt")
+prompt.ActionText = "Grab the diamond"
+prompt.ObjectText = "Diamond"
+prompt.HoldDuration = 0
+prompt.MaxActivationDistance = 14
+prompt.RequiresLineOfSight = false
+prompt.Parent = diamond
+local tag = Instance.new("BillboardGui")
+tag.Size = UDim2.fromOffset(220, 50)
+tag.StudsOffset = Vector3.new(0, 3.2, 0)
+tag.AlwaysOnTop = true
+tag.Parent = diamond
+local tagText = Instance.new("TextLabel")
+tagText.Size = UDim2.fromScale(1, 1)
+tagText.BackgroundTransparency = 1
+tagText.Font = Enum.Font.FredokaOne
+tagText.TextScaled = true
+tagText.TextColor3 = Color3.fromRGB(255, 255, 255)
+tagText.TextStrokeTransparency = 0.2
+tagText.Text = "💎 GRAB IT!"
+tagText.Parent = tag
+
+local DIAMOND_TILT = CFrame.Angles(math.rad(45), 0, math.rad(35))
+
+-- Round state -------------------------------------------------------------------
+local mountain: Mountain.Mountain? = nil
+local phase = "Digging"
+local startingStone = settings.startingStone
+local removed = 0
+local perBlock = 1
+local pendingStone = 0
+local roundStart = 0
+local holder: Player? = nil
+local holdStarted = 0
+local holdWeld: WeldConstraint? = nil
+local mineCooldown: { [Player]: number } = {}
+local admins: { [Player]: boolean } = {}
+
+local function setPhase(value: string)
+	phase = value
+	State:SetAttribute("Phase", value)
+end
+
+local function refreshStone()
+	State:SetAttribute("Stone", math.max(0, math.floor(startingStone - removed + 0.5)))
+	State:SetAttribute("StartingStone", startingStone)
+end
+
+local function showDiamond(visible: boolean)
+	diamond.Transparency = if visible then 0.12 else 1
+	diamond.CanTouch = visible
+	glow.Enabled = visible
+	sparkles.Enabled = visible
+	highlight.Enabled = visible
+	tag.Enabled = visible and phase == "Revealed"
+	prompt.Enabled = visible and phase == "Revealed"
+end
+
+-- A loose diamond drops onto whatever rock (or ground) is left under it.
+local function settleDiamond()
+	if phase ~= "Revealed" or mountain == nil or not diamond.Anchored then
+		return
+	end
+	local rest = mountain:restingHeight(diamond.Position) + 1.6
+	if rest < diamond.Position.Y - 0.1 then
+		local target = CFrame.new(diamond.Position.X, rest, diamond.Position.Z) * DIAMOND_TILT
+		TweenService:Create(diamond, TweenInfo.new(0.4, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out), { CFrame = target }):Play()
+	end
+end
+
+local function reveal()
+	if phase ~= "Digging" then
+		return
+	end
+	setPhase("Revealed")
+	showDiamond(true)
+	Notify:FireAllClients("revealed")
+end
+
+-- Breaks enough blocks to match the stone removed so far.
+local function syncBlocks()
+	local current = mountain
+	if current == nil then
+		return
+	end
+	local target = if removed >= startingStone - 1e-6 then current:total() else math.floor(removed / perBlock)
+	local need = target - current:removedCount()
+	if need > 0 then
+		local centre = current:blast(need)
+		if centre ~= nil and need >= 10 then
+			local blast = Instance.new("Explosion")
+			blast.Position = centre
+			blast.BlastRadius = math.min(32, 4 + math.sqrt(need) * 2.2)
+			blast.BlastPressure = 0
+			blast.DestroyJointRadiusPercent = 0
+			blast.ExplosionType = Enum.ExplosionType.NoCraters
+			blast.Parent = workspace
+		end
+	end
+	refreshStone()
+	settleDiamond()
+end
+
+local function applyStone(amount: number)
+	if amount <= 0 then
+		return
+	end
+	if phase == "Won" or mountain == nil then
+		-- Gifts during the win screen count towards the next mountain.
+		pendingStone += amount
+		return
+	end
+	removed = math.min(startingStone, removed + amount)
+	syncBlocks()
+end
+
+local function teleportHome(player: Player)
+	local character = player.Character
+	if character ~= nil then
+		character:PivotTo(spawn.CFrame + Vector3.new(0, 4, 0))
+	end
+end
+
+local function newRound()
+	if mountain ~= nil then
+		mountain:destroy()
+	end
+	holder = nil
+	if holdWeld ~= nil then
+		holdWeld:Destroy()
+		holdWeld = nil
+	end
+	startingStone = settings.startingStone
+	removed = 0
+	setPhase("Digging")
+	local created = Mountain.new(workspace, Config.MountainRadius, Config.MountainHeight, blockSize, reveal)
+	mountain = created
+	perBlock = startingStone / created:total()
+	diamond.Anchored = true
+	diamond.CFrame = CFrame.new(created:keyPosition(created.diamondKey)) * DIAMOND_TILT
+	showDiamond(false)
+	roundStart = workspace:GetServerTimeNow()
+	State:SetAttribute("RoundStart", roundStart)
+	State:SetAttribute("Holder", "")
+	State:SetAttribute("HoldStart", 0)
+	refreshStone()
+	for _, player in Players:GetPlayers() do
+		teleportHome(player)
+	end
+	local carried = pendingStone
+	pendingStone = 0
+	applyStone(carried)
+end
+
+-- Holding the diamond -----------------------------------------------------------
+local function grab(player: Player)
+	if phase ~= "Revealed" then
+		return
+	end
+	local character = player.Character
+	local head = character and character:FindFirstChild("Head")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if head == nil or not head:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then
+		return
+	end
+	holder = player
+	holdStarted = os.clock()
+	setPhase("Holding")
+	showDiamond(true)
+	-- Held high above the head, like a trophy, so the stream can see it.
+	diamond.Anchored = false
+	diamond.Massless = true
+	diamond.CanCollide = false
+	diamond.CFrame = head.CFrame * CFrame.new(0, 3, 0) * DIAMOND_TILT
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = head
+	weld.Part1 = diamond
+	weld.Parent = diamond
+	holdWeld = weld
+	State:SetAttribute("Holder", player.DisplayName)
+	State:SetAttribute("HoldStart", workspace:GetServerTimeNow())
+	Notify:FireAllClients("grabbed", player.DisplayName)
+end
+
+local function drop(reason: string)
+	if phase ~= "Holding" then
+		return
+	end
+	local where = diamond.Position
+	local lost = holder
+	holder = nil
+	if holdWeld ~= nil then
+		holdWeld:Destroy()
+		holdWeld = nil
+	end
+	diamond.Anchored = true
+	diamond.AssemblyLinearVelocity = Vector3.zero
+	local params = RaycastParams.new()
+	local ignore: { Instance } = { diamond }
+	for _, player in Players:GetPlayers() do
+		if player.Character then
+			table.insert(ignore, player.Character)
+		end
+	end
+	params.FilterDescendantsInstances = ignore
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local hit = workspace:Raycast(where, Vector3.new(0, -400, 0), params)
+	local y = if hit then hit.Position.Y + 1.6 else 1.6
+	diamond.CFrame = CFrame.new(where.X, math.max(y, 1.6), where.Z) * DIAMOND_TILT
+	setPhase("Revealed")
+	showDiamond(true)
+	State:SetAttribute("Holder", "")
+	State:SetAttribute("HoldStart", 0)
+	Notify:FireAllClients("dropped", { name = if lost then lost.DisplayName else "", reason = reason })
+end
+
+local function win(player: Player)
+	setPhase("Won")
+	tag.Enabled = false
+	prompt.Enabled = false
+	local roundTime = workspace:GetServerTimeNow() - roundStart
+	local newBest = settings.best <= 0 or roundTime < settings.best
+	if newBest then
+		settings.best = roundTime
+	end
+	settings.wins += 1
+	State:SetAttribute("LastTime", roundTime)
+	saveSettings()
+	Notify:FireAllClients("win", {
+		winner = player.DisplayName,
+		time = roundTime,
+		best = settings.best,
+		newBest = newBest,
+	})
+	task.delay(Config.WinScreenSeconds, newRound)
+end
+
+prompt.Triggered:Connect(grab)
+diamond.Touched:Connect(function(hit)
+	if phase ~= "Revealed" then
+		return
+	end
+	local player = Players:GetPlayerFromCharacter(hit.Parent)
+	if player ~= nil then
+		grab(player)
+	end
+end)
+
+RunService.Heartbeat:Connect(function()
+	if phase ~= "Holding" then
+		return
+	end
+	local player = holder
+	local character = player and player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if player == nil or player.Parent == nil or character == nil or humanoid == nil or humanoid.Health <= 0 then
+		drop("left")
+		return
+	end
+	if holdWeld == nil or holdWeld.Parent == nil or diamond.Position.Y < -50 then
+		drop("fell")
+		return
+	end
+	if os.clock() - holdStarted >= Config.HoldSeconds then
+		win(player)
+	end
+end)
+
+-- TikTok ------------------------------------------------------------------------
+local function onTikTok(event: TikTokFeed.Event)
+	local who = event.name or event.user or "Someone"
+	local amount = 0
+	local text = ""
+	if event.type == "gift" then
+		local count = math.max(1, math.floor(event.count or 1))
+		local coins = math.max(1, event.coins or 1)
+		amount = coins * count * Config.StonePerCoin
+		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
+	elseif event.type == "like" then
+		local likes = math.max(1, math.floor(event.likes or 1))
+		amount = likes * Config.StonePerLike
+		text = string.format("%s liked x%d", who, likes)
+	elseif event.type == "follow" then
+		amount = Config.StonePerFollow
+		text = who .. " followed"
+	elseif event.type == "share" then
+		amount = Config.StonePerShare
+		text = who .. " shared the live"
+	end
+	if amount <= 0 then
+		return
+	end
+	applyStone(amount)
+	Notify:FireAllClients("feed", { text = text, stone = amount, kind = event.type })
+end
+
+TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, function(status: string)
+	State:SetAttribute("TikTok", status)
+end)
+
+-- Pickaxe mining and settings ---------------------------------------------------------
+local function isAdmin(player: Player): boolean
+	if RunService:IsStudio() then
+		return true
+	end
+	if table.find(Config.Admins, player.UserId) then
+		return true
+	end
+	if game.CreatorType == Enum.CreatorType.User then
+		return player.UserId == game.CreatorId
+	end
+	local ok, rank = pcall(player.GetRankInGroupAsync, player, game.CreatorId)
+	return ok and rank >= 255
+end
+
+local function filtered(player: Player, text: string): string?
+	local ok, result = pcall(function()
+		local filter = TextService:FilterStringAsync(text, player.UserId, Enum.TextFilterContext.PublicChat)
+		return filter:GetNonChatStringForBroadcastAsync()
+	end)
+	return if ok then result else nil
+end
+
+local function testGift(coins: number, count: number, name: string)
+	onTikTok({
+		id = "test-" .. tostring(os.clock()),
+		type = "gift",
+		name = "Test",
+		gift = name,
+		coins = coins,
+		count = count,
+	})
+end
+
+local function applySetting(player: Player, action: string, value: any)
+	if action == "setWins" and type(value) == "number" then
+		settings.wins = math.clamp(math.floor(value), 0, 999999)
+	elseif action == "addWins" and type(value) == "number" then
+		settings.wins = math.clamp(settings.wins + math.floor(value), 0, 999999)
+	elseif action == "setTitle" and type(value) == "string" then
+		local clean = filtered(player, string.sub(value, 1, 24))
+		if clean == nil then
+			return
+		end
+		settings.title = clean
+	elseif action == "setGoal" and type(value) == "number" then
+		settings.goal = math.clamp(math.floor(value), 0, 999999)
+	elseif (action == "setTextColor" or action == "setBackgroundColor") and type(value) == "string" then
+		if Format.parseHex(value) == nil then
+			return
+		end
+		local hex = "#" .. string.upper((string.gsub(value, "[^%x]", "")))
+		if action == "setTextColor" then
+			settings.textColor = hex
+		else
+			settings.backgroundColor = hex
+		end
+	elseif action == "setShowWins" and type(value) == "boolean" then
+		settings.showWins = value
+	elseif action == "setStartingStone" and type(value) == "number" then
+		settings.startingStone = math.clamp(math.floor(value), 100, 100000000)
+	elseif action == "resetBest" then
+		settings.best = 0
+	elseif action == "newRound" then
+		if phase ~= "Won" then
+			newRound()
+		end
+		return
+	elseif action == "testGift" and type(value) == "table" then
+		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 50000) else 1
+		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1
+		testGift(coins, count, if type(value.name) == "string" then string.sub(value.name, 1, 24) else "Test gift")
+		return
+	else
+		return
+	end
+	saveSettings()
+end
+
+Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
+	if type(action) ~= "string" then
+		return
+	end
+	if action == "mine" then
+		local current = mountain
+		if current == nil or phase == "Won" or typeof(value) ~= "Instance" then
+			return
+		end
+		local now = os.clock()
+		if now - (mineCooldown[player] or 0) < 0.18 then
+			return
+		end
+		local key = current:keyForPart(value)
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if key == nil or root == nil or not root:IsA("BasePart") then
+			return
+		end
+		if (root.Position - current:keyPosition(key)).Magnitude > 22 then
+			return
+		end
+		mineCooldown[player] = now
+		if current:mine(key) then
+			removed = math.min(startingStone, removed + perBlock)
+			syncBlocks()
+		end
+		return
+	end
+	if admins[player] then
+		applySetting(player, action, value)
+	end
+end)
+
+-- Chat commands for admins, e.g. "/wins 5", "/wins +1", "/title MY WINS".
+local function onChat(player: Player, message: string)
+	if not admins[player] then
+		return
+	end
+	local command, args = string.match(message, "^/(%a+)%s*(.*)$")
+	if command == nil then
+		return
+	end
+	local rest: string = args or ""
+	command = string.lower(command)
+	local number = tonumber(rest)
+	if command == "wins" and number ~= nil then
+		if string.sub(rest, 1, 1) == "+" or string.sub(rest, 1, 1) == "-" then
+			applySetting(player, "addWins", number)
+		else
+			applySetting(player, "setWins", number)
+		end
+	elseif command == "title" then
+		applySetting(player, "setTitle", rest)
+	elseif command == "goal" and number ~= nil then
+		applySetting(player, "setGoal", number)
+	elseif command == "stone" and number ~= nil then
+		applySetting(player, "setStartingStone", number)
+	elseif command == "newround" then
+		applySetting(player, "newRound", nil)
+	elseif command == "gift" then
+		local coins, count = string.match(rest, "^(%d+)%s*(%d*)$")
+		if coins ~= nil then
+			applySetting(player, "testGift", { coins = tonumber(coins), count = tonumber(count) or 1, name = "Test gift" })
+		end
+	end
+end
+
+-- The modern chat swallows unknown "/" commands, so register them there; the
+-- legacy chat delivers them through Player.Chatted instead.
+local modernChat = TextChatService.ChatVersion == Enum.ChatVersion.TextChatService
+if modernChat then
+	local commands = Instance.new("Folder")
+	commands.Name = "DiamondRushCommands"
+	for _, name in { "wins", "title", "goal", "stone", "newround", "gift" } do
+		local command = Instance.new("TextChatCommand")
+		command.Name = "DiamondRush_" .. name
+		command.PrimaryAlias = "/" .. name
+		command.Triggered:Connect(function(source: TextSource, text: string)
+			local player = Players:GetPlayerByUserId(source.UserId)
+			if player ~= nil then
+				onChat(player, text)
+			end
+		end)
+		command.Parent = commands
+	end
+	commands.Parent = TextChatService
+end
+
+local function onPlayer(player: Player)
+	admins[player] = isAdmin(player)
+	player:SetAttribute("DiamondRushAdmin", admins[player])
+	if not modernChat then
+		player.Chatted:Connect(function(message)
+			onChat(player, message)
+		end)
+	end
+end
+
+Players.PlayerAdded:Connect(onPlayer)
+for _, player in Players:GetPlayers() do
+	task.spawn(onPlayer, player)
+end
+Players.PlayerRemoving:Connect(function(player)
+	admins[player] = nil
+	mineCooldown[player] = nil
+end)
+
+publishSettings()
+State:SetAttribute("TikTok", "Starting…")
+newRound()
+]]></string>
+      </Properties>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
+          <string name="Name">Grid</string>
+          <string name="Source"><![CDATA[--!strict
+-- Pure block-grid logic for the mountain, with no Roblox instances, so it can be
+-- tested outside Roblox. Cells are keyed by one integer; a cell is "exposed"
+-- when at least one of its six neighbours is open air, and only exposed cells
+-- can be blasted away.
+local Grid = {}
+Grid.__index = Grid
+
+local OFFSET = 128
+local SPAN = 256
+local NEIGHBOURS = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
+
+export type Grid = typeof(setmetatable(
+	{} :: {
+		radius: number,
+		height: number,
+		solid: { [number]: boolean },
+		order: { number },
+		total: number,
+		removed: number,
+		exposedList: { number },
+		exposedIndex: { [number]: number },
+		rand: (number?, number?) -> number,
+	},
+	Grid
+))
+
+function Grid.key(x: number, y: number, z: number): number
+	return (x + OFFSET) + (z + OFFSET) * SPAN + y * SPAN * SPAN
+end
+
+function Grid.coords(key: number): (number, number, number)
+	local y = key // (SPAN * SPAN)
+	local rest = key % (SPAN * SPAN)
+	return (rest % SPAN) - OFFSET, y, (rest // SPAN) - OFFSET
+end
+
+-- rand(): a number in [0, 1); rand(a, b): a whole number from a to b.
+function Grid.new(radius: number, height: number, seed: number, rand: (number?, number?) -> number): Grid
+	local self = setmetatable({
+		radius = radius,
+		height = height,
+		solid = {},
+		order = {},
+		total = 0,
+		removed = 0,
+		exposedList = {},
+		exposedIndex = {},
+		rand = rand,
+	}, Grid)
+	-- A rounded peak with a rough, noisy outline and a few lumpy shoulders.
+	for z = -radius, radius do
+		for x = -radius, radius do
+			local distance = math.sqrt(x * x + z * z) / radius
+			if distance <= 1 then
+				local bumps = math.noise(x * 0.16, z * 0.16, seed) * 2.6 + math.noise(x * 0.4, z * 0.4, seed + 7.3) * 0.9
+				local top = height * (1 - distance) ^ 0.85 + bumps * (1 - distance * 0.6)
+				local columnHeight = math.clamp(math.floor(top + 0.5), if distance < 0.85 then 1 else 0, height + 2)
+				for y = 0, columnHeight - 1 do
+					local key = Grid.key(x, y, z)
+					self.solid[key] = true
+					table.insert(self.order, key)
+				end
+			end
+		end
+	end
+	self.total = #self.order
+	for _, key in self.order do
+		if self:isExposed(key) then
+			self:_expose(key)
+		end
+	end
+	return self
+end
+
+function Grid.isSolid(self: Grid, key: number): boolean
+	return self.solid[key] == true
+end
+
+function Grid.remaining(self: Grid): number
+	return self.total - self.removed
+end
+
+function Grid.isExposed(self: Grid, key: number): boolean
+	local x, y, z = Grid.coords(key)
+	for _, step in NEIGHBOURS do
+		local ny = y + step[2]
+		-- The ground under the mountain counts as solid.
+		if ny >= 0 and not self.solid[Grid.key(x + step[1], ny, z + step[3])] then
+			return true
+		end
+	end
+	return false
+end
+
+function Grid._expose(self: Grid, key: number)
+	if self.exposedIndex[key] == nil then
+		table.insert(self.exposedList, key)
+		self.exposedIndex[key] = #self.exposedList
+	end
+end
+
+function Grid._unexpose(self: Grid, key: number)
+	local index = self.exposedIndex[key]
+	if index == nil then
+		return
+	end
+	local last = self.exposedList[#self.exposedList]
+	self.exposedList[index] = last
+	self.exposedIndex[last] = index
+	self.exposedList[#self.exposedList] = nil
+	self.exposedIndex[key] = nil
+end
+
+function Grid.exposedCount(self: Grid): number
+	return #self.exposedList
+end
+
+-- Removes one solid cell; its solid neighbours become exposed.
+function Grid.remove(self: Grid, key: number): boolean
+	if not self.solid[key] then
+		return false
+	end
+	self.solid[key] = nil
+	self.removed += 1
+	self:_unexpose(key)
+	local x, y, z = Grid.coords(key)
+	for _, step in NEIGHBOURS do
+		local ny = y + step[2]
+		if ny >= 0 then
+			local neighbour = Grid.key(x + step[1], ny, z + step[3])
+			if self.solid[neighbour] then
+				self:_expose(neighbour)
+			end
+		end
+	end
+	return true
+end
+
+function Grid.randomExposed(self: Grid): number?
+	local count = #self.exposedList
+	if count == 0 then
+		return nil
+	end
+	return self.exposedList[self.rand(1, count)]
+end
+
+-- A minimal binary heap of {distance, key} pairs, nearest first.
+local function push(heap: { { number } }, item: { number })
+	table.insert(heap, item)
+	local i = #heap
+	while i > 1 do
+		local parent = i // 2
+		if heap[parent][1] <= heap[i][1] then
+			break
+		end
+		heap[parent], heap[i] = heap[i], heap[parent]
+		i = parent
+	end
+end
+
+local function pop(heap: { { number } }): { number }?
+	local count = #heap
+	if count == 0 then
+		return nil
+	end
+	local top = heap[1]
+	heap[1] = heap[count]
+	heap[count] = nil
+	count -= 1
+	local i = 1
+	while true do
+		local left, right, smallest = i * 2, i * 2 + 1, i
+		if left <= count and heap[left][1] < heap[smallest][1] then
+			smallest = left
+		end
+		if right <= count and heap[right][1] < heap[smallest][1] then
+			smallest = right
+		end
+		if smallest == i then
+			break
+		end
+		heap[smallest], heap[i] = heap[i], heap[smallest]
+		i = smallest
+	end
+	return top
+end
+
+-- Blasts up to `count` cells as one crater around a random exposed cell (or
+-- `centre`): the nearest cells to the centre go first, and the crater only
+-- grows through cells it has opened up. Returns the removed keys and the centre.
+function Grid.blast(self: Grid, count: number, centre: number?): ({ number }, number?)
+	local removed: { number } = {}
+	local start = if centre ~= nil and self.solid[centre] and self.exposedIndex[centre] then centre else self:randomExposed()
+	if start == nil then
+		return removed, nil
+	end
+	local cx, cy, cz = Grid.coords(start)
+	local heap: { { number } } = {}
+	local queued: { [number]: boolean } = {}
+	local function enqueue(key: number)
+		if queued[key] or not self.solid[key] then
+			return
+		end
+		queued[key] = true
+		local x, y, z = Grid.coords(key)
+		-- Craters dig a little more readily downwards and outwards than up.
+		local dy = (y - cy) * (if y > cy then 1.15 else 0.9)
+		push(heap, { (x - cx) ^ 2 + dy * dy + (z - cz) ^ 2 + self.rand() * 0.6, key })
+	end
+	enqueue(start)
+	while #removed < count do
+		local item = pop(heap)
+		if item == nil then
+			-- The crater ran out of reachable rock: carry on from a new spot.
+			local nextStart = self:randomExposed()
+			if nextStart == nil then
+				break
+			end
+			cx, cy, cz = Grid.coords(nextStart)
+			enqueue(nextStart)
+			continue
+		end
+		local key = item[2]
+		if self:remove(key) then
+			table.insert(removed, key)
+			local x, y, z = Grid.coords(key)
+			for _, step in NEIGHBOURS do
+				local ny = y + step[2]
+				if ny >= 0 then
+					enqueue(Grid.key(x + step[1], ny, z + step[3]))
+				end
+			end
+		end
+	end
+	return removed, start
+end
+
+-- A cell buried inside the mountain (all six neighbours solid) for the diamond,
+-- preferring the lower two thirds so it is not found straight away.
+function Grid.pickHiddenCell(self: Grid): number
+	local buried: { number } = {}
+	for _, key in self.order do
+		local _, y, _ = Grid.coords(key)
+		if self.solid[key] and not self:isExposed(key) and y < self.height * 2 / 3 then
+			table.insert(buried, key)
+		end
+	end
+	if #buried == 0 then
+		for _, key in self.order do
+			if self.solid[key] then
+				table.insert(buried, key)
+			end
+		end
+	end
+	return buried[self.rand(1, #buried)]
+end
+
+-- The height of the highest solid cell in column (x, z) below layer y, or -1.
+function Grid.supportBelow(self: Grid, x: number, y: number, z: number): number
+	for level = y - 1, 0, -1 do
+		if self.solid[Grid.key(x, level, z)] then
+			return level
+		end
+	end
+	return -1
+end
+
+return Grid
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">Mountain</string>
+          <string name="Source"><![CDATA[--!strict
+-- Turns the block grid into Roblox parts and plays the blast effects.
+local Debris = game:GetService("Debris")
+
+local Grid = require(script.Parent.Grid)
+
+local Mountain = {}
+Mountain.__index = Mountain
+
+-- Rock tones from the foot to the summit, plus a few colourful ore flecks.
+local ROCK = {
+	Color3.fromRGB(92, 88, 84),
+	Color3.fromRGB(110, 106, 100),
+	Color3.fromRGB(128, 124, 116),
+	Color3.fromRGB(146, 140, 130),
+}
+local ORES = {
+	Color3.fromRGB(240, 196, 64), -- gold
+	Color3.fromRGB(46, 196, 120), -- emerald
+	Color3.fromRGB(224, 52, 76), -- ruby
+	Color3.fromRGB(60, 110, 230), -- sapphire
+	Color3.fromRGB(160, 90, 220), -- amethyst
+	Color3.fromRGB(205, 120, 60), -- copper
+}
+local FLYING_LIMIT = 36
+
+export type Mountain = typeof(setmetatable(
+	{} :: {
+		grid: Grid.Grid,
+		folder: Folder,
+		parts: { [number]: BasePart },
+		keys: { [BasePart]: number },
+		blockSize: number,
+		random: Random,
+		diamondKey: number,
+		onDiamondCell: () -> (),
+	},
+	Mountain
+))
+
+function Mountain.new(parent: Instance, radius: number, height: number, blockSize: number, onDiamondCell: () -> ()): Mountain
+	local random = Random.new()
+	local function rand(a: number?, b: number?): number
+		if a ~= nil and b ~= nil then
+			return random:NextInteger(a, b)
+		end
+		return random:NextNumber()
+	end
+	local grid = Grid.new(radius, height, random:NextNumber(0, 1000), rand)
+	local folder = Instance.new("Folder")
+	folder.Name = "Mountain"
+	local self = setmetatable({
+		grid = grid,
+		folder = folder,
+		parts = {},
+		keys = {},
+		blockSize = blockSize,
+		random = random,
+		diamondKey = grid:pickHiddenCell(),
+		onDiamondCell = onDiamondCell,
+	}, Mountain)
+	local tops: { [number]: number } = {}
+	for _, key in grid.order do
+		local x, y, z = Grid.coords(key)
+		local column = Grid.key(x, 0, z)
+		tops[column] = math.max(tops[column] or 0, y)
+	end
+	for _, key in grid.order do
+		local x, y, z = Grid.coords(key)
+		local part = Instance.new("Part")
+		part.Name = "Stone"
+		part.Anchored = true
+		part.Size = Vector3.new(blockSize, blockSize, blockSize)
+		part.Position = self:cellPosition(x, y, z)
+		part.TopSurface = Enum.SurfaceType.Smooth
+		part.BottomSurface = Enum.SurfaceType.Smooth
+		local top = tops[Grid.key(x, 0, z)]
+		if y == top and y >= height * 0.72 then
+			part.Material = Enum.Material.Snow
+			part.Color = Color3.fromRGB(236, 240, 245)
+		elseif y == top and y <= 2 then
+			part.Material = Enum.Material.Grass
+			part.Color = Color3.fromRGB(88, 140, 70)
+		elseif random:NextNumber() < 0.07 then
+			part.Material = Enum.Material.Marble
+			part.Color = ORES[random:NextInteger(1, #ORES)]
+		else
+			part.Material = if random:NextNumber() < 0.5 then Enum.Material.Slate else Enum.Material.Rock
+			local tone = ROCK[math.clamp(1 + math.floor(y / height * #ROCK + random:NextNumber() * 1.2), 1, #ROCK)]
+			part.Color = tone
+		end
+		part.Parent = folder
+		self.parts[key] = part
+		self.keys[part] = key
+	end
+	folder.Parent = parent
+	return self
+end
+
+function Mountain.cellPosition(self: Mountain, x: number, y: number, z: number): Vector3
+	local size = self.blockSize
+	return Vector3.new(x * size, y * size + size / 2, z * size)
+end
+
+function Mountain.keyPosition(self: Mountain, key: number): Vector3
+	local x, y, z = Grid.coords(key)
+	return self:cellPosition(x, y, z)
+end
+
+function Mountain.total(self: Mountain): number
+	return self.grid.total
+end
+
+function Mountain.removedCount(self: Mountain): number
+	return self.grid.removed
+end
+
+function Mountain.keyForPart(self: Mountain, part: Instance): number?
+	if part:IsA("BasePart") then
+		return self.keys[part]
+	end
+	return nil
+end
+
+function Mountain.isExposed(self: Mountain, key: number): boolean
+	return self.grid:isSolid(key) and self.grid.exposedIndex[key] ~= nil
+end
+
+-- Removes blocks from the scene; the first few fly off as rubble.
+function Mountain._clear(self: Mountain, keys: { number }, centre: Vector3?)
+	for index, key in keys do
+		local part: BasePart? = self.parts[key]
+		if part ~= nil then
+			self.parts[key] = nil
+			self.keys[part] = nil
+			if index <= FLYING_LIMIT then
+				local away = if centre then (part.Position - centre) else Vector3.new(0, 1, 0)
+				if away.Magnitude < 0.1 then
+					away = Vector3.new(self.random:NextNumber(-1, 1), 1, self.random:NextNumber(-1, 1))
+				end
+				part.Anchored = false
+				part.CanCollide = false
+				part.CanQuery = false
+				part.Size *= 0.7
+				part.AssemblyLinearVelocity = away.Unit * self.random:NextNumber(30, 60) + Vector3.new(0, self.random:NextNumber(25, 45), 0)
+				part.AssemblyAngularVelocity = Vector3.new(self.random:NextNumber(-8, 8), self.random:NextNumber(-8, 8), self.random:NextNumber(-8, 8))
+				Debris:AddItem(part, 1.6)
+			else
+				part:Destroy()
+			end
+		end
+		if key == self.diamondKey then
+			self.onDiamondCell()
+		end
+	end
+end
+
+-- Blasts `count` blocks as one crater; returns the crater centre.
+function Mountain.blast(self: Mountain, count: number): Vector3?
+	if count <= 0 then
+		return nil
+	end
+	local keys, centreKey = self.grid:blast(count)
+	if centreKey == nil then
+		return nil
+	end
+	local centre = self:keyPosition(centreKey)
+	self:_clear(keys, centre)
+	return centre
+end
+
+-- Mines one exposed block (pickaxe). Returns true when it broke.
+function Mountain.mine(self: Mountain, key: number): boolean
+	if not self:isExposed(key) then
+		return false
+	end
+	self.grid:remove(key)
+	self:_clear({ key }, nil)
+	return true
+end
+
+-- Where a loose find at `position` comes to rest: on top of the highest block
+-- below it in its column, or on the ground.
+function Mountain.restingHeight(self: Mountain, position: Vector3): number
+	local size = self.blockSize
+	local x = math.floor(position.X / size + 0.5)
+	local z = math.floor(position.Z / size + 0.5)
+	local y = math.floor(position.Y / size)
+	local below = self.grid:supportBelow(x, y + 1, z)
+	return (below + 1) * size
+end
+
+function Mountain.destroy(self: Mountain)
+	self.folder:Destroy()
+	table.clear(self.parts)
+	table.clear(self.keys)
+end
+
+return Mountain
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="11">
+        <Properties>
+          <string name="Name">Store</string>
+          <string name="Source"><![CDATA[--!strict
+-- Saves the win counter, its look, the best round time and the starting stone.
+-- DataStores need the game to be published (and, in Studio, "Enable Studio
+-- Access to API Services"). Without them everything still works; it just is
+-- not remembered between sessions.
+local DataStoreService = game:GetService("DataStoreService")
+
+local Store = {}
+
+local KEY = "settings"
+local store: DataStore? = nil
+local pending: { [string]: any }? = nil
+local saving = false
+
+local function open(): DataStore?
+	if store == nil then
+		local ok, result = pcall(DataStoreService.GetDataStore, DataStoreService, "DiamondRushTikTok_v1")
+		if ok then
+			store = result
+		end
+	end
+	return store
+end
+
+function Store.load(): { [string]: any }?
+	local target = open()
+	if target == nil then
+		return nil
+	end
+	local ok, data = pcall(target.GetAsync, target, KEY)
+	if ok and type(data) == "table" then
+		return data
+	end
+	if not ok then
+		warn("[DiamondRush] Settings are not saved between sessions: " .. tostring(data))
+	end
+	return nil
+end
+
+-- Saves a few seconds after the last change, so quick edits make one write.
+function Store.save(data: { [string]: any })
+	pending = table.clone(data)
+	if saving then
+		return
+	end
+	saving = true
+	task.delay(4, function()
+		local target = open()
+		local snapshot = pending
+		pending = nil
+		saving = false
+		if target ~= nil and snapshot ~= nil then
+			local ok, problem = pcall(target.SetAsync, target, KEY, snapshot)
+			if not ok then
+				warn("[DiamondRush] Could not save settings: " .. tostring(problem))
+			end
+		end
+	end)
+end
+
+-- Writes immediately (used when the server shuts down).
+function Store.flush(data: { [string]: any })
+	pending = nil
+	local target = open()
+	if target ~= nil then
+		pcall(target.SetAsync, target, KEY, data)
+	end
+end
+
+return Store
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="12">
+        <Properties>
+          <string name="Name">TikTokFeed</string>
+          <string name="Source"><![CDATA[--!strict
+-- Receives TikTok Live events from the bridge app.
+--  * In Roblox Studio the game polls the bridge on this PC over HTTP.
+--  * In a published game the bridge publishes to MessagingService through
+--    Roblox Open Cloud (see the README), and the game subscribes here.
+-- Both paths can run at once; every event has a unique id and runs once.
+local HttpService = game:GetService("HttpService")
+local MessagingService = game:GetService("MessagingService")
+local RunService = game:GetService("RunService")
+
+export type Event = {
+	id: string,
+	type: string, -- "gift" | "like" | "follow" | "share"
+	user: string?,
+	name: string?,
+	gift: string?,
+	coins: number?, -- coins per gift
+	count: number?, -- gifts in this event
+	likes: number?,
+}
+
+local TikTokFeed = {}
+
+local seen: { [string]: boolean } = {}
+local seenOrder: { string } = {}
+
+local function deliver(raw: any, onEvent: (Event) -> ())
+	if type(raw) ~= "table" or type(raw.id) ~= "string" or type(raw.type) ~= "string" then
+		return
+	end
+	if seen[raw.id] then
+		return
+	end
+	seen[raw.id] = true
+	table.insert(seenOrder, raw.id)
+	if #seenOrder > 4000 then
+		seen[table.remove(seenOrder, 1) :: string] = nil
+	end
+	local event: Event = {
+		id = raw.id,
+		type = raw.type,
+		user = if type(raw.user) == "string" then string.sub(raw.user, 1, 40) else nil,
+		name = if type(raw.name) == "string" then string.sub(raw.name, 1, 40) else nil,
+		gift = if type(raw.gift) == "string" then string.sub(raw.gift, 1, 40) else nil,
+		coins = if type(raw.coins) == "number" then math.clamp(raw.coins, 0, 100000) else nil,
+		count = if type(raw.count) == "number" then math.clamp(raw.count, 0, 10000) else nil,
+		likes = if type(raw.likes) == "number" then math.clamp(raw.likes, 0, 100000) else nil,
+	}
+	local ok, problem = pcall(function()
+		onEvent(event)
+	end)
+	if not ok then
+		warn("[DiamondRush] event failed: " .. tostring(problem))
+	end
+end
+
+-- onStatus receives a short line for the screen, such as
+-- "TikTok: connected to @name" or "Bridge app not running".
+function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (), onStatus: (string) -> ())
+	-- Published games: Open Cloud messages carry a JSON list of events.
+	task.spawn(function()
+		local ok, problem = pcall(function()
+			MessagingService:SubscribeAsync(topic, function(message)
+				local decoded, data = pcall(HttpService.JSONDecode, HttpService, message.Data)
+				if decoded and type(data) == "table" then
+					for _, raw in data do
+						deliver(raw, onEvent)
+					end
+				end
+			end)
+		end)
+		if not ok and not RunService:IsStudio() then
+			warn("[DiamondRush] MessagingService unavailable: " .. tostring(problem))
+		end
+	end)
+
+	-- Roblox Studio: poll the bridge app on this PC.
+	task.spawn(function()
+		local session = ""
+		local since = 0
+		local urlIndex = 1
+		local failures = 0
+		while true do
+			if not HttpService.HttpEnabled then
+				if RunService:IsStudio() then
+					onStatus("Turn on HTTP: Home > Game Settings > Security > Allow HTTP Requests")
+				end
+				task.wait(3)
+				continue
+			end
+			local url = urls[urlIndex] .. "/events?since=" .. tostring(since) .. "&session=" .. HttpService:UrlEncode(session)
+			local ok, body = pcall(HttpService.GetAsync, HttpService, url, true)
+			local decoded, data = false, nil
+			if ok then
+				decoded, data = pcall(HttpService.JSONDecode, HttpService, body)
+			end
+			if decoded and type(data) == "table" then
+				failures = 0
+				if data.session ~= session then
+					-- The bridge restarted: start again from its first event.
+					session = tostring(data.session)
+					since = 0
+				end
+				if type(data.events) == "table" then
+					for _, raw in data.events do
+						deliver(raw, onEvent)
+					end
+				end
+				if type(data.last) == "number" then
+					since = data.last
+				end
+				onStatus(if type(data.tiktok) == "string" then data.tiktok else "TikTok bridge connected")
+				task.wait(0.3)
+			else
+				failures += 1
+				urlIndex = urlIndex % #urls + 1
+				if RunService:IsStudio() or failures <= #urls then
+					onStatus("Bridge app not running (start \"Start Bridge\" on this PC)")
+				end
+				-- Published servers cannot reach a PC; stop polling and rely on
+				-- MessagingService after the first round of failures.
+				if not RunService:IsStudio() and failures > #urls * 2 then
+					onStatus("Waiting for TikTok events (Open Cloud)")
+					return
+				end
+				task.wait(2)
+			end
+		end
+	end)
+end
+
+return TikTokFeed
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="13">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="14">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="15">
+        <Properties>
+          <string name="Name">DiamondRushHud</string>
+          <string name="Source"><![CDATA[--!strict
+-- The on-screen display: stone left, round time, the win counter, the hold
+-- countdown, the gift feed, the win screen and the streamer's settings panel.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local Config = require(Shared:WaitForChild("Config"))
+local Format = require(Shared:WaitForChild("Format"))
+local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
+local State = ReplicatedStorage:WaitForChild("DiamondRushState") :: Configuration
+local Remotes = ReplicatedStorage:WaitForChild("DiamondRushRemotes")
+local Notify = Remotes:WaitForChild("Notify") :: RemoteEvent
+local Request = Remotes:WaitForChild("Request") :: RemoteEvent
+
+local FONT = Enum.Font.FredokaOne
+local WHITE = Color3.fromRGB(255, 255, 255)
+local GOLD = Color3.fromRGB(255, 205, 70)
+local PANEL = Color3.fromRGB(28, 24, 40)
+
+local function attr(name: string, fallback: any): any
+	local value = State:GetAttribute(name)
+	if value == nil then
+		return fallback
+	end
+	return value
+end
+
+local function hexColor(text: string, fallback: Color3): Color3
+	local r, g, b = Format.parseHex(text)
+	if r == nil or g == nil or b == nil then
+		return fallback
+	end
+	return Color3.fromRGB(r, g, b)
+end
+
+local function make(className: string, properties: { [string]: any }, parent: Instance?): any
+	local instance = Instance.new(className)
+	for key, value in properties do
+		(instance :: any)[key] = value
+	end
+	if parent ~= nil then
+		instance.Parent = parent
+	end
+	return instance
+end
+
+local function rounded(parent: Instance, radius: number)
+	make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+end
+
+local function outline(parent: Instance, thickness: number)
+	make("UIStroke", { Thickness = thickness, Color = Color3.fromRGB(0, 0, 0), Transparency = 0.3 }, parent)
+end
+
+local gui = make("ScreenGui", {
+	Name = "DiamondRushHud",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = false,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, player:WaitForChild("PlayerGui"))
+
+-- Stone left (top centre) -------------------------------------------------------
+local stoneBox = make("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 8),
+	Size = UDim2.fromOffset(440, 108),
+	BackgroundColor3 = PANEL,
+	BackgroundTransparency = 0.15,
+}, gui)
+rounded(stoneBox, 16)
+make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 26),
+	Position = UDim2.fromOffset(0, 6),
+	BackgroundTransparency = 1,
+	Font = FONT,
+	TextSize = 22,
+	TextColor3 = Color3.fromRGB(200, 195, 215),
+	Text = "STONE LEFT",
+}, stoneBox)
+local stoneValue = make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 50),
+	Position = UDim2.fromOffset(0, 28),
+	BackgroundTransparency = 1,
+	Font = FONT,
+	TextSize = 50,
+	TextColor3 = WHITE,
+	Text = "250,000",
+}, stoneBox)
+outline(stoneValue, 2)
+local bar = make("Frame", {
+	Position = UDim2.new(0, 18, 1, -22),
+	Size = UDim2.new(1, -36, 0, 12),
+	BackgroundColor3 = Color3.fromRGB(60, 55, 75),
+}, stoneBox)
+rounded(bar, 6)
+local barFill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(150, 145, 140) }, bar)
+rounded(barFill, 6)
+
+local timerLabel = make("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 122),
+	Size = UDim2.fromOffset(300, 30),
+	BackgroundTransparency = 1,
+	Font = FONT,
+	TextSize = 26,
+	TextColor3 = WHITE,
+	Text = "⏱ 0:00.0",
+}, gui)
+outline(timerLabel, 2)
+
+-- Win counter (top right) -----------------------------------------------------------
+local winsBox = make("TextLabel", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -12, 0, 8),
+	Size = UDim2.fromOffset(0, 72),
+	AutomaticSize = Enum.AutomaticSize.X,
+	Font = FONT,
+	TextSize = 46,
+	Text = "WINS: 0",
+}, gui)
+rounded(winsBox, 16)
+make("UIPadding", { PaddingLeft = UDim.new(0, 22), PaddingRight = UDim.new(0, 22) }, winsBox)
+local winsStroke = make("UIStroke", { Thickness = 3, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
+
+local gear = make("TextButton", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -12, 0, 88),
+	Size = UDim2.fromOffset(150, 34),
+	BackgroundColor3 = PANEL,
+	BackgroundTransparency = 0.15,
+	Font = FONT,
+	TextSize = 18,
+	TextColor3 = WHITE,
+	Text = "⚙ Settings",
+	Visible = false,
+}, gui)
+rounded(gear, 10)
+
+-- Banner, hold countdown and status ----------------------------------------------------
+local banner = make("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 160),
+	Size = UDim2.fromOffset(640, 54),
+	BackgroundTransparency = 1,
+	Font = FONT,
+	TextSize = 40,
+	TextColor3 = Color3.fromRGB(150, 240, 255),
+	Text = "",
+	Visible = false,
+}, gui)
+outline(banner, 3)
+
+local countdown = make("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(420, 300),
+	BackgroundTransparency = 1,
+	Visible = false,
+}, gui)
+local countHolder = make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 44),
+	BackgroundTransparency = 1,
+	Font = FONT,
+	TextSize = 36,
+	TextColor3 = WHITE,
+	Text = "",
+}, countdown)
+outline(countHolder, 3)
+local countNumber = make("TextLabel", {
+	Position = UDim2.fromOffset(0, 40),
+	Size = UDim2.new(1, 0, 0, 200),
+	BackgroundTransparency = 1,
+	Font = FONT,
+	TextSize = 180,
+	TextColor3 = WHITE,
+	Text = "10",
+}, countdown)
+outline(countNumber, 5)
+local countScale = make("UIScale", { Scale = 1 }, countNumber)
+
+local status = make("TextLabel", {
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -12, 1, -10),
+	Size = UDim2.fromOffset(520, 22),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamMedium,
+	TextSize = 15,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	TextColor3 = Color3.fromRGB(230, 230, 240),
+	Text = "",
+}, gui)
+outline(status, 1)
+
+-- Gift feed (bottom left) -------------------------------------------------------------
+local feed = make("Frame", {
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 12, 1, -12),
+	Size = UDim2.fromOffset(440, 300),
+	BackgroundTransparency = 1,
+}, gui)
+make("UIListLayout", {
+	VerticalAlignment = Enum.VerticalAlignment.Bottom,
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Padding = UDim.new(0, 6),
+}, feed)
+local feedOrder = 0
+
+local function addFeed(text: string, stone: number, kind: string)
+	feedOrder += 1
+	local colour = if kind == "gift" then GOLD elseif kind == "follow" then Color3.fromRGB(255, 120, 170) else Color3.fromRGB(170, 220, 255)
+	local row = make("TextLabel", {
+		LayoutOrder = feedOrder,
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundColor3 = PANEL,
+		BackgroundTransparency = 0.25,
+		Font = FONT,
+		TextSize = 20,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = WHITE,
+		RichText = true,
+		Text = if stone > 0
+			then string.format('%s  <font color="#%s">-%s</font>', (text:gsub("[<>&]", "")), colour:ToHex(), Format.commas(stone))
+			else (text:gsub("[<>&]", "")),
+	}, feed)
+	rounded(row, 10)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 12) }, row)
+	local rows = {}
+	for _, child in feed:GetChildren() do
+		if child:IsA("TextLabel") then
+			table.insert(rows, child)
+		end
+	end
+	table.sort(rows, function(a, b)
+		return a.LayoutOrder < b.LayoutOrder
+	end)
+	for index = 1, #rows - 6 do
+		rows[index]:Destroy()
+	end
+	task.delay(7, function()
+		if row.Parent then
+			local fade = TweenService:Create(row, TweenInfo.new(0.6), { BackgroundTransparency = 1, TextTransparency = 1 })
+			fade:Play()
+			fade.Completed:Wait()
+			row:Destroy()
+		end
+	end)
+end
+
+-- Win screen --------------------------------------------------------------------------
+local winScreen = make("Frame", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = Color3.fromRGB(10, 8, 20),
+	BackgroundTransparency = 0.25,
+	Visible = false,
+	ZIndex = 20,
+}, gui)
+local winCard = make("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(620, 360),
+	BackgroundColor3 = PANEL,
+	ZIndex = 21,
+}, winScreen)
+rounded(winCard, 24)
+make("UIStroke", { Thickness = 4, Color = Color3.fromRGB(150, 240, 255) }, winCard)
+local winScale = make("UIScale", { Scale = 1 }, winCard)
+local function winLine(y: number, height: number, size: number, colour: Color3): TextLabel
+	return make("TextLabel", {
+		Position = UDim2.fromOffset(0, y),
+		Size = UDim2.new(1, 0, 0, height),
+		BackgroundTransparency = 1,
+		Font = FONT,
+		TextSize = size,
+		TextColor3 = colour,
+		Text = "",
+		ZIndex = 22,
+	}, winCard)
+end
+local winTitle = winLine(24, 64, 56, Color3.fromRGB(150, 240, 255))
+local winWho = winLine(92, 40, 30, WHITE)
+local winTime = winLine(160, 50, 40, WHITE)
+local winBest = winLine(216, 50, 40, GOLD)
+local winNewBest = winLine(282, 44, 34, Color3.fromRGB(120, 255, 150))
+
+local function showWin(data: { [string]: any })
+	winTitle.Text = "💎 DIAMOND SECURED!"
+	winWho.Text = tostring(data.winner or "") .. " wins!"
+	winTime.Text = "This round's time: " .. Format.duration(tonumber(data.time) or 0)
+	winBest.Text = "Best round's time: " .. Format.duration(tonumber(data.best) or 0)
+	winNewBest.Text = if data.newBest then "⭐ NEW BEST! ⭐" else ""
+	winScreen.Visible = true
+	winScale.Scale = 0.6
+	TweenService:Create(winScale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	task.delay(Config.WinScreenSeconds, function()
+		winScreen.Visible = false
+	end)
+end
+
+-- Settings panel (owner / admins only) ------------------------------------------------------
+local panel = make("ScrollingFrame", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -12, 0, 128),
+	Size = UDim2.fromOffset(330, 460),
+	CanvasSize = UDim2.fromOffset(0, 0),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	ScrollBarThickness = 6,
+	BackgroundColor3 = PANEL,
+	BackgroundTransparency = 0.05,
+	Visible = false,
+	ZIndex = 10,
+}, gui)
+rounded(panel, 14)
+make("UIPadding", {
+	PaddingLeft = UDim.new(0, 12),
+	PaddingRight = UDim.new(0, 14),
+	PaddingTop = UDim.new(0, 10),
+	PaddingBottom = UDim.new(0, 12),
+}, panel)
+make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }, panel)
+local panelOrder = 0
+
+local function panelLabel(text: string)
+	panelOrder += 1
+	make("TextLabel", {
+		LayoutOrder = panelOrder,
+		Size = UDim2.new(1, 0, 0, 20),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = Color3.fromRGB(200, 195, 215),
+		Text = text,
+		ZIndex = 11,
+	}, panel)
+end
+
+local function panelBox(text: string, onSubmit: (string) -> ()): TextBox
+	panelOrder += 1
+	local box = make("TextBox", {
+		LayoutOrder = panelOrder,
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundColor3 = Color3.fromRGB(50, 44, 68),
+		Font = Enum.Font.GothamMedium,
+		TextSize = 17,
+		TextColor3 = WHITE,
+		ClearTextOnFocus = false,
+		Text = text,
+		ZIndex = 11,
+	}, panel)
+	rounded(box, 8)
+	box.FocusLost:Connect(function()
+		onSubmit(box.Text)
+	end)
+	return box
+end
+
+local function panelButtons(buttons: { { any } })
+	panelOrder += 1
+	local row = make("Frame", {
+		LayoutOrder = panelOrder,
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundTransparency = 1,
+		ZIndex = 11,
+	}, panel)
+	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6) }, row)
+	for _, spec in buttons do
+		local button = make("TextButton", {
+			Size = UDim2.new(1 / #buttons, -6, 1, 0),
+			BackgroundColor3 = Color3.fromRGB(90, 70, 150),
+			Font = FONT,
+			TextSize = 16,
+			TextColor3 = WHITE,
+			Text = spec[1],
+			ZIndex = 12,
+		}, row)
+		rounded(button, 8)
+		button.Activated:Connect(spec[2])
+	end
+end
+
+local function send(action: string, value: any)
+	Request:FireServer(action, value)
+end
+
+panelLabel("WIN COUNTER TITLE")
+local titleBox = panelBox("", function(text)
+	send("setTitle", text)
+end)
+panelLabel("WINS")
+local winsInput = panelBox("", function(text)
+	local number = tonumber(text)
+	if number then
+		send("setWins", number)
+	end
+end)
+panelButtons({
+	{ "-1", function() send("addWins", -1) end },
+	{ "+1", function() send("addWins", 1) end },
+	{ "Reset to 0", function() send("setWins", 0) end },
+})
+panelLabel("GOAL (0 = no goal)")
+local goalBox = panelBox("", function(text)
+	local number = tonumber(text)
+	if number then
+		send("setGoal", number)
+	end
+end)
+panelLabel("TEXT COLOUR (#RRGGBB)")
+local textColourBox = panelBox("", function(text)
+	send("setTextColor", text)
+end)
+panelLabel("BACKGROUND COLOUR (#RRGGBB)")
+local backgroundBox = panelBox("", function(text)
+	send("setBackgroundColor", text)
+end)
+panelButtons({
+	{ "Show / hide counter", function() send("setShowWins", not attr("ShowWins", true)) end },
+})
+panelLabel("STARTING STONE (next round)")
+local stoneBoxInput = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[,%s]", "")))
+	if number then
+		send("setStartingStone", number)
+	end
+end)
+panelButtons({
+	{ "New round", function() send("newRound") end },
+	{ "Reset best time", function() send("resetBest") end },
+})
+panelLabel("TEST GIFTS (no TikTok needed)")
+panelButtons({
+	{ "Rose 1", function() send("testGift", { coins = 1, count = 1, name = "Rose" }) end },
+	{ "Donut 30", function() send("testGift", { coins = 30, count = 1, name = "Doughnut" }) end },
+})
+panelButtons({
+	{ "Galaxy 1000", function() send("testGift", { coins = 1000, count = 1, name = "Galaxy" }) end },
+	{ "Universe", function() send("testGift", { coins = 34999, count = 1, name = "TikTok Universe" }) end },
+})
+
+local function refreshPanelFields()
+	titleBox.Text = attr("WinTitle", "WINS")
+	winsInput.Text = tostring(attr("Wins", 0))
+	goalBox.Text = tostring(attr("WinGoal", 0))
+	textColourBox.Text = attr("WinTextColor", "#FFFFFF")
+	backgroundBox.Text = attr("WinBackgroundColor", "#2B2140")
+	stoneBoxInput.Text = Format.commas(attr("NextStartingStone", Config.StartingStone))
+end
+
+gear.Activated:Connect(function()
+	panel.Visible = not panel.Visible
+	if panel.Visible then
+		refreshPanelFields()
+	end
+end)
+
+local function refreshAdmin()
+	gear.Visible = player:GetAttribute("DiamondRushAdmin") == true
+	if not gear.Visible then
+		panel.Visible = false
+	end
+end
+player:GetAttributeChangedSignal("DiamondRushAdmin"):Connect(refreshAdmin)
+refreshAdmin()
+
+-- Live updates ---------------------------------------------------------------------------
+local function refreshWins()
+	winsBox.Visible = attr("ShowWins", true)
+	winsBox.Text = Format.wins(attr("WinTitle", "WINS"), attr("Wins", 0), attr("WinGoal", 0))
+	winsBox.TextColor3 = hexColor(attr("WinTextColor", "#FFFFFF"), WHITE)
+	winsBox.BackgroundColor3 = hexColor(attr("WinBackgroundColor", "#2B2140"), PANEL)
+	winsStroke.Color = winsBox.TextColor3:Lerp(GOLD, 0.6)
+	if panel.Visible then
+		refreshPanelFields()
+	end
+end
+for _, name in { "Wins", "WinTitle", "WinGoal", "WinTextColor", "WinBackgroundColor", "ShowWins", "NextStartingStone" } do
+	State:GetAttributeChangedSignal(name):Connect(refreshWins)
+end
+refreshWins()
+
+local shownStone = attr("Stone", Config.StartingStone)
+local lastCount = -1
+
+RunService.RenderStepped:Connect(function(dt: number)
+	-- The stone number rolls towards its new value instead of jumping.
+	local stone = attr("Stone", 0)
+	local starting = math.max(1, attr("StartingStone", Config.StartingStone))
+	shownStone += (stone - shownStone) * math.min(1, dt * 10)
+	if math.abs(stone - shownStone) < 1 then
+		shownStone = stone
+	end
+	stoneValue.Text = Format.commas(shownStone)
+	barFill.Size = UDim2.fromScale(math.clamp(shownStone / starting, 0, 1), 1)
+
+	local phase = attr("Phase", "Digging")
+	local now = workspace:GetServerTimeNow()
+	local roundStart = attr("RoundStart", now)
+	timerLabel.Text = "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart)
+	status.Text = "TikTok: " .. tostring(attr("TikTok", ""))
+
+	if phase == "Holding" then
+		local elapsed = now - attr("HoldStart", now)
+		local shown = HoldTimer.display(elapsed, Config.HoldSeconds, Config.HoldCountFrom, Config.HoldSlowdown)
+		countdown.Visible = true
+		countHolder.Text = "💎 " .. tostring(attr("Holder", "")) .. " — HOLD IT!"
+		countNumber.Text = tostring(shown)
+		if shown ~= lastCount then
+			lastCount = shown
+			countNumber.TextColor3 = WHITE:Lerp(GOLD, 1 - shown / Config.HoldCountFrom)
+			countScale.Scale = 1.35
+			TweenService:Create(countScale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+		end
+		banner.Visible = false
+	else
+		countdown.Visible = false
+		lastCount = -1
+		banner.Visible = phase == "Revealed"
+		if phase == "Revealed" then
+			banner.Text = "💎 THE DIAMOND IS EXPOSED — GRAB IT!"
+			banner.TextTransparency = 0.25 + 0.25 * math.sin(now * 6)
+		end
+	end
+end)
+
+Notify.OnClientEvent:Connect(function(kind: string, data: any)
+	if kind == "feed" and type(data) == "table" then
+		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
+	elseif kind == "win" and type(data) == "table" then
+		showWin(data)
+	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then
+		addFeed(tostring(data.name) .. " dropped the diamond!", 0, "drop")
+	end
+end)
+
+-- Pickaxe: click a rock block while holding the pickaxe to mine it.
+local mouse = player:GetMouse()
+UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+	if processed then
+		return
+	end
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+		return
+	end
+	local character = player.Character
+	local tool = character and character:FindFirstChildOfClass("Tool")
+	if tool ~= nil and tool.Name == "Pickaxe" and mouse.Target ~= nil and mouse.Target.Name == "Stone" then
+		Request:FireServer("mine", mouse.Target)
+	end
+end)
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="Workspace" referent="16">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <bool name="NeedsPivotMigration">false</bool>
+    </Properties>
+  </Item>
+</roblox>

@@ -3,6 +3,9 @@ name: Build and publish Windows update
 on:
   push:
     branches: [main]
+    # The Roblox TikTok game lives alongside but is not part of the Windows build.
+    paths-ignore:
+      - 'roblox-tiktok/**'
   workflow_dispatch:
 
 # A newer push cancels an older build. A release is visible only after every

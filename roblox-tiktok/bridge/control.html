@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diamond Rush Bridge</title>
+<style>
+  :root { --bg: #17131f; --panel: #241e33; --line: #3a3150; --text: #f3f0f8; --muted: #b3aac6; --accent: #8be9ff; --gold: #ffcd46; --ok: #7dffa0; --bad: #ff8f8f; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { margin: 0 0 4px; font-size: 28px; }
+  h2 { margin: 0 0 12px; font-size: 18px; }
+  p { margin: 0 0 12px; color: var(--muted); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-top: 16px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  input { flex: 1 1 220px; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #1b1626; color: var(--text); font: inherit; }
+  button { padding: 10px 14px; border: 0; border-radius: 10px; background: #6b4fd8; color: white; font: inherit; font-weight: 600; cursor: pointer; }
+  button:hover { filter: brightness(1.12); }
+  button.gift { background: #3a2f55; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .status { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; }
+  .status b { color: var(--muted); font-weight: 600; }
+  .good { color: var(--ok); } .wait { color: var(--gold); }
+  ul { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; }
+  li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+  li:last-child { border: 0; }
+  small { color: var(--muted); }
+  details summary { cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>💎 Diamond Rush · TikTok Bridge</h1>
+  <p>Keep this window and the black bridge window open while you stream.</p>
+
+  <section>
+    <h2>Status</h2>
+    <div class="status">
+      <b>TikTok</b><span id="tiktok">…</span>
+      <b>Roblox</b><span id="roblox">…</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>1 · Connect your TikTok LIVE</h2>
+    <p>Go live on TikTok first, then enter your username (the part after @).</p>
+    <form class="row" id="connect">
+      <input id="username" placeholder="your_tiktok_username" autocomplete="off">
+      <button>Connect</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>2 · Test without going live</h2>
+    <p>These send pretend gifts to the game, exactly like real ones.</p>
+    <div class="grid" id="tests"></div>
+  </section>
+
+  <section>
+    <h2>Recent events</h2>
+    <ul id="recent"><li><small>Nothing yet.</small></li></ul>
+  </section>
+
+  <section>
+    <details>
+      <summary>Published game (optional): Roblox Open Cloud</summary>
+      <p style="margin-top:12px">Only needed when you play the published game instead of pressing Play in Roblox Studio. See the README for how to make the key.</p>
+      <form class="row" id="cloud">
+        <input id="universe" placeholder="Universe ID (Experience ID)" autocomplete="off">
+        <input id="apikey" placeholder="Open Cloud API key" type="password" autocomplete="off">
+        <button>Save</button>
+      </form>
+      <p id="cloudState" style="margin-top:10px"></p>
+    </details>
+  </section>
+</main>
+<script>
+const tests = [
+  ['🌹 Rose', { gift: 'Rose', coins: 1 }],
+  ['🌹 Rose x10', { gift: 'Rose', coins: 1, count: 10 }],
+  ['🫰 Finger Heart', { gift: 'Finger Heart', coins: 5 }],
+  ['🍩 Doughnut', { gift: 'Doughnut', coins: 30 }],
+  ['🫶 Hand Hearts', { gift: 'Hand Hearts', coins: 100 }],
+  ['🔫 Money Gun', { gift: 'Money Gun', coins: 500 }],
+  ['🌌 Galaxy', { gift: 'Galaxy', coins: 1000 }],
+  ['🦁 Lion', { gift: 'Lion', coins: 29999 }],
+  ['🪐 Universe', { gift: 'TikTok Universe', coins: 34999 }],
+  ['👍 25 likes', { type: 'like', likes: 25 }],
+  ['➕ Follow', { type: 'follow' }],
+  ['↗️ Share', { type: 'share' }],
+];
+const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const box = document.getElementById('tests');
+for (const [label, body] of tests) {
+  const button = document.createElement('button');
+  button.className = 'gift';
+  button.textContent = label;
+  button.onclick = () => post('/test', body).then(refresh);
+  box.append(button);
+}
+document.getElementById('connect').onsubmit = (event) => {
+  event.preventDefault();
+  post('/connect', { username: document.getElementById('username').value }).then(refresh);
+};
+document.getElementById('cloud').onsubmit = (event) => {
+  event.preventDefault();
+  post('/opencloud', { universeId: document.getElementById('universe').value, apiKey: document.getElementById('apikey').value }).then(refresh);
+};
+let filled = false;
+function describe(event) {
+  if (event.type === 'gift') return `${event.name} sent ${event.gift} x${event.count} · ${event.coins * event.count} coins`;
+  if (event.type === 'like') return `${event.name} liked x${event.likes}`;
+  return `${event.name} ${event.type === 'follow' ? 'followed' : 'shared the live'}`;
+}
+async function refresh() {
+  try {
+    const data = await (await fetch('/status')).json();
+    const tiktok = document.getElementById('tiktok');
+    tiktok.textContent = data.tiktok;
+    tiktok.className = data.tiktok.startsWith('connected') ? 'good' : 'wait';
+    const roblox = document.getElementById('roblox');
+    roblox.textContent = data.openCloud ? `${data.roblox} · Open Cloud on` : data.roblox;
+    roblox.className = data.roblox.startsWith('connected') ? 'good' : 'wait';
+    if (!filled) {
+      document.getElementById('username').value = data.username || '';
+      filled = true;
+    }
+    document.getElementById('cloudState').textContent = data.openCloud ? 'Open Cloud is set up: events also go to the published game.' : 'Open Cloud is off.';
+    const list = document.getElementById('recent');
+    list.replaceChildren(...(data.recent.length ? data.recent : [null]).map((event) => {
+      const item = document.createElement('li');
+      if (event) item.textContent = `${new Date(event.at).toLocaleTimeString()} · ${describe(event)}`;
+      else item.innerHTML = '<small>Nothing yet.</small>';
+      return item;
+    }));
+  } catch {
+    document.getElementById('tiktok').textContent = 'The bridge window is closed. Start it again.';
+  }
+}
+refresh();
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>

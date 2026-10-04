@@ -1,0 +1,132 @@
+--!strict
+-- Receives TikTok Live events from the bridge app.
+--  * In Roblox Studio the game polls the bridge on this PC over HTTP.
+--  * In a published game the bridge publishes to MessagingService through
+--    Roblox Open Cloud (see the README), and the game subscribes here.
+-- Both paths can run at once; every event has a unique id and runs once.
+local HttpService = game:GetService("HttpService")
+local MessagingService = game:GetService("MessagingService")
+local RunService = game:GetService("RunService")
+
+export type Event = {
+	id: string,
+	type: string, -- "gift" | "like" | "follow" | "share"
+	user: string?,
+	name: string?,
+	gift: string?,
+	coins: number?, -- coins per gift
+	count: number?, -- gifts in this event
+	likes: number?,
+}
+
+local TikTokFeed = {}
+
+local seen: { [string]: boolean } = {}
+local seenOrder: { string } = {}
+
+local function deliver(raw: any, onEvent: (Event) -> ())
+	if type(raw) ~= "table" or type(raw.id) ~= "string" or type(raw.type) ~= "string" then
+		return
+	end
+	if seen[raw.id] then
+		return
+	end
+	seen[raw.id] = true
+	table.insert(seenOrder, raw.id)
+	if #seenOrder > 4000 then
+		seen[table.remove(seenOrder, 1) :: string] = nil
+	end
+	local event: Event = {
+		id = raw.id,
+		type = raw.type,
+		user = if type(raw.user) == "string" then string.sub(raw.user, 1, 40) else nil,
+		name = if type(raw.name) == "string" then string.sub(raw.name, 1, 40) else nil,
+		gift = if type(raw.gift) == "string" then string.sub(raw.gift, 1, 40) else nil,
+		coins = if type(raw.coins) == "number" then math.clamp(raw.coins, 0, 100000) else nil,
+		count = if type(raw.count) == "number" then math.clamp(raw.count, 0, 10000) else nil,
+		likes = if type(raw.likes) == "number" then math.clamp(raw.likes, 0, 100000) else nil,
+	}
+	local ok, problem = pcall(function()
+		onEvent(event)
+	end)
+	if not ok then
+		warn("[DiamondRush] event failed: " .. tostring(problem))
+	end
+end
+
+-- onStatus receives a short line for the screen, such as
+-- "TikTok: connected to @name" or "Bridge app not running".
+function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (), onStatus: (string) -> ())
+	-- Published games: Open Cloud messages carry a JSON list of events.
+	task.spawn(function()
+		local ok, problem = pcall(function()
+			MessagingService:SubscribeAsync(topic, function(message)
+				local decoded, data = pcall(HttpService.JSONDecode, HttpService, message.Data)
+				if decoded and type(data) == "table" then
+					for _, raw in data do
+						deliver(raw, onEvent)
+					end
+				end
+			end)
+		end)
+		if not ok and not RunService:IsStudio() then
+			warn("[DiamondRush] MessagingService unavailable: " .. tostring(problem))
+		end
+	end)
+
+	-- Roblox Studio: poll the bridge app on this PC.
+	task.spawn(function()
+		local session = ""
+		local since = 0
+		local urlIndex = 1
+		local failures = 0
+		while true do
+			if not HttpService.HttpEnabled then
+				if RunService:IsStudio() then
+					onStatus("Turn on HTTP: Home > Game Settings > Security > Allow HTTP Requests")
+				end
+				task.wait(3)
+				continue
+			end
+			local url = urls[urlIndex] .. "/events?since=" .. tostring(since) .. "&session=" .. HttpService:UrlEncode(session)
+			local ok, body = pcall(HttpService.GetAsync, HttpService, url, true)
+			local decoded, data = false, nil
+			if ok then
+				decoded, data = pcall(HttpService.JSONDecode, HttpService, body)
+			end
+			if decoded and type(data) == "table" then
+				failures = 0
+				if data.session ~= session then
+					-- The bridge restarted: start again from its first event.
+					session = tostring(data.session)
+					since = 0
+				end
+				if type(data.events) == "table" then
+					for _, raw in data.events do
+						deliver(raw, onEvent)
+					end
+				end
+				if type(data.last) == "number" then
+					since = data.last
+				end
+				onStatus(if type(data.tiktok) == "string" then data.tiktok else "TikTok bridge connected")
+				task.wait(0.3)
+			else
+				failures += 1
+				urlIndex = urlIndex % #urls + 1
+				if RunService:IsStudio() or failures <= #urls then
+					onStatus("Bridge app not running (start \"Start Bridge\" on this PC)")
+				end
+				-- Published servers cannot reach a PC; stop polling and rely on
+				-- MessagingService after the first round of failures.
+				if not RunService:IsStudio() and failures > #urls * 2 then
+					onStatus("Waiting for TikTok events (Open Cloud)")
+					return
+				end
+				task.wait(2)
+			end
+		end
+	end)
+end
+
+return TikTokFeed
