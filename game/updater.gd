@@ -2,6 +2,8 @@ extends Node
 
 ## Private GitHub releases: CLI keeps its credentials; optional tokens stay in RAM.
 signal status_changed(status: Dictionary)
+## A verified update is downloaded and can be installed now.
+signal update_ready
 const REPOSITORY := "Outsourcedevv/diamond-in-the-rough"
 const API := "https://api.github.com/repos/" + REPOSITORY
 const REPO_URL := "https://github.com/" + REPOSITORY
@@ -304,7 +306,11 @@ func _accept_manifest(data: Dictionary) -> void:
 		_status("current","You have the newest available build.")
 		return
 	status.available_version=str(manifest.version)
-	_status("available","A new workshop build is ready to download.")
+	_status("available","A new build is available.")
+	# With automatic updates on, fetch it straight away; installing waits for a safe moment.
+	if not test_mode and bool(game.settings.get("auto_updates",true)):
+		download_update()
+		return
 	if int(manifest.build)!=_notified_build:
 		_notified_build=int(manifest.build)
 		if game.ui.has_method("toast"): game.ui.toast("Update available · Esc → Updates")
@@ -334,7 +340,8 @@ func _verify_package() -> void:
 		_status("error","The update checksum failed. The current game was kept; download again.")
 		return
 	status.progress=1.0
-	_status("ready","Download verified. Save and install when you are ready to restart.")
+	_status("ready","Update downloaded. It installs and restarts the game automatically.")
+	update_ready.emit()
 
 func prepare_install() -> int:
 	if status.phase!="ready" or manifest.is_empty(): return -1
