@@ -1,15 +1,15 @@
 # Diamond Rush: TikTok Live Roblox game
 
-A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain holds **250,000 stone**, shown at the top of the screen. Every gift, like, follow and share from your viewers blasts stone out of it. Somewhere inside is **one diamond**. Once it is exposed, grab it and **hold it for 15 seconds** to win.
+A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 tiny rocks** (one rock is one stone) is shown counting down at the top of the screen. Every gift, like, follow and share from your viewers blasts stone out of it. Somewhere inside is **one diamond**. Once it is exposed, grab it and **hold it for 15 seconds** to win.
 
 - **Stone counter.** The top of the screen shows how much stone is left (250,000 to start), with a progress bar.
-- **Gifts blast the mountain.** Each TikTok coin removes 100 stone, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
+- **Gifts blast the mountain.** Each TikTok coin removes 100 rocks, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. The counter always equals the rocks really left. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
 - **Hold the diamond.** When it is uncovered, a banner says "THE DIAMOND IS EXPOSED — GRAB IT!". Walk into it (or press E) to lift it above your head.
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
   - If you fall or leave, the diamond drops.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and ⭐ NEW BEST! when you beat it). Then a fresh mountain appears.
-- **Pickaxe.** You also get a pickaxe to chip at rock yourself (click a block).
+- **Dig with your hands.** First-person view with two hands: click a rock to punch it out (one rock each).
 
 ## What you need
 
@@ -72,14 +72,14 @@ In Studio, open **ReplicatedStorage → DiamondRush → Config**:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `StartingStone` | 250000 | Stone in each new mountain |
+| `StartingStone` | 250000 | Rocks in each new mountain (one rock = one stone, up to 1,500,000) |
 | `StonePerCoin` | 100 | Stone removed per TikTok coin |
 | `StonePerLike` / `StonePerFollow` / `StonePerShare` | 2 / 500 / 300 | Stone for likes, follows and shares |
 | `HoldSeconds` | 15 | Real seconds the diamond must be held |
 | `HoldCountFrom` | 10 | Number the countdown starts at |
 | `HoldSlowdown` | 0.6 | 0 = even countdown, 1 = slows down a lot at the end |
 | `WinScreenSeconds` | 4 | How long the win screen shows |
-| `MountainRadius` / `MountainHeight` | 15 / 14 | Mountain size in blocks |
+| `BlockSize` | 1 | Size of one rock in studs; the diamond is the same size |
 
 With the defaults, clearing the whole mountain takes 2,500 coins of gifts. The diamond often shows up before that, depending on where the blasts land.
 
@@ -119,3 +119,7 @@ Rebuild the place with `rojo build -o DiamondRushTikTok.rbxlx`, or use `rojo ser
 - Bridge tests: `npm test` inside `bridge/`.
 
 TikTok events come from the community [tiktok-live-connector](https://github.com/zerodytrash/TikTok-Live-Connector) package, which is not an official TikTok API.
+
+### How 250,000 rocks stay fast
+
+Every stone is a real rock, but only the rocks on the outside of the mountain exist as Roblox parts (about 14,000). Rocks inside are kept as numbers and get a part the instant digging uncovers them, so the mountain always looks solid and the counter always matches.

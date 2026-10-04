@@ -538,7 +538,7 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	end
 end)
 
--- Pickaxe: click a rock block while holding the pickaxe to mine it.
+-- Digging: click a rock block to dig it out with your hands.
 local mouse = player:GetMouse()
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed then
@@ -548,8 +548,9 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		return
 	end
 	local character = player.Character
+	-- Dig with bare hands: click a rock block within reach.
 	local tool = character and character:FindFirstChildOfClass("Tool")
-	if tool ~= nil and tool.Name == "Pickaxe" and mouse.Target ~= nil and mouse.Target.Name == "Stone" then
+	if tool == nil and mouse.Target ~= nil and mouse.Target.Name == "Stone" then
 		Request:FireServer("mine", mouse.Target)
 	end
 end)

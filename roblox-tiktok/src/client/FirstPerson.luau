@@ -1,7 +1,7 @@
 --!strict
 -- First-person view with two hands in front of the camera (like the PC game).
 -- The hands follow the camera, bob while walking and swing when you click.
--- While the pickaxe is equipped the right hand holds a pickaxe model.
+-- You dig with your hands: each click punches with the other hand.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -47,10 +47,12 @@ function FirstPerson.start()
 	pickHead.Parent = rig
 
 	local swing = 0
+	local punchSide = 1
 	local bob = 0
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if not processed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
 			swing = 1
+			punchSide = -punchSide
 		end
 	end)
 
@@ -67,7 +69,6 @@ function FirstPerson.start()
 		local colours = character:FindFirstChildOfClass("BodyColors")
 		local skin = if colours then colours.RightArmColor3 else SKIN_FALLBACK
 		local tool = character:FindFirstChildOfClass("Tool")
-		local holdingPick = tool ~= nil and tool.Name == "Pickaxe"
 		-- Hide the third-person tool; the hands show their own pickaxe.
 		if tool then
 			for _, d in tool:GetDescendants() do
@@ -83,7 +84,7 @@ function FirstPerson.start()
 		local strike = math.sin(swing * math.pi)
 		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
 		for _, h in hands do
-			local hit = if h.side == 1 then strike else 0
+			local hit = if h.side == punchSide then strike else 0
 			local arm = base
 				* CFrame.new(h.side * 0.75, hit * 0.25, -hit * 0.4)
 				* CFrame.Angles(math.rad(10 + hit * -55), math.rad(-h.side * 8), 0)
@@ -91,7 +92,7 @@ function FirstPerson.start()
 			h.hand.CFrame = arm * CFrame.new(0, 0, -0.35)
 			h.hand.Color = skin
 		end
-		pickHandle.Transparency = if holdingPick then 0 else 1
+		pickHandle.Transparency = 1
 		pickHead.Transparency = pickHandle.Transparency
 		local grip = hands[2].hand.CFrame * CFrame.Angles(math.rad(-70), 0, 0)
 		pickHandle.CFrame = grip * CFrame.new(0, 0.55, 0)

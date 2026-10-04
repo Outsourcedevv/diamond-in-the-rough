@@ -21,6 +21,8 @@ export type Grid = typeof(setmetatable(
 		exposedList: { number },
 		exposedIndex: { [number]: number },
 		rand: (number?, number?) -> number,
+		fresh: { number },
+		sealed: { [number]: boolean },
 	},
 	Grid
 ))
@@ -35,8 +37,14 @@ function Grid.coords(key: number): (number, number, number)
 	return (rest % SPAN) - OFFSET, y, (rest // SPAN) - OFFSET
 end
 
+-- Builds a mountain of exactly `target` cells (one cell = one stone).
 -- rand(): a number in [0, 1); rand(a, b): a whole number from a to b.
-function Grid.new(radius: number, height: number, seed: number, rand: (number?, number?) -> number): Grid
+function Grid.new(target: number, seed: number, rand: (number?, number?) -> number): Grid
+	target = math.max(1, math.floor(target))
+	-- A cone of volume ~pi r^2 h / 3 with h = 0.9 r, a little oversized so it
+	-- can be trimmed down to the exact number of cells.
+	local radius = math.clamp(math.ceil((target * 1.06 / 0.94) ^ (1 / 3)), 3, OFFSET - 4)
+	local height = math.max(2, math.floor(radius * 0.9 + 0.5))
 	local self = setmetatable({
 		radius = radius,
 		height = height,
@@ -47,15 +55,17 @@ function Grid.new(radius: number, height: number, seed: number, rand: (number?, 
 		exposedList = {},
 		exposedIndex = {},
 		rand = rand,
+		fresh = {},
+		sealed = {},
 	}, Grid)
-	-- A rounded peak with a rough, noisy outline and a few lumpy shoulders.
+	local scale = 15 / radius
 	for z = -radius, radius do
 		for x = -radius, radius do
 			local distance = math.sqrt(x * x + z * z) / radius
 			if distance <= 1 then
-				local bumps = math.noise(x * 0.16, z * 0.16, seed) * 2.6 + math.noise(x * 0.4, z * 0.4, seed + 7.3) * 0.9
-				local top = height * (1 - distance) ^ 0.85 + bumps * (1 - distance * 0.6)
-				local columnHeight = math.clamp(math.floor(top + 0.5), if distance < 0.85 then 1 else 0, height + 2)
+				local bumps = math.noise(x * 0.16 * scale, z * 0.16 * scale, seed) * 2.6 + math.noise(x * 0.4 * scale, z * 0.4 * scale, seed + 7.3) * 0.9
+				local top = height * (1 - distance) ^ 0.85 + bumps * (1 - distance * 0.6) / math.sqrt(scale)
+				local columnHeight = math.clamp(math.floor(top + 0.5), if distance < 0.85 then 1 else 0, height * 2)
 				for y = 0, columnHeight - 1 do
 					local key = Grid.key(x, y, z)
 					self.solid[key] = true
@@ -64,12 +74,54 @@ function Grid.new(radius: number, height: number, seed: number, rand: (number?, 
 			end
 		end
 	end
+	-- Shave the highest rocks first until exactly `target` cells remain, so the
+	-- surface stays smooth. Column tops are bucketed by height.
+	local count = #self.order
+	if count > target then
+		local buckets: { [number]: { number } } = {}
+		local highest = 0
+		for _, key in self.order do
+			local x, y, z = Grid.coords(key)
+			if not self.solid[Grid.key(x, y + 1, z)] then
+				buckets[y] = buckets[y] or {}
+				table.insert(buckets[y], key)
+				highest = math.max(highest, y)
+			end
+		end
+		local level = highest
+		while count > target and level >= 0 do
+			local bucket = buckets[level]
+			if bucket == nil or #bucket == 0 then
+				level -= 1
+				continue
+			end
+			local index = rand(1, #bucket)
+			local key = bucket[index]
+			bucket[index] = bucket[#bucket]
+			bucket[#bucket] = nil
+			self.solid[key] = nil
+			count -= 1
+			local x, y, z = Grid.coords(key)
+			if y > 0 then
+				buckets[y - 1] = buckets[y - 1] or {}
+				table.insert(buckets[y - 1], Grid.key(x, y - 1, z))
+			end
+		end
+		local kept: { number } = {}
+		for _, key in self.order do
+			if self.solid[key] then
+				table.insert(kept, key)
+			end
+		end
+		self.order = kept
+	end
 	self.total = #self.order
 	for _, key in self.order do
 		if self:isExposed(key) then
 			self:_expose(key)
 		end
 	end
+	table.clear(self.fresh)
 	return self
 end
 
@@ -86,7 +138,8 @@ function Grid.isExposed(self: Grid, key: number): boolean
 	for _, step in NEIGHBOURS do
 		local ny = y + step[2]
 		-- The ground under the mountain counts as solid.
-		if ny >= 0 and not self.solid[Grid.key(x + step[1], ny, z + step[3])] then
+		local neighbour = Grid.key(x + step[1], ny, z + step[3])
+		if ny >= 0 and not self.solid[neighbour] and not self.sealed[neighbour] then
 			return true
 		end
 	end
@@ -97,6 +150,7 @@ function Grid._expose(self: Grid, key: number)
 	if self.exposedIndex[key] == nil then
 		table.insert(self.exposedList, key)
 		self.exposedIndex[key] = #self.exposedList
+		table.insert(self.fresh, key)
 	end
 end
 
@@ -236,8 +290,38 @@ function Grid.blast(self: Grid, count: number, centre: number?): ({ number }, nu
 	return removed, start
 end
 
--- A cell buried inside the mountain (all six neighbours solid) for the diamond,
--- preferring the lower two thirds so it is not found straight away.
+-- Newly exposed cells since the last call (for drawing them).
+function Grid.takeFresh(self: Grid): { number }
+	local fresh = self.fresh
+	self.fresh = {}
+	return fresh
+end
+
+-- True once any of the cell's six neighbours is open air.
+function Grid.isOpenAround(self: Grid, key: number): boolean
+	return self:isExposed(key)
+end
+
+-- Takes a buried cell out of the rock for the diamond (all six neighbours
+-- solid, in the lower two thirds so it is not found straight away). The
+-- diamond is not stone: it does not count towards the total.
+function Grid.carveHiddenCell(self: Grid): number
+	local key = self:pickHiddenCell()
+	if self.solid[key] then
+		-- Sealed: not stone, but it still counts as rock around it until the
+		-- digging reaches it.
+		self.solid[key] = nil
+		self.sealed[key] = true
+		self:_unexpose(key)
+		self.total -= 1
+		local index = table.find(self.order, key)
+		if index then
+			table.remove(self.order, index)
+		end
+	end
+	return key
+end
+
 function Grid.pickHiddenCell(self: Grid): number
 	local buried: { number } = {}
 	for _, key in self.order do

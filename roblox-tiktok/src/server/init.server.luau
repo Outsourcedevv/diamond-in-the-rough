@@ -75,7 +75,8 @@ end)
 
 -- The world ---------------------------------------------------------------------
 local blockSize = Config.BlockSize
-local spawnDistance = Config.MountainRadius * blockSize + 40
+-- A cone of about this many rocks reaches out roughly this far.
+local spawnDistance = math.ceil((math.min(Config.StartingStone, 1500000) * 1.06 / 0.94) ^ (1 / 3)) * blockSize + 30
 
 local ground = Instance.new("Part")
 ground.Name = "Ground"
@@ -114,7 +115,7 @@ local function makePickaxe(): Tool
 	local tool = Instance.new("Tool")
 	tool.Name = "Pickaxe"
 	tool.CanBeDropped = false
-	tool.ToolTip = "Click rock to mine it"
+	tool.ToolTip = "Click rock to dig it"
 	tool.GripPos = Vector3.new(0, -1.3, 0)
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
@@ -139,12 +140,15 @@ local function makePickaxe(): Tool
 	head.Parent = tool
 	return tool
 end
-makePickaxe().Parent = StarterPack
+-- Digging is done with bare hands, so nobody carries a tool.
+local _ = makePickaxe
+local _ = StarterPack
 
 -- The one diamond -----------------------------------------------------------------
 local diamond = Instance.new("Part")
 diamond.Name = "Diamond"
-diamond.Size = Vector3.new(2.2, 2.2, 2.2)
+-- The diamond is the same size as a rock.
+diamond.Size = Vector3.new(blockSize, blockSize, blockSize) * 0.85
 diamond.Material = Enum.Material.Glass
 diamond.Color = Color3.fromRGB(175, 240, 255)
 diamond.Reflectance = 0.35
@@ -193,8 +197,6 @@ local DIAMOND_TILT = CFrame.Angles(math.rad(45), 0, math.rad(35))
 local mountain: Mountain.Mountain? = nil
 local phase = "Digging"
 local startingStone = settings.startingStone
-local removed = 0
-local perBlock = 1
 local pendingStone = 0
 local roundStart = 0
 local holder: Player? = nil
@@ -209,7 +211,7 @@ local function setPhase(value: string)
 end
 
 local function refreshStone()
-	State:SetAttribute("Stone", math.max(0, math.floor(startingStone - removed + 0.5)))
+	State:SetAttribute("Stone", if mountain then mountain:remaining() else 0)
 	State:SetAttribute("StartingStone", startingStone)
 end
 
@@ -228,7 +230,7 @@ local function settleDiamond()
 	if phase ~= "Revealed" or mountain == nil or not diamond.Anchored then
 		return
 	end
-	local rest = mountain:restingHeight(diamond.Position) + 1.6
+	local rest = mountain:restingHeight(diamond.Position) + blockSize / 2
 	if rest < diamond.Position.Y - 0.1 then
 		local target = CFrame.new(diamond.Position.X, rest, diamond.Position.Z) * DIAMOND_TILT
 		TweenService:Create(diamond, TweenInfo.new(0.4, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out), { CFrame = target }):Play()
@@ -244,41 +246,31 @@ local function reveal()
 	Notify:FireAllClients("revealed")
 end
 
--- Breaks enough blocks to match the stone removed so far.
-local function syncBlocks()
-	local current = mountain
-	if current == nil then
-		return
-	end
-	local target = if removed >= startingStone - 1e-6 then current:total() else math.floor(removed / perBlock)
-	local need = target - current:removedCount()
-	if need > 0 then
-		local centre = current:blast(need)
-		if centre ~= nil and need >= 10 then
-			local blast = Instance.new("Explosion")
-			blast.Position = centre
-			blast.BlastRadius = math.min(32, 4 + math.sqrt(need) * 2.2)
-			blast.BlastPressure = 0
-			blast.DestroyJointRadiusPercent = 0
-			blast.ExplosionType = Enum.ExplosionType.NoCraters
-			blast.Parent = workspace
-		end
-	end
-	refreshStone()
-	settleDiamond()
-end
-
+-- One rock is one stone: blast exactly that many rocks.
 local function applyStone(amount: number)
+	amount = math.floor(amount)
 	if amount <= 0 then
 		return
 	end
-	if phase == "Won" or mountain == nil then
+	local current = mountain
+	if phase == "Won" or current == nil then
 		-- Gifts during the win screen count towards the next mountain.
 		pendingStone += amount
 		return
 	end
-	removed = math.min(startingStone, removed + amount)
-	syncBlocks()
+	local count = math.min(amount, current:remaining())
+	local centre = current:blast(count)
+	if centre ~= nil and count >= 200 then
+		local blast = Instance.new("Explosion")
+		blast.Position = centre
+		blast.BlastRadius = math.min(40, 2 + count ^ (1 / 3) * 1.6)
+		blast.BlastPressure = 0
+		blast.DestroyJointRadiusPercent = 0
+		blast.ExplosionType = Enum.ExplosionType.NoCraters
+		blast.Parent = workspace
+	end
+	refreshStone()
+	settleDiamond()
 end
 
 local function teleportHome(player: Player)
@@ -297,12 +289,11 @@ local function newRound()
 		holdWeld:Destroy()
 		holdWeld = nil
 	end
-	startingStone = settings.startingStone
-	removed = 0
+	startingStone = math.clamp(settings.startingStone, 100, 1500000)
 	setPhase("Digging")
-	local created = Mountain.new(workspace, Config.MountainRadius, Config.MountainHeight, blockSize, reveal)
+	local created = Mountain.new(workspace, startingStone, blockSize, reveal)
 	mountain = created
-	perBlock = startingStone / created:total()
+	startingStone = created:total()
 	diamond.Anchored = true
 	diamond.CFrame = CFrame.new(created:keyPosition(created.diamondKey)) * DIAMOND_TILT
 	showDiamond(false)
@@ -372,8 +363,8 @@ local function drop(reason: string)
 	params.FilterDescendantsInstances = ignore
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	local hit = workspace:Raycast(where, Vector3.new(0, -400, 0), params)
-	local y = if hit then hit.Position.Y + 1.6 else 1.6
-	diamond.CFrame = CFrame.new(where.X, math.max(y, 1.6), where.Z) * DIAMOND_TILT
+	local y = if hit then hit.Position.Y + blockSize / 2 else blockSize / 2
+	diamond.CFrame = CFrame.new(where.X, math.max(y, blockSize / 2), where.Z) * DIAMOND_TILT
 	setPhase("Revealed")
 	showDiamond(true)
 	State:SetAttribute("Holder", "")
@@ -525,7 +516,7 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "setShowWins" and type(value) == "boolean" then
 		settings.showWins = value
 	elseif action == "setStartingStone" and type(value) == "number" then
-		settings.startingStone = math.clamp(math.floor(value), 100, 100000000)
+		settings.startingStone = math.clamp(math.floor(value), 100, 1500000)
 	elseif action == "resetBest" then
 		settings.best = 0
 	elseif action == "newRound" then
@@ -563,13 +554,13 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		if key == nil or root == nil or not root:IsA("BasePart") then
 			return
 		end
-		if (root.Position - current:keyPosition(key)).Magnitude > 22 then
+		if (root.Position - current:keyPosition(key)).Magnitude > 16 then
 			return
 		end
 		mineCooldown[player] = now
 		if current:mine(key) then
-			removed = math.min(startingStone, removed + perBlock)
-			syncBlocks()
+			refreshStone()
+			settleDiamond()
 		end
 		return
 	end

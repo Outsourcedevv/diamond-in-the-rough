@@ -26,7 +26,7 @@
 -- changed in-game from the settings panel; the panel's values are saved.
 local Config = {
 	-- Stone -----------------------------------------------------------------
-	StartingStone = 250000, -- (live) stone in the mountain at the start of a round
+	StartingStone = 250000, -- (live) rocks in the mountain at the start of a round (one rock = one stone, max 1,500,000)
 	StonePerCoin = 100, -- stone removed per TikTok coin gifted (a Rose is 1 coin)
 	StonePerLike = 2,
 	StonePerFollow = 500,
@@ -44,10 +44,8 @@ local Config = {
 	WinTextColor = "#FFFFFF",
 	WinBackgroundColor = "#2B2140",
 
-	-- Mountain shape ----------------------------------------------------------
-	MountainRadius = 15, -- in blocks
-	MountainHeight = 14, -- in blocks
-	BlockSize = 4, -- studs
+	-- Rocks -----------------------------------------------------------------------
+	BlockSize = 1, -- size of one rock in studs (the diamond is the same size)
 
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
@@ -231,7 +229,8 @@ end)
 
 -- The world ---------------------------------------------------------------------
 local blockSize = Config.BlockSize
-local spawnDistance = Config.MountainRadius * blockSize + 40
+-- A cone of about this many rocks reaches out roughly this far.
+local spawnDistance = math.ceil((math.min(Config.StartingStone, 1500000) * 1.06 / 0.94) ^ (1 / 3)) * blockSize + 30
 
 local ground = Instance.new("Part")
 ground.Name = "Ground"
@@ -270,7 +269,7 @@ local function makePickaxe(): Tool
 	local tool = Instance.new("Tool")
 	tool.Name = "Pickaxe"
 	tool.CanBeDropped = false
-	tool.ToolTip = "Click rock to mine it"
+	tool.ToolTip = "Click rock to dig it"
 	tool.GripPos = Vector3.new(0, -1.3, 0)
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
@@ -295,12 +294,15 @@ local function makePickaxe(): Tool
 	head.Parent = tool
 	return tool
 end
-makePickaxe().Parent = StarterPack
+-- Digging is done with bare hands, so nobody carries a tool.
+local _ = makePickaxe
+local _ = StarterPack
 
 -- The one diamond -----------------------------------------------------------------
 local diamond = Instance.new("Part")
 diamond.Name = "Diamond"
-diamond.Size = Vector3.new(2.2, 2.2, 2.2)
+-- The diamond is the same size as a rock.
+diamond.Size = Vector3.new(blockSize, blockSize, blockSize) * 0.85
 diamond.Material = Enum.Material.Glass
 diamond.Color = Color3.fromRGB(175, 240, 255)
 diamond.Reflectance = 0.35
@@ -349,8 +351,6 @@ local DIAMOND_TILT = CFrame.Angles(math.rad(45), 0, math.rad(35))
 local mountain: Mountain.Mountain? = nil
 local phase = "Digging"
 local startingStone = settings.startingStone
-local removed = 0
-local perBlock = 1
 local pendingStone = 0
 local roundStart = 0
 local holder: Player? = nil
@@ -365,7 +365,7 @@ local function setPhase(value: string)
 end
 
 local function refreshStone()
-	State:SetAttribute("Stone", math.max(0, math.floor(startingStone - removed + 0.5)))
+	State:SetAttribute("Stone", if mountain then mountain:remaining() else 0)
 	State:SetAttribute("StartingStone", startingStone)
 end
 
@@ -384,7 +384,7 @@ local function settleDiamond()
 	if phase ~= "Revealed" or mountain == nil or not diamond.Anchored then
 		return
 	end
-	local rest = mountain:restingHeight(diamond.Position) + 1.6
+	local rest = mountain:restingHeight(diamond.Position) + blockSize / 2
 	if rest < diamond.Position.Y - 0.1 then
 		local target = CFrame.new(diamond.Position.X, rest, diamond.Position.Z) * DIAMOND_TILT
 		TweenService:Create(diamond, TweenInfo.new(0.4, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out), { CFrame = target }):Play()
@@ -400,41 +400,31 @@ local function reveal()
 	Notify:FireAllClients("revealed")
 end
 
--- Breaks enough blocks to match the stone removed so far.
-local function syncBlocks()
-	local current = mountain
-	if current == nil then
-		return
-	end
-	local target = if removed >= startingStone - 1e-6 then current:total() else math.floor(removed / perBlock)
-	local need = target - current:removedCount()
-	if need > 0 then
-		local centre = current:blast(need)
-		if centre ~= nil and need >= 10 then
-			local blast = Instance.new("Explosion")
-			blast.Position = centre
-			blast.BlastRadius = math.min(32, 4 + math.sqrt(need) * 2.2)
-			blast.BlastPressure = 0
-			blast.DestroyJointRadiusPercent = 0
-			blast.ExplosionType = Enum.ExplosionType.NoCraters
-			blast.Parent = workspace
-		end
-	end
-	refreshStone()
-	settleDiamond()
-end
-
+-- One rock is one stone: blast exactly that many rocks.
 local function applyStone(amount: number)
+	amount = math.floor(amount)
 	if amount <= 0 then
 		return
 	end
-	if phase == "Won" or mountain == nil then
+	local current = mountain
+	if phase == "Won" or current == nil then
 		-- Gifts during the win screen count towards the next mountain.
 		pendingStone += amount
 		return
 	end
-	removed = math.min(startingStone, removed + amount)
-	syncBlocks()
+	local count = math.min(amount, current:remaining())
+	local centre = current:blast(count)
+	if centre ~= nil and count >= 200 then
+		local blast = Instance.new("Explosion")
+		blast.Position = centre
+		blast.BlastRadius = math.min(40, 2 + count ^ (1 / 3) * 1.6)
+		blast.BlastPressure = 0
+		blast.DestroyJointRadiusPercent = 0
+		blast.ExplosionType = Enum.ExplosionType.NoCraters
+		blast.Parent = workspace
+	end
+	refreshStone()
+	settleDiamond()
 end
 
 local function teleportHome(player: Player)
@@ -453,12 +443,11 @@ local function newRound()
 		holdWeld:Destroy()
 		holdWeld = nil
 	end
-	startingStone = settings.startingStone
-	removed = 0
+	startingStone = math.clamp(settings.startingStone, 100, 1500000)
 	setPhase("Digging")
-	local created = Mountain.new(workspace, Config.MountainRadius, Config.MountainHeight, blockSize, reveal)
+	local created = Mountain.new(workspace, startingStone, blockSize, reveal)
 	mountain = created
-	perBlock = startingStone / created:total()
+	startingStone = created:total()
 	diamond.Anchored = true
 	diamond.CFrame = CFrame.new(created:keyPosition(created.diamondKey)) * DIAMOND_TILT
 	showDiamond(false)
@@ -528,8 +517,8 @@ local function drop(reason: string)
 	params.FilterDescendantsInstances = ignore
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	local hit = workspace:Raycast(where, Vector3.new(0, -400, 0), params)
-	local y = if hit then hit.Position.Y + 1.6 else 1.6
-	diamond.CFrame = CFrame.new(where.X, math.max(y, 1.6), where.Z) * DIAMOND_TILT
+	local y = if hit then hit.Position.Y + blockSize / 2 else blockSize / 2
+	diamond.CFrame = CFrame.new(where.X, math.max(y, blockSize / 2), where.Z) * DIAMOND_TILT
 	setPhase("Revealed")
 	showDiamond(true)
 	State:SetAttribute("Holder", "")
@@ -681,7 +670,7 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "setShowWins" and type(value) == "boolean" then
 		settings.showWins = value
 	elseif action == "setStartingStone" and type(value) == "number" then
-		settings.startingStone = math.clamp(math.floor(value), 100, 100000000)
+		settings.startingStone = math.clamp(math.floor(value), 100, 1500000)
 	elseif action == "resetBest" then
 		settings.best = 0
 	elseif action == "newRound" then
@@ -719,13 +708,13 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		if key == nil or root == nil or not root:IsA("BasePart") then
 			return
 		end
-		if (root.Position - current:keyPosition(key)).Magnitude > 22 then
+		if (root.Position - current:keyPosition(key)).Magnitude > 16 then
 			return
 		end
 		mineCooldown[player] = now
 		if current:mine(key) then
-			removed = math.min(startingStone, removed + perBlock)
-			syncBlocks()
+			refreshStone()
+			settleDiamond()
 		end
 		return
 	end
@@ -839,6 +828,8 @@ export type Grid = typeof(setmetatable(
 		exposedList: { number },
 		exposedIndex: { [number]: number },
 		rand: (number?, number?) -> number,
+		fresh: { number },
+		sealed: { [number]: boolean },
 	},
 	Grid
 ))
@@ -853,8 +844,14 @@ function Grid.coords(key: number): (number, number, number)
 	return (rest % SPAN) - OFFSET, y, (rest // SPAN) - OFFSET
 end
 
+-- Builds a mountain of exactly `target` cells (one cell = one stone).
 -- rand(): a number in [0, 1); rand(a, b): a whole number from a to b.
-function Grid.new(radius: number, height: number, seed: number, rand: (number?, number?) -> number): Grid
+function Grid.new(target: number, seed: number, rand: (number?, number?) -> number): Grid
+	target = math.max(1, math.floor(target))
+	-- A cone of volume ~pi r^2 h / 3 with h = 0.9 r, a little oversized so it
+	-- can be trimmed down to the exact number of cells.
+	local radius = math.clamp(math.ceil((target * 1.06 / 0.94) ^ (1 / 3)), 3, OFFSET - 4)
+	local height = math.max(2, math.floor(radius * 0.9 + 0.5))
 	local self = setmetatable({
 		radius = radius,
 		height = height,
@@ -865,15 +862,17 @@ function Grid.new(radius: number, height: number, seed: number, rand: (number?, 
 		exposedList = {},
 		exposedIndex = {},
 		rand = rand,
+		fresh = {},
+		sealed = {},
 	}, Grid)
-	-- A rounded peak with a rough, noisy outline and a few lumpy shoulders.
+	local scale = 15 / radius
 	for z = -radius, radius do
 		for x = -radius, radius do
 			local distance = math.sqrt(x * x + z * z) / radius
 			if distance <= 1 then
-				local bumps = math.noise(x * 0.16, z * 0.16, seed) * 2.6 + math.noise(x * 0.4, z * 0.4, seed + 7.3) * 0.9
-				local top = height * (1 - distance) ^ 0.85 + bumps * (1 - distance * 0.6)
-				local columnHeight = math.clamp(math.floor(top + 0.5), if distance < 0.85 then 1 else 0, height + 2)
+				local bumps = math.noise(x * 0.16 * scale, z * 0.16 * scale, seed) * 2.6 + math.noise(x * 0.4 * scale, z * 0.4 * scale, seed + 7.3) * 0.9
+				local top = height * (1 - distance) ^ 0.85 + bumps * (1 - distance * 0.6) / math.sqrt(scale)
+				local columnHeight = math.clamp(math.floor(top + 0.5), if distance < 0.85 then 1 else 0, height * 2)
 				for y = 0, columnHeight - 1 do
 					local key = Grid.key(x, y, z)
 					self.solid[key] = true
@@ -882,12 +881,54 @@ function Grid.new(radius: number, height: number, seed: number, rand: (number?, 
 			end
 		end
 	end
+	-- Shave the highest rocks first until exactly `target` cells remain, so the
+	-- surface stays smooth. Column tops are bucketed by height.
+	local count = #self.order
+	if count > target then
+		local buckets: { [number]: { number } } = {}
+		local highest = 0
+		for _, key in self.order do
+			local x, y, z = Grid.coords(key)
+			if not self.solid[Grid.key(x, y + 1, z)] then
+				buckets[y] = buckets[y] or {}
+				table.insert(buckets[y], key)
+				highest = math.max(highest, y)
+			end
+		end
+		local level = highest
+		while count > target and level >= 0 do
+			local bucket = buckets[level]
+			if bucket == nil or #bucket == 0 then
+				level -= 1
+				continue
+			end
+			local index = rand(1, #bucket)
+			local key = bucket[index]
+			bucket[index] = bucket[#bucket]
+			bucket[#bucket] = nil
+			self.solid[key] = nil
+			count -= 1
+			local x, y, z = Grid.coords(key)
+			if y > 0 then
+				buckets[y - 1] = buckets[y - 1] or {}
+				table.insert(buckets[y - 1], Grid.key(x, y - 1, z))
+			end
+		end
+		local kept: { number } = {}
+		for _, key in self.order do
+			if self.solid[key] then
+				table.insert(kept, key)
+			end
+		end
+		self.order = kept
+	end
 	self.total = #self.order
 	for _, key in self.order do
 		if self:isExposed(key) then
 			self:_expose(key)
 		end
 	end
+	table.clear(self.fresh)
 	return self
 end
 
@@ -904,7 +945,8 @@ function Grid.isExposed(self: Grid, key: number): boolean
 	for _, step in NEIGHBOURS do
 		local ny = y + step[2]
 		-- The ground under the mountain counts as solid.
-		if ny >= 0 and not self.solid[Grid.key(x + step[1], ny, z + step[3])] then
+		local neighbour = Grid.key(x + step[1], ny, z + step[3])
+		if ny >= 0 and not self.solid[neighbour] and not self.sealed[neighbour] then
 			return true
 		end
 	end
@@ -915,6 +957,7 @@ function Grid._expose(self: Grid, key: number)
 	if self.exposedIndex[key] == nil then
 		table.insert(self.exposedList, key)
 		self.exposedIndex[key] = #self.exposedList
+		table.insert(self.fresh, key)
 	end
 end
 
@@ -1054,8 +1097,38 @@ function Grid.blast(self: Grid, count: number, centre: number?): ({ number }, nu
 	return removed, start
 end
 
--- A cell buried inside the mountain (all six neighbours solid) for the diamond,
--- preferring the lower two thirds so it is not found straight away.
+-- Newly exposed cells since the last call (for drawing them).
+function Grid.takeFresh(self: Grid): { number }
+	local fresh = self.fresh
+	self.fresh = {}
+	return fresh
+end
+
+-- True once any of the cell's six neighbours is open air.
+function Grid.isOpenAround(self: Grid, key: number): boolean
+	return self:isExposed(key)
+end
+
+-- Takes a buried cell out of the rock for the diamond (all six neighbours
+-- solid, in the lower two thirds so it is not found straight away). The
+-- diamond is not stone: it does not count towards the total.
+function Grid.carveHiddenCell(self: Grid): number
+	local key = self:pickHiddenCell()
+	if self.solid[key] then
+		-- Sealed: not stone, but it still counts as rock around it until the
+		-- digging reaches it.
+		self.solid[key] = nil
+		self.sealed[key] = true
+		self:_unexpose(key)
+		self.total -= 1
+		local index = table.find(self.order, key)
+		if index then
+			table.remove(self.order, index)
+		end
+	end
+	return key
+end
+
 function Grid.pickHiddenCell(self: Grid): number
 	local buried: { number } = {}
 	for _, key in self.order do
@@ -1092,7 +1165,9 @@ return Grid
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
--- Turns the block grid into Roblox parts and plays the blast effects.
+-- Draws the mountain: one small rock per stone. To keep Roblox fast only the
+-- rocks on the outside exist as parts; rocks inside are tracked by the grid
+-- and get a part the moment digging uncovers them, so it looks solid.
 local Debris = game:GetService("Debris")
 
 local Grid = require(script.Parent.Grid)
@@ -1100,7 +1175,6 @@ local Grid = require(script.Parent.Grid)
 local Mountain = {}
 Mountain.__index = Mountain
 
--- Rock tones from the foot to the summit, plus a few colourful ore flecks.
 local ROCK = {
 	Color3.fromRGB(92, 88, 84),
 	Color3.fromRGB(110, 106, 100),
@@ -1115,7 +1189,7 @@ local ORES = {
 	Color3.fromRGB(160, 90, 220), -- amethyst
 	Color3.fromRGB(205, 120, 60), -- copper
 }
-local FLYING_LIMIT = 36
+local FLYING_LIMIT = 40
 
 export type Mountain = typeof(setmetatable(
 	{} :: {
@@ -1123,15 +1197,17 @@ export type Mountain = typeof(setmetatable(
 		folder: Folder,
 		parts: { [number]: BasePart },
 		keys: { [BasePart]: number },
+		tops: { [number]: number },
 		blockSize: number,
 		random: Random,
 		diamondKey: number,
+		revealed: boolean,
 		onDiamondCell: () -> (),
 	},
 	Mountain
 ))
 
-function Mountain.new(parent: Instance, radius: number, height: number, blockSize: number, onDiamondCell: () -> ()): Mountain
+function Mountain.new(parent: Instance, stones: number, blockSize: number, onDiamondCell: () -> ()): Mountain
 	local random = Random.new()
 	local function rand(a: number?, b: number?): number
 		if a ~= nil and b ~= nil then
@@ -1139,7 +1215,8 @@ function Mountain.new(parent: Instance, radius: number, height: number, blockSiz
 		end
 		return random:NextNumber()
 	end
-	local grid = Grid.new(radius, height, random:NextNumber(0, 1000), rand)
+	local grid = Grid.new(stones, random:NextNumber(0, 1000), rand)
+	local diamondKey = grid:carveHiddenCell()
 	local folder = Instance.new("Folder")
 	folder.Name = "Mountain"
 	local self = setmetatable({
@@ -1147,45 +1224,22 @@ function Mountain.new(parent: Instance, radius: number, height: number, blockSiz
 		folder = folder,
 		parts = {},
 		keys = {},
+		tops = {},
 		blockSize = blockSize,
 		random = random,
-		diamondKey = grid:pickHiddenCell(),
+		diamondKey = diamondKey,
+		revealed = false,
 		onDiamondCell = onDiamondCell,
 	}, Mountain)
-	local tops: { [number]: number } = {}
 	for _, key in grid.order do
 		local x, y, z = Grid.coords(key)
 		local column = Grid.key(x, 0, z)
-		tops[column] = math.max(tops[column] or 0, y)
+		self.tops[column] = math.max(self.tops[column] or 0, y)
 	end
-	for _, key in grid.order do
-		local x, y, z = Grid.coords(key)
-		local part = Instance.new("Part")
-		part.Name = "Stone"
-		part.Anchored = true
-		part.Size = Vector3.new(blockSize, blockSize, blockSize)
-		part.Position = self:cellPosition(x, y, z)
-		part.TopSurface = Enum.SurfaceType.Smooth
-		part.BottomSurface = Enum.SurfaceType.Smooth
-		local top = tops[Grid.key(x, 0, z)]
-		if y == top and y >= height * 0.72 then
-			part.Material = Enum.Material.Snow
-			part.Color = Color3.fromRGB(236, 240, 245)
-		elseif y == top and y <= 2 then
-			part.Material = Enum.Material.Grass
-			part.Color = Color3.fromRGB(88, 140, 70)
-		elseif random:NextNumber() < 0.07 then
-			part.Material = Enum.Material.Marble
-			part.Color = ORES[random:NextInteger(1, #ORES)]
-		else
-			part.Material = if random:NextNumber() < 0.5 then Enum.Material.Slate else Enum.Material.Rock
-			local tone = ROCK[math.clamp(1 + math.floor(y / height * #ROCK + random:NextNumber() * 1.2), 1, #ROCK)]
-			part.Color = tone
-		end
-		part.Parent = folder
-		self.parts[key] = part
-		self.keys[part] = key
+	for _, key in grid.exposedList do
+		self:_draw(key)
 	end
+	grid:takeFresh()
 	folder.Parent = parent
 	return self
 end
@@ -1200,12 +1254,49 @@ function Mountain.keyPosition(self: Mountain, key: number): Vector3
 	return self:cellPosition(x, y, z)
 end
 
+function Mountain._draw(self: Mountain, key: number)
+	local existing: BasePart? = self.parts[key]
+	if existing ~= nil or not self.grid:isSolid(key) then
+		return
+	end
+	local x, y, z = Grid.coords(key)
+	local size = self.blockSize
+	local part = Instance.new("Part")
+	part.Name = "Stone"
+	part.Anchored = true
+	part.CastShadow = false
+	part.Size = Vector3.new(size, size, size)
+	part.Position = self:cellPosition(x, y, z)
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	local height = self.grid.height
+	local top = self.tops[Grid.key(x, 0, z)] or 0
+	-- Colour depends only on the cell, so a rock looks the same whenever it appears.
+	local shade = (math.noise(x * 0.37, y * 0.41, z * 0.29) + 1) / 2
+	if y == top and y >= height * 0.7 then
+		part.Material = Enum.Material.Snow
+		part.Color = Color3.fromRGB(236, 240, 245)
+	elseif y == top and y <= height * 0.18 then
+		part.Material = Enum.Material.Grass
+		part.Color = Color3.fromRGB(88, 140, 70)
+	elseif (key * 2654435761) % 1000 < 60 then
+		part.Material = Enum.Material.Marble
+		part.Color = ORES[(key % #ORES) + 1]
+	else
+		part.Material = if shade > 0.5 then Enum.Material.Slate else Enum.Material.Rock
+		part.Color = ROCK[math.clamp(1 + math.floor(y / height * #ROCK + shade), 1, #ROCK)]
+	end
+	part.Parent = self.folder
+	self.parts[key] = part
+	self.keys[part] = key
+end
+
 function Mountain.total(self: Mountain): number
 	return self.grid.total
 end
 
-function Mountain.removedCount(self: Mountain): number
-	return self.grid.removed
+function Mountain.remaining(self: Mountain): number
+	return self.grid:remaining()
 end
 
 function Mountain.keyForPart(self: Mountain, part: Instance): number?
@@ -1219,9 +1310,10 @@ function Mountain.isExposed(self: Mountain, key: number): boolean
 	return self.grid:isSolid(key) and self.grid.exposedIndex[key] ~= nil
 end
 
--- Removes blocks from the scene; the first few fly off as rubble.
-function Mountain._clear(self: Mountain, keys: { number }, centre: Vector3?)
-	for index, key in keys do
+-- After rocks are removed: drop their parts (a few fly off as rubble), draw the
+-- rocks that were uncovered, and check whether the diamond is now in the open.
+function Mountain._settle(self: Mountain, removed: { number }, centre: Vector3?)
+	for index, key in removed do
 		local part: BasePart? = self.parts[key]
 		if part ~= nil then
 			self.parts[key] = nil
@@ -1234,21 +1326,24 @@ function Mountain._clear(self: Mountain, keys: { number }, centre: Vector3?)
 				part.Anchored = false
 				part.CanCollide = false
 				part.CanQuery = false
-				part.Size *= 0.7
-				part.AssemblyLinearVelocity = away.Unit * self.random:NextNumber(30, 60) + Vector3.new(0, self.random:NextNumber(25, 45), 0)
+				part.AssemblyLinearVelocity = away.Unit * self.random:NextNumber(20, 40) + Vector3.new(0, self.random:NextNumber(15, 30), 0)
 				part.AssemblyAngularVelocity = Vector3.new(self.random:NextNumber(-8, 8), self.random:NextNumber(-8, 8), self.random:NextNumber(-8, 8))
-				Debris:AddItem(part, 1.6)
+				Debris:AddItem(part, 1.4)
 			else
 				part:Destroy()
 			end
 		end
-		if key == self.diamondKey then
-			self.onDiamondCell()
-		end
+	end
+	for _, key in self.grid:takeFresh() do
+		self:_draw(key)
+	end
+	if not self.revealed and self.grid:isOpenAround(self.diamondKey) then
+		self.revealed = true
+		self.onDiamondCell()
 	end
 end
 
--- Blasts `count` blocks as one crater; returns the crater centre.
+-- Blasts `count` rocks as one crater; returns the crater centre.
 function Mountain.blast(self: Mountain, count: number): Vector3?
 	if count <= 0 then
 		return nil
@@ -1258,21 +1353,21 @@ function Mountain.blast(self: Mountain, count: number): Vector3?
 		return nil
 	end
 	local centre = self:keyPosition(centreKey)
-	self:_clear(keys, centre)
+	self:_settle(keys, centre)
 	return centre
 end
 
--- Mines one exposed block (pickaxe). Returns true when it broke.
+-- Digs out one uncovered rock by hand. Returns true when it broke.
 function Mountain.mine(self: Mountain, key: number): boolean
 	if not self:isExposed(key) then
 		return false
 	end
 	self.grid:remove(key)
-	self:_clear({ key }, nil)
+	self:_settle({ key }, nil)
 	return true
 end
 
--- Where a loose find at `position` comes to rest: on top of the highest block
+-- Where a loose find at `position` comes to rest: on top of the highest rock
 -- below it in its column, or on the ground.
 function Mountain.restingHeight(self: Mountain, position: Vector3): number
 	local size = self.blockSize
@@ -2060,7 +2155,7 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	end
 end)
 
--- Pickaxe: click a rock block while holding the pickaxe to mine it.
+-- Digging: click a rock block to dig it out with your hands.
 local mouse = player:GetMouse()
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed then
@@ -2070,8 +2165,9 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		return
 	end
 	local character = player.Character
+	-- Dig with bare hands: click a rock block within reach.
 	local tool = character and character:FindFirstChildOfClass("Tool")
-	if tool ~= nil and tool.Name == "Pickaxe" and mouse.Target ~= nil and mouse.Target.Name == "Stone" then
+	if tool == nil and mouse.Target ~= nil and mouse.Target.Name == "Stone" then
 		Request:FireServer("mine", mouse.Target)
 	end
 end)
@@ -2083,7 +2179,7 @@ end)
             <string name="Source"><![CDATA[--!strict
 -- First-person view with two hands in front of the camera (like the PC game).
 -- The hands follow the camera, bob while walking and swing when you click.
--- While the pickaxe is equipped the right hand holds a pickaxe model.
+-- You dig with your hands: each click punches with the other hand.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -2129,10 +2225,12 @@ function FirstPerson.start()
 	pickHead.Parent = rig
 
 	local swing = 0
+	local punchSide = 1
 	local bob = 0
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if not processed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
 			swing = 1
+			punchSide = -punchSide
 		end
 	end)
 
@@ -2149,7 +2247,6 @@ function FirstPerson.start()
 		local colours = character:FindFirstChildOfClass("BodyColors")
 		local skin = if colours then colours.RightArmColor3 else SKIN_FALLBACK
 		local tool = character:FindFirstChildOfClass("Tool")
-		local holdingPick = tool ~= nil and tool.Name == "Pickaxe"
 		-- Hide the third-person tool; the hands show their own pickaxe.
 		if tool then
 			for _, d in tool:GetDescendants() do
@@ -2165,7 +2262,7 @@ function FirstPerson.start()
 		local strike = math.sin(swing * math.pi)
 		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
 		for _, h in hands do
-			local hit = if h.side == 1 then strike else 0
+			local hit = if h.side == punchSide then strike else 0
 			local arm = base
 				* CFrame.new(h.side * 0.75, hit * 0.25, -hit * 0.4)
 				* CFrame.Angles(math.rad(10 + hit * -55), math.rad(-h.side * 8), 0)
@@ -2173,7 +2270,7 @@ function FirstPerson.start()
 			h.hand.CFrame = arm * CFrame.new(0, 0, -0.35)
 			h.hand.Color = skin
 		end
-		pickHandle.Transparency = if holdingPick then 0 else 1
+		pickHandle.Transparency = 1
 		pickHead.Transparency = pickHandle.Transparency
 		local grip = hands[2].hand.CFrame * CFrame.Angles(math.rad(-70), 0, 0)
 		pickHandle.CFrame = grip * CFrame.new(0, 0.55, 0)

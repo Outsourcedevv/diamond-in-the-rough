@@ -3,7 +3,7 @@
 -- changed in-game from the settings panel; the panel's values are saved.
 local Config = {
 	-- Stone -----------------------------------------------------------------
-	StartingStone = 250000, -- (live) stone in the mountain at the start of a round
+	StartingStone = 250000, -- (live) rocks in the mountain at the start of a round (one rock = one stone, max 1,500,000)
 	StonePerCoin = 100, -- stone removed per TikTok coin gifted (a Rose is 1 coin)
 	StonePerLike = 2,
 	StonePerFollow = 500,
@@ -21,10 +21,8 @@ local Config = {
 	WinTextColor = "#FFFFFF",
 	WinBackgroundColor = "#2B2140",
 
-	-- Mountain shape ----------------------------------------------------------
-	MountainRadius = 15, -- in blocks
-	MountainHeight = 14, -- in blocks
-	BlockSize = 4, -- studs
+	-- Rocks -----------------------------------------------------------------------
+	BlockSize = 1, -- size of one rock in studs (the diamond is the same size)
 
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
