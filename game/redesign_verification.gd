@@ -120,10 +120,14 @@ func run() -> void:
 	if found >= 0:
 		var at: Array = game.state.gems[found].pos
 		var spot := Vector3(float(at[0]),float(at[1]),float(at[2]))
-		# Finds rest at the bottom of the dug shaft, so look straight down into it.
+		# Finds rest at the bottom of the dug shaft, so look straight down into it once
+		# the background surface rebuild has opened the shaft (slow CI machines lag).
+		await settle_surface()
+		if game.gem_nodes.has(found): spot = game.gem_nodes[found].global_position
 		await go(spot + Vector3(0,0.6,0))
 		aim(spot,Vector3.FORWARD)
 		var reached_id: int = int(game.target_meta("gem_id",-1))
+		if reached_id != found: print("SHAFT_DEBUG idle=",game.mountain_view.idle()," spot=",spot," hit=",game.selected_target.get("position")," collider=",game.selected_target.get("collider")," node=",game.gem_nodes.get(found).position if game.gem_nodes.has(found) else null)
 		check(reached_id == found,"The first-person ray reaches the released find")
 		game.interact()
 		await get_tree().create_timer(0.08).timeout
@@ -371,6 +375,17 @@ func tray_count() -> int:
 	for gem in game.state.gems.values():
 		if gem.stage == "tray": count += 1
 	return count
+
+func settle_surface() -> void:
+	var waited := 0
+	while not game.mountain_view.idle() and waited < 100:
+		await get_tree().create_timer(0.05).timeout
+		waited += 1
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	game.refresh()
+	# Let a find that moved onto the rebuilt surface finish settling.
+	await get_tree().create_timer(0.5).timeout
 
 func aim(pos: Vector3, up: Vector3 = Vector3.UP) -> void:
 	game.player.camera.look_at(pos,up)
