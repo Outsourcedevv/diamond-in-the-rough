@@ -26,7 +26,7 @@ func build(owner_game: Node) -> void:
 	game = owner_game
 	collision_layer = 2
 	collision_mask = 1
-	floor_max_angle = deg_to_rad(46.0)
+	floor_max_angle = deg_to_rad(50.0)
 	floor_snap_length = 0.32
 	floor_stop_on_slope = true
 	var col := CollisionShape3D.new()

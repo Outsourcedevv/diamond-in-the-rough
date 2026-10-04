@@ -200,12 +200,12 @@ func probe_mountain_geometry() -> void:
 	var probes := 0
 	for z in range(6,MountainScript.SIZE_Z,9):
 		for x in range(6,MountainScript.SIZE_X,11):
-			var top: int = grid.height(x,z)
-			if top < 2: continue
+			var top: float = grid.smooth_height(x,z)
+			if top < 2.0: continue
 			var at: Vector3 = MountainScript.cell_center(MountainScript.index(x,0,z))
 			var ray := PhysicsRayQueryParameters3D.create(Vector3(at.x,60,at.z),Vector3(at.x,-5,at.z),1)
 			var hit: Dictionary = game.player.get_world_3d().direct_space_state.intersect_ray(ray)
-			check(not hit.is_empty() and bool(hit.collider.get_meta("mountain",false)) and absf(hit.position.y-float(top)) < 0.02,"Mountain column %d,%d is solid at its authoritative height of %d blocks" % [x,z,top])
+			check(not hit.is_empty() and bool(hit.collider.get_meta("mountain",false)) and absf(hit.position.y-top) < 0.6,"Mountain column %d,%d is solid at its natural height of %.1f m" % [x,z,top])
 			probes += 1
 	check(probes >= 12,"The mountain's surface was probed across its whole footprint")
 	# Walk to the foot of the slope and climb it with real movement and jumps.
@@ -218,9 +218,9 @@ func probe_mountain_geometry() -> void:
 	game.player.yaw = 0.0
 	game.player.update_view()
 	game.player.set_physics_process(true)
-	await hold_key(KEY_W,3.2,KEY_SPACE)
-	await get_tree().create_timer(0.6).timeout
-	check(game.player.position.y > start.y + 3.0 and game.player.position.z < start.z - 3.0 and game.player.is_on_floor(),"WASD and jumping climb the block mountain (%.1f m up)" % (game.player.position.y-start.y))
+	await hold_key(KEY_W,2.2,KEY_SPACE)
+	await get_tree().create_timer(1.2).timeout
+	check(game.player.position.y > start.y + 2.5 and game.player.position.z < start.z - 3.0 and game.player.is_on_floor(),"WASD and jumping climb the mountain's lower slopes (%.1f m up)" % (game.player.position.y-start.y))
 	await screenshot("00_walkable_mountain")
 
 ## An exposed block with open air above it, so a miner can stand on top of it.

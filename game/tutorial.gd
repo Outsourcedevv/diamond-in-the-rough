@@ -269,7 +269,7 @@ func data() -> Dictionary:
 			result.instruction = "Walk around the camp and look toward the mountain. Hold Shift to run, Space to jump."
 			result.key = "W A S D  /  Mouse"
 		1:
-			result.instruction = "Walk up to the mountain and hold left click on a speckled ore block. Ore goes straight into your satchel."
+			result.instruction = "Walk up to the mountain and hold left click on rock flecked with ore. Ore goes straight into your satchel."
 			result.key = "Hold left click"
 			result.target = _nearest_ore()
 			result.target_label = "Surface ore"
@@ -293,7 +293,7 @@ func data() -> Dictionary:
 			if positions is Dictionary: result.target = positions.get("steel_pick",result.target)
 			result.target_label = "Steel pickaxe"
 		4:
-			result.instruction = "Glittering white blocks are crystal veins; pale seams hold fossils. Mine one and walk over what falls out."
+			result.instruction = "Glittering white veins hold crystals; pale seams hold fossils. Mine one and walk over what falls out."
 			result.key = "Hold left click  /  walk over it"
 			result.target = _nearest_find()
 			result.target_label = "Crystal or fossil" if result.target != Vector3.ZERO else ""

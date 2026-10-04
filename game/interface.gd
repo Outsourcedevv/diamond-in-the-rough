@@ -748,7 +748,7 @@ func show_collection(state: Variant) -> void:
 	for kind in MountainScript.ORE_ORDER:
 		lines.append("%s  $%d   ·   carrying %d" % [MountainScript.ORE_NAMES[kind],int(MountainScript.ORE_VALUES[kind]),int(satchel.get(kind,0))])
 	_modal_body.add_child(_wrapped("\n".join(lines),14,CREAM))
-	_modal_body.add_child(_wrapped("%d blocks mined so far." % blocks,14,MUTED))
+	_modal_body.add_child(_wrapped("%d m³ of rock mined so far." % blocks,14,MUTED))
 	_modal_body.add_child(HSeparator.new())
 	for entry in [{"label":"Save game","action":"save"},{"label":"Recover lost finds","action":"recover"},{"label":"Return to solid ground","action":"unstuck"}]:
 		var action: String = str(entry.action)

@@ -28,6 +28,7 @@ var selection := 0
 var mine_target := -1
 var mine_damage := 0
 var mine_warned := -1
+var mine_progress := 0.0
 var explosives := {}
 var throw_ready_at := {}
 var auto_pick_timer := 0.0
@@ -62,6 +63,7 @@ func _ready() -> void:
 	mountain_view = MountainViewScript.new()
 	add_child(mountain_view)
 	mountain_view.build(self)
+	mountain_view.surface_settled.connect(func(): call_deferred("refresh"))
 	player = PlayerScript.new()
 	add_child(player)
 	player.build(self)
@@ -429,10 +431,10 @@ func interaction_prompt() -> String:
 		var ore: String = MountainScript.ore_for_code(code)
 		if not ore.is_empty():
 			if state.ore_total()>=state.ore_capacity(): return "%s · satchel full · sell at the exchange" % block
-			return "%s · $%d · hold left click to mine" % [block,int(MountainScript.ORE_VALUES[ore])]
-		if code == MountainScript.CRYSTAL: return "Crystal vein · something clear glints inside"
-		if code == MountainScript.CURIO: return "Fossil seam · something is buried here"
-		return "%s · hold left click to mine" % block
+			return "%s · $%d · hold left click to mine%s" % [block,int(MountainScript.ORE_VALUES[ore]),progress_text(cell)]
+		if code == MountainScript.CRYSTAL: return "Crystal vein · something clear glints inside%s" % progress_text(cell)
+		if code == MountainScript.CURIO: return "Fossil seam · something is buried here%s" % progress_text(cell)
+		return "%s · hold left click to mine%s" % [block,progress_text(cell)]
 	var station := str(target_meta("station",""))
 	match station:
 		"sell": return "[E] Sell ore and finds · clear crystals go safely to the tray"
@@ -447,6 +449,17 @@ func interaction_prompt() -> String:
 	var peer: int = int(target_meta("peer_id",-1))
 	if peer >= 0: return "[F] Label   [G] Foam   [R] Wrapped present   [LMB] Dump your finds on them"
 	return ""
+
+func progress_text(cell: int) -> String:
+	if cell != mine_target or mine_progress <= 0.0: return ""
+	return "  ·  %d%%" % roundi(mine_progress*100.0)
+
+func rock_tint(code: int) -> Color:
+	match code:
+		MountainScript.GRASS, MountainScript.DIRT: return Color("6e5a44")
+		MountainScript.SNOW: return Color("e6ebee")
+		MountainScript.GRANITE: return Color("5c5d5f")
+	return Color("85837c")
 
 func objective() -> String:
 	if state.certified: return "Diamond certified. Keep blasting for treasure or fill your collection."
@@ -499,7 +512,9 @@ func mine_step() -> void:
 		mine_target = cell
 		mine_damage = 0
 	mine_damage += 1 if tool=="pickaxe" else 2
-	mountain_view.show_crack(cell,float(mine_damage)/float(state.mountain.hardness(c.x,c.y,c.z,code)))
+	mine_progress = clampf(float(mine_damage)/float(state.mountain.hardness(c.x,c.y,c.z,code)),0.0,1.0)
+	if not selected_target.is_empty():
+		burst(selected_target.position,rock_tint(code),3,true,1.1)
 	state.action("mine",{"cell":cell})
 	sound.play("drill" if tool=="drill" else "mine")
 	tutorial.on_action("mine")
@@ -792,7 +807,7 @@ func refresh() -> void:
 			p=Vector3(-8+(slot%8-3.5)*0.28,1.31,-0.6+int(slot/8)*0.23)
 		elif stage=="loose":
 			var a: Array=gem.get("pos",[0,1,5])
-			p=Vector3(float(a[0]),float(a[1]),float(a[2]))
+			p=ground_point(Vector3(float(a[0]),float(a[1]),float(a[2])))
 		elif stage=="collection":
 			p=Vector3(4.2+(collection_index%6)*0.32,1.5+int(collection_index/6)*0.4,8.1)
 			collection_index+=1
@@ -1005,10 +1020,18 @@ func remove_avatar(peer: int) -> void:
 func burst(pos: Vector3,color: Color,count:int,heavy: bool=false,speed: float=1.6) -> void:
 	for i in range(count):
 		var m:=MeshInstance3D.new()
-		var mesh:=BoxMesh.new()
 		var size: float=randf_range(0.07,0.16) if heavy else 0.06
-		mesh.size=Vector3(size,size*0.7,size*1.2)
-		m.mesh=mesh
+		if heavy:
+			var chip:=SphereMesh.new()
+			chip.radius=size*0.6
+			chip.height=size*0.9
+			chip.radial_segments=5
+			chip.rings=2
+			m.mesh=chip
+		else:
+			var mesh:=BoxMesh.new()
+			mesh.size=Vector3(size,size*0.7,size*1.2)
+			m.mesh=mesh
 		var material:=StandardMaterial3D.new()
 		material.albedo_color=color*randf_range(0.8,1.15)
 		material.albedo_color.a=1.0
@@ -1041,6 +1064,13 @@ func recover_items() -> void:
 	state.send_pose(player.position,player.yaw,player.pitch)
 	await get_tree().create_timer(0.18).timeout
 	state.action("recover")
+
+## Finds rest on whole blocks in the rules; draw them on the smooth surface instead.
+func ground_point(at: Vector3) -> Vector3:
+	var query := PhysicsRayQueryParameters3D.create(at+Vector3(0,1.4,0),at-Vector3(0,1.6,0),1)
+	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty(): return at
+	return Vector3(at.x,float(hit.position.y)+0.14,at.z)
 
 func tray_count() -> int:
 	var count:=0

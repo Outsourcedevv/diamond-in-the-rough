@@ -2,7 +2,7 @@
 
 **One real diamond. An unreasonable amount of rubbish.**
 
-A playable native first-person 3D mining game built with Godot 4.6.2. Start with an old pickaxe at the foot of a big block mountain, mine ore, buy better tools and explosives, and blast your way to the one genuine diamond hidden in its core. Mine alone or share the mountain with up to three friends.
+A playable native first-person 3D mining game built with Godot 4.6.2. Start with an old pickaxe at the foot of a big snow-capped mountain, mine ore, buy better tools and explosives, and blast your way to the one genuine diamond hidden in its core. Mine alone or share the mountain with up to three friends.
 
 ![The mountain claim and first-session guide](screenshots/01_workshop.png)
 
@@ -12,7 +12,7 @@ A playable native first-person 3D mining game built with Godot 4.6.2. Start with
 
 ## Features
 
-- A 72 × 64 m, 28-block-tall mountain of about 30,000 breakable blocks: grass, dirt, stone, granite and bedrock, with a snowcap.
+- A 72 × 64 m mountain rising about 39 m to a snowy summit: grassy foothills, bare rocky upper slopes and cliffs. Underneath its smooth surface are about 29,000 diggable 1 m cells of soil, stone, granite and bedrock, so tunnels and blast craters carve smooth pits into the rock.
 - Nine ores in veins that get richer with depth: coal, copper, iron, silver, gold, amethyst, emerald, sapphire and ruby.
 - One genuine diamond buried deep in the core among about 150 look-alike clear crystals, plus fossils and curiosities to collect.
 - Hold-to-mine pickaxe with crack feedback, then a steel pickaxe and a power drill.
@@ -92,8 +92,8 @@ The mountain, camp geometry, materials and sound effects are generated in code. 
 | --- | --- |
 | `game/main.gd` | Session orchestration, interactions and visible objects |
 | `game/state.gd` | Authoritative mining, blasting, items, purchases, saves and networking |
-| `game/mountain.gd` | Deterministic block mountain: shape, layers, hardness and ore veins |
-| `game/mountain_view.gd` | Chunked block meshes, collision, crack overlay and sonar pings |
+| `game/mountain.gd` | Deterministic mountain: smooth shape, diggable cells, layers, hardness and ore veins |
+| `game/mountain_view.gd` | Smooth chunked rock surface built on a worker thread, collision, rock/grass/snow shader and sonar pings |
 | `game/player.gd` | First-person movement, tools and held-object inspection |
 | `game/workshop.gd` | Camp, scenery, physical equipment displays, stations and explosive models |
 | `game/interface.gd` | Menus, settings, ledger and HUD |
@@ -108,7 +108,7 @@ Read [DEVELOPMENT.md](DEVELOPMENT.md) for architecture and reproducible commands
 
 ## Prototype scope
 
-This is a playable prototype. Steamworks, invitations, achievements, internet matchmaking, relay/NAT traversal, Opus and full ragdolls are not implemented. The mountain is made of 1 m blocks without overhang physics: blocks never fall, and loose finds settle onto the highest block beneath them. See the development notes for these simplifications.
+This is a playable prototype. Steamworks, invitations, achievements, internet matchmaking, relay/NAT traversal, Opus and full ragdolls are not implemented. Digging works on 1 m cells under a smooth surface. There are no cave-ins: rock never falls, and loose finds settle onto the rock beneath them. See the development notes for these simplifications.
 
 ## License notices
 

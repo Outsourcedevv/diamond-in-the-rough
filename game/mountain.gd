@@ -5,11 +5,11 @@ extends RefCounted
 ## and by which cells have been mined.
 
 const SIZE_X: int = 72
-const SIZE_Y: int = 34
+const SIZE_Y: int = 42
 const SIZE_Z: int = 64
 const CELL_COUNT: int = SIZE_X * SIZE_Y * SIZE_Z
 const ORIGIN := Vector3(-36.0, 0.0, -79.0)
-const SNOW_LINE: int = 18
+const SNOW_LINE: int = 22
 
 # Cell codes. 0 is open air; everything else is a solid block.
 const AIR: int = 0
@@ -25,9 +25,10 @@ const ORE_CODES: Dictionary = {"coal": 10, "copper": 11, "iron": 12, "silver": 1
 const ORE_NAMES: Dictionary = {"coal": "Coal", "copper": "Copper ore", "iron": "Iron ore", "silver": "Silver ore", "gold": "Gold nugget", "amethyst": "Amethyst", "emerald": "Emerald", "sapphire": "Sapphire", "ruby": "Ruby"}
 const ORE_VALUES: Dictionary = {"coal": 2, "copper": 4, "iron": 6, "silver": 11, "gold": 20, "amethyst": 28, "emerald": 38, "sapphire": 45, "ruby": 55}
 const ORE_ORDER: Array[String] = ["coal", "copper", "iron", "silver", "gold", "amethyst", "emerald", "sapphire", "ruby"]
-const BLOCK_NAMES: Dictionary = {1: "Grass", 2: "Snow", 3: "Dirt", 4: "Stone", 5: "Granite", 6: "Bedrock", 20: "Crystal vein", 21: "Fossil seam"}
+const BLOCK_NAMES: Dictionary = {1: "Turf", 2: "Snowpack", 3: "Soil", 4: "Stone", 5: "Granite", 6: "Bedrock", 20: "Crystal vein", 21: "Fossil seam"}
 
 var heights := PackedByteArray()
+var smooth := PackedFloat32Array()
 
 
 func _init() -> void:
@@ -45,7 +46,7 @@ func _generate_heights() -> void:
 	ridges.fractal_type = FastNoiseLite.FRACTAL_RIDGED
 	ridges.fractal_octaves = 3
 	# One main summit with two shoulders, roughened by crags and ridgelines.
-	var peaks: Array = [[Vector2(37.0, 30.0), Vector2(31.0, 29.0), 30.0], [Vector2(17.0, 22.0), Vector2(15.0, 14.0), 17.0], [Vector2(57.0, 40.0), Vector2(14.0, 16.0), 19.0]]
+	var peaks: Array = [[Vector2(37.0, 29.0), Vector2(31.0, 28.0), 38.0], [Vector2(17.0, 21.0), Vector2(15.0, 14.0), 22.0], [Vector2(57.0, 40.0), Vector2(14.0, 16.0), 24.0]]
 	var raw: Array[float] = []
 	raw.resize(SIZE_X * SIZE_Z)
 	for z: int in range(SIZE_Z):
@@ -58,39 +59,65 @@ func _generate_heights() -> void:
 				var dz: float = (float(z) + 0.5 - centre.y) / radius.y
 				var d: float = sqrt(dx * dx + dz * dz)
 				if d < 1.0:
-					h = maxf(h, float(peak[2]) * pow(1.0 - d, 1.05))
-			# Fade texture out at the rim so the mountain still meets the valley floor.
+					h = maxf(h, float(peak[2]) * pow(1.0 - d, 1.2))
+			# Fade texture out at the rim so the mountain still meets the valley floor;
+			# ridgelines and crags grow stronger towards the summit.
 			var rim: float = clampf(h / 6.0, 0.0, 1.0)
 			if h > 0.0:
-				h += (noise.get_noise_2d(float(x), float(z)) * 6.5 + ridges.get_noise_2d(float(x), float(z)) * 5.0 + 1.5) * rim
+				h += (noise.get_noise_2d(float(x), float(z)) * 5.0 + 1.0) * rim + ridges.get_noise_2d(float(x), float(z)) * (3.0 + h * 0.22) * rim
+			# Taper to the valley floor before the grid ends so no edge is cut off.
+			var border: float = float(mini(mini(x, SIZE_X - 1 - x), mini(z, SIZE_Z - 1 - z)))
+			h *= clampf((border - 1.0) / 5.0, 0.0, 1.0)
 			raw[x + z * SIZE_X] = clampf(h, 0.0, float(SIZE_Y - 2))
-	var h_int: Array[int] = []
-	h_int.resize(raw.size())
-	for i: int in range(raw.size()):
-		h_int[i] = int(round(raw[i]))
-	# Limit slopes so every face can be climbed one block at a time.
+	# Limit slopes so the lower mountain stays walkable, while the upper slopes may
+	# steepen into rocky cliffs. Then soften everything into a natural form.
 	for _pass: int in range(2):
 		for z: int in range(SIZE_Z):
 			for x: int in range(SIZE_X):
-				var best: int = h_int[x + z * SIZE_X]
-				for offset: Vector2i in [Vector2i(-1, 0), Vector2i(0, -1)]:
-					best = mini(best, _column(h_int, x + offset.x, z + offset.y) + 1)
-				h_int[x + z * SIZE_X] = best
+				var best: float = raw[x + z * SIZE_X]
+				for step: Vector3 in [Vector3(-1, 0, 1.0), Vector3(0, -1, 1.0), Vector3(-1, -1, 1.35), Vector3(1, -1, 1.35)]:
+					var below: float = _column(raw, x + int(step.x), z + int(step.y))
+					best = minf(best, below + step.z * _slope_limit(below))
+				raw[x + z * SIZE_X] = best
 		for z: int in range(SIZE_Z - 1, -1, -1):
 			for x: int in range(SIZE_X - 1, -1, -1):
-				var best: int = h_int[x + z * SIZE_X]
-				for offset: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
-					best = mini(best, _column(h_int, x + offset.x, z + offset.y) + 1)
-				h_int[x + z * SIZE_X] = best
+				var best: float = raw[x + z * SIZE_X]
+				for step: Vector3 in [Vector3(1, 0, 1.0), Vector3(0, 1, 1.0), Vector3(1, 1, 1.35), Vector3(-1, 1, 1.35)]:
+					var below: float = _column(raw, x + int(step.x), z + int(step.y))
+					best = minf(best, below + step.z * _slope_limit(below))
+				raw[x + z * SIZE_X] = best
+	smooth.resize(SIZE_X * SIZE_Z)
 	heights.resize(SIZE_X * SIZE_Z)
-	for i: int in range(h_int.size()):
-		heights[i] = h_int[i]
+	for z: int in range(SIZE_Z):
+		for x: int in range(SIZE_X):
+			var total: float = 0.0
+			var weight: float = 0.0
+			for dz: int in range(-1, 2):
+				for dx: int in range(-1, 2):
+					var w: float = 2.0 if dx == 0 and dz == 0 else (1.0 if dx == 0 or dz == 0 else 0.6)
+					total += _column(raw, x + dx, z + dz) * w
+					weight += w
+			var h: float = total / weight
+			smooth[x + z * SIZE_X] = h
+			heights[x + z * SIZE_X] = clampi(roundi(h), 0, SIZE_Y - 2)
 
 
-func _column(values: Array[int], x: int, z: int) -> int:
+func _column(values: Array[float], x: int, z: int) -> float:
 	if x < 0 or z < 0 or x >= SIZE_X or z >= SIZE_Z:
-		return 0
+		return 0.0
 	return values[x + z * SIZE_X]
+
+
+## Rise per metre allowed above a given height: gentle foothills, steep summit.
+func _slope_limit(height_below: float) -> float:
+	return 0.85 + clampf((height_below - 9.0) / 10.0, 0.0, 1.0) * 1.7
+
+
+## The continuous ground height of a column, used to draw a natural surface.
+func smooth_height(x: int, z: int) -> float:
+	if x < 0 or z < 0 or x >= SIZE_X or z >= SIZE_Z:
+		return 0.0
+	return smooth[x + z * SIZE_X]
 
 
 func height(x: int, z: int) -> int:

@@ -19,8 +19,8 @@ or skip it. Completed guidance stays completed on your PC. Replays direct full
 hands to safe storage. A mountain with every find already dug out instead shows
 help for stored candidates and certification, preserving your progress.
 
-Your first shift: walk to the mountain behind the camp, aim at a block and hold
-left click. Speckled blocks are ore; breaking one puts it straight into your
+Your first shift: walk to the mountain behind the camp, aim at the rock and hold
+left click. Rock flecked with colour is ore; mining it puts it straight into your
 satchel. Carry the satchel to the Scrap Exchange and press E to sell. The
 steel pickaxe costs $60. The HUD and Tab journal show your next goal, your
 satchel, ore prices and the diamond objective.
@@ -30,7 +30,7 @@ satchel, ore prices and the diamond objective.
 ```text
 WASD                 Move
 Mouse                Look; rotate the held object during inspection
-Shift / Space        Move faster / jump (climbs one block at a time)
+Shift / Space        Move faster / jump
 E                    Pick up a find, use a station or buy a displayed tool
 Left mouse (hold)    Mine with the pickaxe or drill, or throw the selected explosive
 Right mouse          Enter or finish close inspection
@@ -55,17 +55,19 @@ Pranks preserve the diamond, equipment and shared money.
 
 ## The mountain
 
-The mountain is made of 1 metre blocks. Grass and snow sit on top, dirt
-beneath, then stone. Deep inside is granite, which the old pickaxe cannot
-break, and the thick interior rests on unbreakable bedrock. The crosshair
-prompt names the block you are aiming at, its ore price, and whether your tool
-can break it. Hold left click to keep swinging; cracks show your progress.
+Grassy foothills rise into bare rock, cliffs and a snowy summit. You can walk up
+the lower slopes; the steep upper faces need digging or blasting. Each swing of
+the pickaxe breaks away about a metre of rock: soil near the surface, then
+stone. Deep inside is granite, which the old pickaxe cannot break, and the
+thick interior rests on unbreakable bedrock. The crosshair prompt names the
+rock you are aiming at, its ore price, whether your tool can break it, and
+your progress. Hold left click to keep swinging; chips fly off with each hit.
 
 Ore grows in veins and gets richer the deeper you dig:
 
 ```text
 Coal $2 · Copper ore $4 · Iron ore $6       near the surface
-Silver ore $11 · Gold nugget $20            a few blocks down
+Silver ore $11 · Gold nugget $20            a few metres down
 Amethyst $28 · Emerald $38                  deep
 Sapphire $45 · Ruby $55                     deepest, near the core
 ```
@@ -74,7 +76,7 @@ Ore goes straight into your satchel. A full satchel will not take more ore:
 sell it at the exchange first. Explosions that find more ore than you can
 carry lose the excess, and the message says how much.
 
-Glittering white blocks are crystal veins; pale seams hold fossils and other
+Glittering white veins hold crystals; pale seams hold fossils and other
 curiosities. When you break one, the find pops out and drops onto the rock
 below. Walk over it to pick it up, or aim at it and press E. Finds never get
 destroyed: if the rock beneath them is mined away, they settle further down.
@@ -91,7 +93,7 @@ $110   Big satchel: carry 90 ore and 10 finds (instead of 30 and 4).
 $150   Loupe & lamp: clearer facet, inclusion and optical inspection clues.
 $180   Dynamite: press 2, left click to throw. Blasts a 2.4 m crater.
 $300   Ore magnet: pulls loose finds within 7 m into your hands.
-$420   Power drill: hold left click to drill several blocks a second.
+$420   Power drill: hold left click to drill through rock at speed.
 $750   TNT: press 3 to throw. Blasts a 3.9 m crater.
 $1000  Crystal sonar: pings buried crystal veins within 12 m through rock.
 $2400  Mountain Buster: press 4 to throw. Blasts a 6.5 m crater.
@@ -135,7 +137,7 @@ game first, return to the title, then choose Co-op and Host game.
 On another PC, choose Co-op, enter the host's local IP address, use the same
 port and choose Join game. Allow the game through Windows Firewall on the
 network being used. The host must stay running; money, purchases, finds and
-every mined block are shared, and each player carries their own satchel. A
+every bit of mined rock are shared, and each player carries their own satchel. A
 player who leaves has their satchel ore sold into the shared funds. There are
 no AI teammates.
 
@@ -174,7 +176,7 @@ Voice is live only. The game does not save recordings or include audio in saves.
 
 ## Save and recovery
 
-Solo and host play saves money, equipment, collections, every mined block,
+Solo and host play saves money, equipment, collections, all mined rock,
 find locations, the host's satchel and the diamond's generated location.
 Purchases and sales save immediately; mining is saved every few seconds and
 whenever you leave. The client does not overwrite its own save with the
@@ -198,10 +200,10 @@ Text retains its proportions; long settings and help pages scroll vertically.
 ## Prototype scope
 
 The mountain, camp, materials and sound effects are generated for this
-prototype. The mountain holds about 30,000 blocks drawn in chunks; only the
-chunks touched by mining or a blast are rebuilt. Blocks never fall and there
-are no cave-ins: unsupported blocks stay where they are. Explosions remove
-blocks within a sphere and do not damage players. Prank reactions use brief
+prototype. Digging works on about 29,000 cells of 1 metre under a smooth
+rock surface; only the parts touched by mining or a blast are rebuilt. There
+are no cave-ins: unsupported rock stays where it is. Explosions remove rock
+within a sphere and do not damage players. Prank reactions use brief
 physics/animation responses rather than full character ragdolls.
 
 This build contains no Steamworks integration. A production release still needs

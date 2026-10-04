@@ -811,7 +811,7 @@ func _blast(peer_id: int, fuse: int, location: Variant) -> void:
 	var ore_count: int = 0
 	for kind in result.gained:
 		ore_count += int(result.gained[kind])
-	var message: String = "%s cleared %d blocks · +%d ore" % [str(upgrade_names[tier]), result.cells.size(), ore_count]
+	var message: String = "%s blasted out %d m³ of rock · +%d ore" % [str(upgrade_names[tier]), result.cells.size(), ore_count]
 	if not result.released.is_empty():
 		message += " · %d %s broke loose" % [result.released.size(), "find" if result.released.size() == 1 else "finds"]
 	if int(result.lost) > 0:
@@ -1374,8 +1374,19 @@ func _on_peer_connected(id: int) -> void:
 			multiplayer.multiplayer_peer.disconnect_peer(id)
 		return
 	players[id] = _player_template(id)
+	_steady_voice(id)
 	peer_joined.emit(id)
 	_commit("Player %d joined the claim." % id)
+
+
+## ENet thins out unreliable packets when a peer acknowledges slowly; a brief hitch
+## (for example while the mountain loads) would silence voice for seconds. Voice is
+## tiny, so keep its throttle fully open.
+func _steady_voice(peer_id: int) -> void:
+	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		var link: ENetPacketPeer = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(peer_id)
+		if link != null:
+			link.throttle_configure(5000, 32, 0)
 
 
 func _on_peer_disconnected(id: int) -> void:
@@ -1399,6 +1410,7 @@ func _on_peer_disconnected(id: int) -> void:
 
 func _on_connected_to_server() -> void:
 	_connecting = false
+	_steady_voice(1)
 	connection_status.emit("Connected to shared claim · player %d" % local_id())
 	_request_snapshot.rpc_id(1)
 

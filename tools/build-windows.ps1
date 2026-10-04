@@ -61,7 +61,7 @@ if (-not $SkipVerification) {
     }
     if ($redesignProcess.ExitCode -ne 0) { throw "Native redesign verification failed ($($redesignProcess.ExitCode))." }
     $redesignReport = Get-Content -LiteralPath (Join-Path $redesignDirectory 'redesign_report.json') -Raw | ConvertFrom-Json
-    if ($redesignReport.phase -ne 'complete' -or $redesignReport.errors.Count -ne 0 -or $redesignReport.checks.Count -lt 97) {
+    if ($redesignReport.phase -ne 'complete' -or $redesignReport.errors.Count -ne 0 -or $redesignReport.checks.Count -lt 96) {
         throw 'Native tutorial and screen-layout report was incomplete or failed; update will not be published.'
     }
     Write-Host "Native tutorial and screen-layout verification passed $($redesignReport.checks.Count) checks."

@@ -223,16 +223,16 @@ func solo() -> void:
 	for code in game.state.cells:
 		if code!=0: solid+=1
 		if code>=10 and code<20: ore+=1
-	check(tallest>=24 and solid>20000,"The mountain is big: %d blocks tall and %d blocks of rock" % [tallest,solid])
+	check(tallest>=30 and solid>20000,"The mountain is big: %d blocks tall and %d blocks of rock" % [tallest,solid])
 	check(ore>2000,"The mountain holds %d ore blocks across several ore types" % ore)
 	var peak := Vector3i(37,0,30)
-	var peak_top: float=float(game.state.mountain.height(peak.x,peak.z))
+	var peak_top: float=game.state.mountain.smooth_height(peak.x,peak.z)
 	var probe: Vector3=MountainScript.cell_center(MountainScript.index(peak.x,0,peak.z))
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	var hit: Dictionary=game.player.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(probe.x,60,probe.z),Vector3(probe.x,-5,probe.z),1))
-	if hit.is_empty() or absf(hit.position.y-peak_top)>=0.02: print("SUMMIT_PROBE ",hit.get("position","none")," expected ",peak_top," collider ",hit.get("collider"))
-	check(not hit.is_empty() and bool(hit.collider.get_meta("mountain",false)) and absf(hit.position.y-peak_top)<0.02,"The summit is solid to walk on at its true height")
+	if hit.is_empty() or absf(hit.position.y-peak_top)>=0.6: print("SUMMIT_PROBE ",hit.get("position","none")," expected ",peak_top," collider ",hit.get("collider"))
+	check(not hit.is_empty() and bool(hit.collider.get_meta("mountain",false)) and absf(hit.position.y-peak_top)<0.6,"The summit is solid to walk on at its true height")
 	await screenshot("01_mountain")
 	await go(Vector3(0.9,0.1,3.7))
 	game.player.yaw=0.0
@@ -403,6 +403,31 @@ func solo() -> void:
 	game.state.save_game()
 	check(game.state.load_game() and game.state.certified,"Certification ending survives save/load")
 
+## Picks up a loose find, blasting one free from the mountain if none is lying around.
+func obtain_find() -> void:
+	for attempt in range(3):
+		var loose:=-1
+		for gem in game.state.gems.values():
+			if gem.stage=="loose": loose=int(gem.id); break
+		if loose<0:
+			var buried:=-1
+			for gem in game.state.gems.values():
+				if gem.stage=="buried": buried=int(gem.cell); break
+			if buried<0: return
+			var c: Vector3=MountainScript.cell_center(buried)
+			await go(c+Vector3(0,3,2))
+			var origin: Vector3=game.player.position+Vector3(0,1.4,0)
+			last_fuse=-1
+			await act("throw",{"tier":"dynamite","pos":[origin.x,origin.y,origin.z],"vel":[0,0,-3]})
+			if not await wait_for(func(): return last_fuse>=0,5.0): continue
+			await act("blast",{"fuse":last_fuse,"pos":[c.x,c.y,c.z]})
+			await wait_for(func(): return game.state.gems.values().any(func(g): return g.stage=="loose"),5.0)
+			continue
+		var at: Array=game.state.gems[loose].pos
+		await go(Vector3(float(at[0]),float(at[1])+0.1,float(at[2])+1.0))
+		await act("pick",{"id":loose})
+		if await wait_for(func(): return game.state.held_ids().has(loose),3.0): return
+
 func host_probe() -> void:
 	game.start_session("solo","",24681,true)
 	game.state.test_mode=true
@@ -537,12 +562,7 @@ func client_probe() -> void:
 	check(game.state.money==previous-150,"Duplicate purchase does not spend money twice")
 	# Keep one find in hand so the disconnect rescue can be observed by the host.
 	if game.state.held_ids().is_empty():
-		for gem in game.state.gems.values():
-			if gem.stage=="loose":
-				var at: Array=gem.pos
-				await go(Vector3(float(at[0]),float(at[1])+0.1,float(at[2])+1.0))
-				await act("pick",{"id":int(gem.id)})
-				break
+		await obtain_find()
 	if game.state.ore_total()==0:
 		var more: int=surface_cell(true,true)
 		await stand_on(more)
