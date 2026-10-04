@@ -7,6 +7,9 @@ signal update_ready
 const REPOSITORY := "Outsourcedevv/diamond-in-the-rough"
 const API := "https://api.github.com/repos/" + REPOSITORY
 const REPO_URL := "https://github.com/" + REPOSITORY
+## Public download links for the newest release. Like Space Goobers, these need no
+## sign-in once the releases are public, so every player updates automatically.
+const PUBLIC_DOWNLOAD := REPO_URL + "/releases/latest/download/"
 const ASSET := "DIAMOND_IN_THE_ROUGH_Update.zip"
 const MAX_PACKAGE := 160 * 1024 * 1024
 const CHECK_INTERVAL := 300.0
@@ -35,6 +38,8 @@ var _cache := ""
 var _elapsed := 0.0
 var _progress_tick := 0.0
 var _notified_build := -1
+var _public := false
+var _public_failed := false
 
 func build(owner_game: Node) -> void:
 	game=owner_game
@@ -120,6 +125,7 @@ func use_github_cli() -> void:
 		_status("auth_required","GitHub CLI was not found. Sign in with GitHub CLI, or use a read-only token below.")
 		return
 	_mode="cli"
+	_public_failed=true
 	check_for_updates()
 
 func set_session_token(token: String) -> void:
@@ -130,6 +136,7 @@ func set_session_token(token: String) -> void:
 		return
 	_session_token=clean
 	_mode="http"
+	_public_failed=true
 	check_for_updates()
 
 func check_for_updates() -> void:
@@ -140,6 +147,13 @@ func check_for_updates() -> void:
 	status.available_version=""
 	status.progress=0.0
 	_status("checking","Checking GitHub for a completed Windows build…")
+	# Try the public download first; signing in is only a fallback for private releases.
+	if not test_mode and _session_token.is_empty() and not _public_failed:
+		_public = true
+		DirAccess.make_dir_recursive_absolute(_cache.path_join("metadata"))
+		_request(PUBLIC_DOWNLOAD+"latest.json","manifest",_cache.path_join("metadata/latest.json"))
+		return
+	_public = false
 	if _mode=="cli":
 		_start_cli(["api","repos/"+REPOSITORY+"/releases/latest","--hostname","github.com"],"release")
 	else:
@@ -223,6 +237,7 @@ func _request(url: String,stage: String,path: String="",redirect: bool=false) ->
 static func trusted_url(url: String,allow_local: bool=false) -> bool:
 	if allow_local and url.begins_with("http://127.0.0.1:"): return true
 	if url.begins_with(API+"/"): return true
+	if url.begins_with(REPO_URL+"/releases/"): return true
 	# Signed asset redirects are fetched without Authorization headers.
 	return url.begins_with("https://release-assets.githubusercontent.com/") or url.begins_with("https://objects.githubusercontent.com/")
 
@@ -240,6 +255,15 @@ func _http_finished(result: int,code: int,headers: PackedStringArray,body: Packe
 		return
 	if code in [401,403,404] and stage=="release":
 		_status("auth_required","This repository is private. Use your GitHub CLI sign-in or a read-only token for this session.")
+		return
+	if _public and stage=="manifest" and (result!=HTTPRequest.RESULT_SUCCESS or code!=200):
+		# The releases are not public (or GitHub is unreachable): fall back to signing in.
+		_public = false
+		_public_failed = true
+		if _mode=="cli" or not _session_token.is_empty():
+			check_for_updates()
+		else:
+			_status("auth_required","Updates could not be downloaded: this game's releases are private. Ask the owner to make them public, or sign in below.")
 		return
 	if result!=HTTPRequest.RESULT_SUCCESS or code!=200:
 		_status("error","The update request failed. Your installed game is unchanged; try again later.")
@@ -293,6 +317,9 @@ static func manifest_valid(data: Dictionary) -> bool:
 
 func _accept_manifest(data: Dictionary) -> void:
 	var asset:=asset_info(ASSET)
+	if _public:
+		# Public links carry no release listing; the manifest's size and SHA-256 are checked on download.
+		asset = {"size": int(data.get("size",0))}
 	if not manifest_valid(data) or asset.is_empty() or int(asset.get("size",0))!=int(data.get("size",0)):
 		_status("error","The release package or checksum manifest is invalid. Nothing was installed.")
 		return
@@ -321,8 +348,10 @@ func download_update() -> void:
 	DirAccess.make_dir_recursive_absolute(directory)
 	package_path=directory.path_join(ASSET)
 	status.progress=0.0
-	_status("downloading","Downloading the new build. You can keep sorting while it downloads.")
-	if _mode=="cli":
+	_status("downloading","Downloading the new build. You can keep playing while it downloads.")
+	if _public:
+		_request(PUBLIC_DOWNLOAD+ASSET,"package",package_path)
+	elif _mode=="cli":
 		_start_cli(["release","download",str(release.tag_name),"--repo",REPOSITORY,"--pattern",ASSET,"--dir",directory,"--clobber"],"package")
 	else:
 		_request(asset_api_url(asset_info(ASSET)),"package",package_path)
