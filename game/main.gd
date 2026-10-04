@@ -1079,8 +1079,10 @@ func recover_items() -> void:
 	state.action("recover")
 
 ## Finds rest on whole blocks in the rules; draw them on the smooth surface instead.
+## The smooth surface rounds off narrow holes, so look down from well above the
+## find: it then always sits on rock the player can see, never hidden inside it.
 func ground_point(at: Vector3) -> Vector3:
-	var query := PhysicsRayQueryParameters3D.create(at+Vector3(0,1.4,0),at-Vector3(0,1.6,0),1)
+	var query := PhysicsRayQueryParameters3D.create(at+Vector3(0,3.0,0),at-Vector3(0,1.6,0),1)
 	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty(): return at
 	return Vector3(at.x,float(hit.position.y)+0.14,at.z)

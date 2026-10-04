@@ -196,6 +196,16 @@ func mark_cells(list: PackedInt32Array) -> void:
 					if _chunks.has(key):
 						_dirty[key] = true
 
+func _exit_tree() -> void:
+	# Never leave a surface computation running while the game shuts down.
+	if _task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_task)
+		_task = -1
+
+## True once every requested surface rebuild has been applied.
+func idle() -> bool:
+	return _dirty.is_empty() and _task < 0
+
 func flush() -> void:
 	_finish_task()
 	for key: Vector3i in _dirty.keys():
