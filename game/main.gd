@@ -94,6 +94,7 @@ func _ready() -> void:
 	for update_arg in OS.get_cmdline_user_args():
 		if update_arg.begins_with("--verify"): updater.test_mode=true
 	updater.status_changed.connect(ui.update_updates)
+	updater.update_ready.connect(on_update_ready)
 	updater.build(self)
 	tutorial=TutorialScript.new()
 	add_child(tutorial)
@@ -203,6 +204,7 @@ func return_to_menu() -> void:
 	ui.show_menu(false)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	for id in avatars.keys(): remove_avatar(id)
+	if updater.status.phase=="ready" and not updater.test_mode and bool(settings.get("auto_updates",true)): on_update_ready()
 
 func ui_action(kind: String, args: Dictionary) -> void:
 	match kind:
@@ -224,6 +226,17 @@ func ui_action(kind: String, args: Dictionary) -> void:
 		"close_modal": resume_game()
 		_: state.action(kind, args)
 	if ui.menu_visible: Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+## Installs a downloaded update without interrupting play: immediately at the
+## title screen, otherwise when the player returns to the menu or closes the game.
+func on_update_ready() -> void:
+	if updater.test_mode or not bool(settings.get("auto_updates",true)): return
+	if not active:
+		ui.toast("Installing the new version and restarting…")
+		await get_tree().create_timer(1.5).timeout
+		if not active: install_update()
+		return
+	ui.toast("New version downloaded. It installs when you return to the menu or close the game.")
 
 func install_update() -> void:
 	if updater.status.phase!="ready": return
@@ -1113,4 +1126,7 @@ func capture_later() -> void:
 func _notification(what: int) -> void:
 	if what==NOTIFICATION_WM_CLOSE_REQUEST:
 		if active and is_instance_valid(state) and state.is_authority(): state.save_game()
+		# A downloaded update installs on the way out and starts the new version.
+		if is_instance_valid(updater) and updater.status.phase=="ready" and not updater.test_mode and bool(settings.get("auto_updates",true)):
+			updater.prepare_install()
 		get_tree().quit()
