@@ -3,6 +3,8 @@
 local DiamondShape = {}
 function DiamondShape.attach(root: BasePart)
 	root.Transparency = 1
+	root.Reflectance = 0
+	root.Material = Enum.Material.SmoothPlastic
 	local scale = root.Size.X
 	local facets = Instance.new("Folder")
 	facets.Name = "Facets"

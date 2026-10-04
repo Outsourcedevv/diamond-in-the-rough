@@ -71,6 +71,8 @@ return Config
 local DiamondShape = {}
 function DiamondShape.attach(root: BasePart)
 	root.Transparency = 1
+	root.Reflectance = 0
+	root.Material = Enum.Material.SmoothPlastic
 	local scale = root.Size.X
 	local facets = Instance.new("Folder")
 	facets.Name = "Facets"
@@ -2918,8 +2920,7 @@ function FirstPerson.start()
 			if face:IsA("BasePart") then face.LocalTransparencyModifier = if hidden then 1 else 0 end
 		end
 	end
-	local gem = part("HeldDiamond", worldDiamond.Size, worldDiamond.Color, Enum.Material.Glass)
-	gem.Reflectance = 0.35
+	local gem = part("HeldDiamond", worldDiamond.Size, worldDiamond.Color, Enum.Material.SmoothPlastic)
 	DiamondShape.attach(gem)
 	DiamondShape.visible(gem, false)
 	local shine = Instance.new("PointLight")
@@ -2928,7 +2929,8 @@ function FirstPerson.start()
 	shine.Brightness = 0.7
 	shine.Enabled = false
 	shine.Parent = gem
-	gem.Parent = rig
+	-- Keep the complete gem out of the rendered scene until it is held.
+	gem.Parent = nil
 	local hiddenArms: { [BasePart]: number } = {}
 	local armNames = { RightHand = true, RightLowerArm = true, RightUpperArm = true, LeftHand = true, LeftLowerArm = true, LeftUpperArm = true, ["Right Arm"] = true, ["Left Arm"] = true }
 	local function restoreArms()
@@ -2982,6 +2984,8 @@ function FirstPerson.start()
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if camera == nil or character == nil or humanoid == nil or humanoid.Health <= 0 then
 			rig.Parent = nil
+			gem.Parent = nil
+			shine.Enabled = false
 			restoreArms()
 			hideWorld(false)
 			return
@@ -3067,10 +3071,16 @@ function FirstPerson.start()
 				* CFrame.Angles(math.rad(-35 * grip), math.rad(h.side * 20 * grip), math.rad(h.side * (15 + 35 * grip)))
 
 		end
-		DiamondShape.visible(gem, holding and lift > 0.3)
-		shine.Enabled = holding and lift > 0.3
-		local palm = hands[2].hand.CFrame
-		gem.CFrame = palm * CFrame.new(0, 0.25, -0.14) * CFrame.Angles(0, math.rad(22.5), 0)
+		local showGem = holding and lift > 0.3
+		DiamondShape.visible(gem, showGem)
+		shine.Enabled = showGem
+		if showGem then
+			local palm = hands[2].hand.CFrame
+			gem.CFrame = palm * CFrame.new(0, 0.25, -0.14) * CFrame.Angles(0, math.rad(22.5), 0)
+			gem.Parent = rig
+		else
+			gem.Parent = nil
+		end
 	end)
 end
 
