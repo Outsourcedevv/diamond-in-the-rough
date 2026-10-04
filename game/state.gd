@@ -1,7 +1,7 @@
 extends Node
 class_name RoughState
 
-## The server owns every item transition and purchase. Clients submit intentions.
+## The server owns every block, item transition and purchase. Clients submit intentions.
 ## IDs and the seeded diamond are preserved even after an item has been sold.
 signal changed
 signal notice(text: String)
@@ -10,19 +10,31 @@ signal peer_left(id: int)
 signal pose_received(id: int, position: Vector3, yaw: float, pitch: float)
 signal voice_received(peer_id: int, sequence: int, payload: PackedByteArray)
 signal connection_status(text: String)
+signal cells_changed(cells: PackedInt32Array)
+signal world_reset
+signal throw_spawned(peer_id: int, tier: String, position: Vector3, velocity: Vector3, fuse: int)
+signal blasted(fuse: int, position: Vector3, tier: String)
 
-const SAVE_VERSION: int = 1
-const GEM_COUNT: int = 720
-const SECTOR_COUNT: int = 12
+const MountainScript = preload("res://game/mountain.gd")
+const SAVE_VERSION: int = 2
+const GEM_COUNT: int = 220
+const CRYSTAL_COUNT: int = 150
 const MAX_PLAYERS: int = 4
+const MINING_REACH: float = 5.6
 const VOICE_FRAME_BYTES: int = 320 # 20 ms of mono 16 kHz G.711 mu-law audio.
 const VOICE_RANGE_METRES: float = 12.0
 const VOICE_MAX_SEQUENCE: int = 2147483647
 const VOICE_PACKETS_PER_SECOND: float = 60.0
 const VOICE_BURST_PACKETS: float = 6.0
-const COLLECTIBLE_NAMES: Array[String] = ["Disco pebble", "Royal plastic emerald", "Forbidden gummy", "Tiny trophy", "Space potato", "Emotional support ruby", "Executive button", "Suspiciously fancy marble"]
+const COLLECTIBLE_NAMES: Array[String] = ["Ammonite fossil", "Trilobite", "Dinosaur tooth", "Petrified egg", "Fossil fern", "Purple geode", "Gold-rush coin", "Old miner's lamp"]
+const ODDITY_NAMES: Array[String] = ["Fool's gold", "Rusty miner's helmet", "Suspicious rock-shaped rock", "Lost lunchbox"]
+const EXPLOSIVES: Dictionary = {
+	"dynamite": {"radius": 2.4, "fuse": 2.2, "cooldown": 2.5},
+	"tnt": {"radius": 3.9, "fuse": 2.8, "cooldown": 5.0},
+	"buster": {"radius": 6.5, "fuse": 3.6, "cooldown": 12.0}
+}
 
-var money: int = 22
+var money: int = 0
 var gems: Dictionary = {}
 var upgrades: Array[String] = []
 var collection: Array[String] = []
@@ -33,19 +45,26 @@ var players: Dictionary = {}
 var seed_value: int = 0
 var certification_step: int = 0
 var certification_id: int = -1
-var prices: Dictionary = {"scoop": 70, "trays": 100, "loupe": 145, "wash": 180, "sorter": 330, "vacuum": 440, "conveyor": 560, "scanner": 850}
+var prices: Dictionary = {"steel_pick": 60, "satchel": 110, "loupe": 150, "dynamite": 180, "magnet": 300, "drill": 420, "tnt": 750, "sonar": 1000, "buster": 2400}
+var upgrade_names: Dictionary = {"steel_pick": "Steel pickaxe", "satchel": "Big satchel", "loupe": "Loupe & lamp", "dynamite": "Dynamite", "magnet": "Ore magnet", "drill": "Power drill", "tnt": "TNT", "sonar": "Crystal sonar", "buster": "Mountain Buster"}
 var benefits: Dictionary = {
-	"scoop": "Carry 9 objects and scoop bigger batches.",
-	"trays": "Carry 14 objects; expanded candidate storage.",
+	"steel_pick": "Mines twice as fast and cuts through granite.",
+	"satchel": "Carry 90 ore and 10 finds.",
 	"loupe": "Sharper optical clues under the inspection lamp.",
-	"wash": "Clean discoveries; clean recyclables sell for 60% more.",
-	"sorter": "Process 18 objects per pull; candidates go safely to the tray.",
-	"vacuum": "Gather loose objects from a wider area, or fill your hands from a sector.",
-	"conveyor": "Double sorter throughput to 36 objects per pull.",
-	"scanner": "Flag promising objects in a 24-object local batch. Inspect to identify."
+	"dynamite": "Press 2 to throw. Blasts a 2.4 m crater.",
+	"magnet": "Pulls loose finds within 7 m into your hands.",
+	"drill": "Hold left click to drill through rock at speed.",
+	"tnt": "Press 3 to throw. Blasts a 3.9 m crater.",
+	"sonar": "Pings buried crystal veins within 12 m through solid rock.",
+	"buster": "Press 4 to throw. Blasts a 6.5 m crater."
 }
-var pile_positions: Dictionary = {}
 var station_positions: Dictionary = {}
+var upgrade_positions: Dictionary = {}
+var mountain = MountainScript.new()
+var mined := PackedByteArray()
+var cells := PackedByteArray()
+## Verification only: removes explosive preparation time so tests stay fast.
+var test_mode: bool = false
 
 var _save_path: String = "user://rough_default.json"
 var _network_mode: String = "solo"
@@ -53,6 +72,14 @@ var _connecting: bool = false
 var _rpc_ready: bool = false
 var _action_times: Dictionary = {}
 var _world_is_local: bool = true
+var _cell_seed: int = -1
+var _buried_by_cell: Dictionary = {}
+var _damage: Dictionary = {}
+var _fuses: Dictionary = {}
+var _next_fuse: int = 1
+var _throw_ready: Dictionary = {}
+var _save_dirty: bool = false
+var _last_save_ms: int = 0
 # Ephemeral transport data: microphone audio and these counters are never saved.
 var voice_sent_packets: int = 0
 var voice_relayed_packets: int = 0
@@ -63,13 +90,18 @@ var _voice_received_sequences: Dictionary = {}
 
 func _ready() -> void:
 	_connect_network_signals()
-	for sector in range(SECTOR_COUNT):
-		if not pile_positions.has(sector):
-			pile_positions[sector] = Vector3(-4.5 + float(sector % 4) * 3.0, 0.25, -4.4 + float(sector / 4) * 2.4)
 	if station_positions.is_empty():
-		station_positions = {"sell": Vector3(-8, 1, 4), "shop": Vector3(8, 1, 4), "tray": Vector3(-8, 1, 0), "wash": Vector3(-8, 1, -4), "sorter": Vector3(8, 1, -4), "certify": Vector3(0, 1, -8), "scanner": Vector3(8, 1, 0), "recover": Vector3(-5, 1, 8), "collection": Vector3(5, 1, 8)}
+		station_positions = {"sell": Vector3(-8, 1, 4), "shop": Vector3(8, 1, 4), "tray": Vector3(-8, 1, 0), "certify": Vector3(0, 1, -8), "recover": Vector3(-5, 1, 8), "collection": Vector3(5, 1, 8)}
 	if players.is_empty():
 		players[1] = _player_template(1)
+	if mined.is_empty():
+		mined = MountainScript.empty_mined()
+
+
+func _process(_delta: float) -> void:
+	# Mining is frequent, so its saves are batched instead of written per block.
+	if _save_dirty and is_authority() and Time.get_ticks_msec() - _last_save_ms > 3000:
+		save_game()
 
 
 func _connect_network_signals() -> void:
@@ -114,8 +146,7 @@ func new_game() -> void:
 	seed_value = int(Time.get_unix_time_from_system()) ^ int(randi())
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.seed = seed_value
-	diamond_id = rng.randi_range(0, GEM_COUNT - 1)
-	money = 22
+	money = 0
 	gems.clear()
 	upgrades.clear()
 	collection.clear()
@@ -123,60 +154,99 @@ func new_game() -> void:
 	searched = 0
 	certification_step = 0
 	certification_id = -1
+	mined = MountainScript.empty_mined()
+	_damage.clear()
+	_fuses.clear()
+	for id in players:
+		players[id]["ore"] = {}
+	# The genuine diamond rests deep in the mountain's core, among many look-alikes.
+	var core: Array[int] = []
+	for z: int in range(MountainScript.SIZE_Z):
+		for x: int in range(MountainScript.SIZE_X):
+			for y: int in range(2, 7):
+				if mountain.natural_solid(x, y, z) and mountain.depth(x, y, z) >= 14:
+					core.append(MountainScript.index(x, y, z))
+	var diamond_cell: int = core[rng.randi_range(0, core.size() - 1)]
+	diamond_id = rng.randi_range(0, CRYSTAL_COUNT - 1)
+	var used: Dictionary = {diamond_cell: true}
 	for id in range(GEM_COUNT):
-		var roll: float = rng.randf()
-		var kind: String = "glass"
-		var label: String = "Bottle-glass gem"
-		var value: int = rng.randi_range(2, 5)
-		var clue: String = "Rounded edges, a few bubbles. Very convincing from across the room."
-		var tint: Array = [0.18 + rng.randf() * 0.35, 0.35 + rng.randf() * 0.45, 0.55 + rng.randf() * 0.4]
-		if roll < 0.105:
-			kind = "suspect"
-			label = "Promising clear crystal"
-			value = 9
-			clue = "Look closely: a doubled internal line, soft facet edges, or a tiny round bubble."
-			tint = [0.72, 0.91, 1.0]
-		elif roll < 0.255:
-			kind = "metal"
-			label = "Shiny workshop scrap"
-			value = rng.randi_range(7, 13)
-			clue = "Heavy, metallic, and destined to fund irresponsible machinery."
-			tint = [0.76, 0.58, 0.25]
-		elif roll < 0.335:
-			kind = "cash"
-			label = "Crumpled emergency money"
-			value = rng.randi_range(15, 28)
-			clue = "The previous owner called this a financial crystal."
-			tint = [0.29, 0.78, 0.39]
-		elif roll < 0.425:
-			kind = "collectible"
-			label = COLLECTIBLE_NAMES[rng.randi_range(0, COLLECTIBLE_NAMES.size() - 1)]
-			value = rng.randi_range(10, 18)
-			clue = "An excellent addition to the shelf of questionable treasures."
-			tint = [0.95, 0.3 + rng.randf() * 0.45, 0.76]
-		elif roll < 0.49:
-			kind = "oddity"
-			label = "Fake diamond with a moustache" if id % 2 == 0 else "Premium industrial nonsense"
-			value = rng.randi_range(6, 11)
-			clue = "Clearly certified by a man wearing a bucket."
-			tint = [0.75, 0.27, 0.93]
-		if id == diamond_id:
-			kind = "diamond"
-			label = "Promising clear crystal"
-			value = 0
-			clue = "Razor-sharp facets. One crisp internal edge, no round bubbles. Blue-white light stays bright as it turns."
-			tint = [0.72, 0.94, 1.0]
-		var sector: int = id / 60
-		gems[id] = {"id": id, "kind": kind, "name": label, "pile": sector, "stage": "pile", "owner": 0, "pos": _vector_array(_pile_gem_position(id, sector)), "clean": false, "tag": false, "flagged": false, "searched": false, "value": value, "clue": clue, "color": tint}
-	_commit("A fresh mountain of questionable treasure. Your first upgrade costs $70.")
+		var cell: int = diamond_cell if id == diamond_id else _random_find_cell(rng, used)
+		used[cell] = true
+		var gem: Dictionary = {"id": id, "cell": cell, "stage": "buried", "owner": 0, "pos": _vector_array(MountainScript.cell_center(cell)), "tag": false, "flagged": false, "searched": false}
+		if id < CRYSTAL_COUNT:
+			gem["kind"] = "suspect"
+			gem["name"] = "Clear crystal"
+			gem["value"] = 9
+			gem["clue"] = "Look closely: a doubled internal line, soft facet edges, or a tiny round bubble."
+			if id == diamond_id:
+				gem["kind"] = "diamond"
+				gem["value"] = 0
+				gem["clue"] = "Razor-sharp facets. One crisp internal edge, no round bubbles. Blue-white light stays bright as it turns."
+		elif rng.randf() < 0.65:
+			gem["kind"] = "collectible"
+			gem["name"] = COLLECTIBLE_NAMES[rng.randi_range(0, COLLECTIBLE_NAMES.size() - 1)]
+			gem["value"] = rng.randi_range(12, 24)
+			gem["clue"] = "An excellent addition to the specimen shelf."
+		else:
+			gem["kind"] = "oddity"
+			gem["name"] = ODDITY_NAMES[rng.randi_range(0, ODDITY_NAMES.size() - 1)]
+			gem["value"] = rng.randi_range(6, 14)
+			gem["clue"] = "Definitely not a diamond. Probably."
+		gems[id] = gem
+	_rebuild_cells()
+	_commit("A fresh mountain. Somewhere deep inside sits one real diamond. Your pickaxe is ready.")
+
+
+func _random_find_cell(rng: RandomNumberGenerator, used: Dictionary) -> int:
+	for _attempt: int in range(4000):
+		var x: int = rng.randi_range(0, MountainScript.SIZE_X - 1)
+		var z: int = rng.randi_range(0, MountainScript.SIZE_Z - 1)
+		var top: int = mountain.height(x, z)
+		if top < 4:
+			continue
+		var y: int = rng.randi_range(1, top - 2)
+		var cell: int = MountainScript.index(x, y, z)
+		if not used.has(cell):
+			return cell
+	return -1
 
 
 func capacity() -> int:
-	if "trays" in upgrades:
-		return 14
-	if "scoop" in upgrades:
-		return 9
-	return 3
+	return 10 if "satchel" in upgrades else 4
+
+
+func ore_capacity() -> int:
+	return 90 if "satchel" in upgrades else 30
+
+
+func ore_of(peer_id: int = -1) -> Dictionary:
+	if peer_id < 0:
+		peer_id = local_id()
+	var ore: Variant = players.get(peer_id, {}).get("ore", {})
+	return ore if ore is Dictionary else {}
+
+
+func ore_total(peer_id: int = -1) -> int:
+	var total: int = 0
+	for kind in ore_of(peer_id):
+		total += int(ore_of(peer_id)[kind])
+	return total
+
+
+func ore_value(peer_id: int = -1) -> int:
+	var total: int = 0
+	var ore: Dictionary = ore_of(peer_id)
+	for kind in ore:
+		total += int(MountainScript.ORE_VALUES.get(str(kind), 0)) * int(ore[kind])
+	return total
+
+
+func mining_tool() -> String:
+	if "drill" in upgrades:
+		return "drill"
+	if "steel_pick" in upgrades:
+		return "steel_pick"
+	return "pickaxe"
 
 
 func held_ids(peer_id: int = -1) -> Array:
@@ -201,24 +271,63 @@ func is_authority() -> bool:
 	return _network_mode != "client"
 
 
+func is_solid(cell: int) -> bool:
+	return MountainScript.valid_cell(cell) and cell < cells.size() and cells[cell] != MountainScript.AIR
+
+
+func solid_at(x: int, y: int, z: int) -> bool:
+	if not MountainScript.in_grid(x, y, z):
+		return false
+	return cells.size() == MountainScript.CELL_COUNT and cells[MountainScript.index(x, y, z)] != MountainScript.AIR
+
+
+func cell_code(cell: int) -> int:
+	if not MountainScript.valid_cell(cell) or cell >= cells.size():
+		return MountainScript.AIR
+	return cells[cell]
+
+
+func exposed(cell: int) -> bool:
+	var c: Vector3i = MountainScript.coords(cell)
+	for offset: Vector3i in [Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 1, 0), Vector3i(0, -1, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1)]:
+		var n: Vector3i = c + offset
+		if n.y < 0:
+			continue
+		if not solid_at(n.x, n.y, n.z):
+			return true
+	return false
+
+
+func blocks_mined() -> int:
+	var total: int = 0
+	for byte in mined:
+		var value: int = byte
+		while value != 0:
+			total += value & 1
+			value >>= 1
+	return total
+
+
 func snapshot() -> Dictionary:
-	return {"version": SAVE_VERSION, "seed": seed_value, "money": money, "gems": gems.duplicate(true), "upgrades": upgrades.duplicate(), "collection": collection.duplicate(), "diamond_id": diamond_id, "certified": certified, "searched": searched, "players": players.duplicate(true), "certification_step": certification_step, "certification_id": certification_id}
+	return {"version": SAVE_VERSION, "seed": seed_value, "money": money, "gems": gems.duplicate(true), "upgrades": upgrades.duplicate(), "collection": collection.duplicate(), "diamond_id": diamond_id, "certified": certified, "searched": searched, "players": players.duplicate(true), "certification_step": certification_step, "certification_id": certification_id, "mined": Marshalls.raw_to_base64(mined)}
 
 
 func save_game() -> bool:
 	if not is_authority() or not _world_is_local or gems.is_empty():
 		return false
+	_save_dirty = false
+	_last_save_ms = Time.get_ticks_msec()
 	var temporary: String = _save_path + ".tmp"
 	var file: FileAccess = FileAccess.open(temporary, FileAccess.WRITE)
 	if file == null:
-		notice.emit("Save failed: the workshop folder is not writable.")
+		notice.emit("Save failed: the camp folder is not writable.")
 		return false
 	file.store_string(JSON.stringify(snapshot()))
 	file.flush()
 	var write_error: Error=file.get_error()
 	file.close()
 	if write_error!=OK:
-		notice.emit("Save failed while writing. The previous workshop save was kept.")
+		notice.emit("Save failed while writing. The previous save was kept.")
 		return false
 	var result: Error = DirAccess.rename_absolute(temporary, _save_path)
 	if result != OK:
@@ -257,21 +366,29 @@ func load_game() -> bool:
 		return false
 	_apply_snapshot(data)
 	_world_is_local = true
-	var saved_cosmetics: Array = players.get(1, {}).get("cosmetics", []).duplicate()
-	var saved_hat: String = str(players.get(1, {}).get("hat", ""))
+	var saved_host: Dictionary = players.get(1, {})
 	players.clear()
 	players[1] = _player_template(1)
-	players[1]["cosmetics"] = saved_cosmetics
-	players[1]["hat"] = saved_hat
+	players[1]["cosmetics"] = saved_host.get("cosmetics", []).duplicate()
+	players[1]["hat"] = str(saved_host.get("hat", ""))
+	var saved_ore: Variant = saved_host.get("ore", {})
+	if saved_ore is Dictionary:
+		for kind in saved_ore:
+			if MountainScript.ORE_VALUES.has(str(kind)):
+				players[1]["ore"][str(kind)] = maxi(0, int(saved_ore[kind]))
 	for id in gems:
 		var gem: Dictionary = gems[id]
-		if str(gem.get("stage", "")) == "held":
+		var stage: String = str(gem.get("stage", ""))
+		if stage == "buried" and MountainScript.is_mined(mined, int(gem.get("cell", -1))):
 			_to_tray(gem)
-		elif str(gem.get("stage", "")) == "loose" and not _valid_position(_array_vector(gem.get("pos", []))):
+		elif stage == "held":
 			_to_tray(gem)
+		elif stage == "loose" and not _valid_position(_array_vector(gem.get("pos", []))):
+			_to_tray(gem)
+	_rebuild_cells()
 	certification_step = 0 if not certified else 3
 	certification_id = -1 if not certified else diamond_id
-	_commit("Workshop loaded. Carried items were returned to the inspection tray.")
+	_commit("Camp loaded. Carried finds were returned to the inspection tray.")
 	return true
 
 
@@ -282,12 +399,17 @@ func _valid_saved_world(data: Dictionary) -> bool:
 	var saved_diamond: int = int(data.get("diamond_id", -1))
 	if saved_diamond < 0 or saved_diamond >= GEM_COUNT:
 		return false
+	var saved_mined: Variant = data.get("mined", null)
+	if not (saved_mined is String) or Marshalls.base64_to_raw(saved_mined).size() != MountainScript.empty_mined().size():
+		return false
 	var genuine_count: int = 0
 	for id in range(GEM_COUNT):
 		var gem_data: Variant = saved_gems.get(str(id), saved_gems.get(id, null))
 		if not (gem_data is Dictionary) or int(gem_data.get("id", -1)) != id:
 			return false
-		if not str(gem_data.get("stage", "")) in ["pile", "held", "tray", "loose", "collection", "certified", "sold"] or int(gem_data.get("pile", -1)) < 0 or int(gem_data.get("pile", -1)) >= SECTOR_COUNT:
+		if not str(gem_data.get("stage", "")) in ["buried", "held", "tray", "loose", "collection", "certified", "sold"]:
+			return false
+		if not typeof(gem_data.get("cell", null)) in [TYPE_INT, TYPE_FLOAT] or not MountainScript.valid_cell(int(gem_data.get("cell", -1))):
 			return false
 		var saved_pos: Variant = gem_data.get("pos", null)
 		if not (saved_pos is Array) or saved_pos.size() != 3:
@@ -305,9 +427,11 @@ func _valid_saved_world(data: Dictionary) -> bool:
 func start_solo() -> void:
 	leave()
 	_network_mode = "solo"
+	var saved_ore: Dictionary = ore_of(1).duplicate()
 	players = {1: _player_template(1)}
+	players[1]["ore"] = saved_ore
 	_recover_strays()
-	connection_status.emit("Solo workshop")
+	connection_status.emit("Solo camp")
 	changed.emit()
 
 
@@ -325,14 +449,16 @@ func host(port: int = 24680) -> Error:
 		connection_status.emit("Could not host: port %d is busy or unavailable." % port)
 		return result
 	# ENet compresses MTU-sized fragments; both ends must use the same codec.
-	# This substantially reduces repeated gem dictionaries over reliable UDP.
+	# This substantially reduces repeated item dictionaries over reliable UDP.
 	peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
 	multiplayer.multiplayer_peer = peer
 	_network_mode = "host"
+	var saved_ore: Dictionary = ore_of(1).duplicate()
 	players = {1: _player_template(1)}
+	players[1]["ore"] = saved_ore
 	_recover_strays()
 	connection_status.emit("Hosting up to 4 players on port %d" % port)
-	_commit("Co-op workshop opened. Everyone shares purchases, money, and progress.")
+	_commit("Co-op claim opened. Everyone shares purchases, money and the mountain.")
 	return OK
 
 
@@ -366,6 +492,9 @@ func leave() -> void:
 	_network_mode = "solo"
 	_connecting = false
 	_action_times.clear()
+	_fuses.clear()
+	_throw_ready.clear()
+	_damage.clear()
 	_reset_voice_transport()
 
 
@@ -391,9 +520,10 @@ func _request_action(kind: String, args: Dictionary) -> void:
 	if kind.length() > 32 or not _valid_action_args(args):
 		return
 	var now: int = Time.get_ticks_msec()
-	if now - int(_action_times.get(sender, -1000)) < 90:
+	var key: String = "%d:%s" % [sender, kind]
+	if now - int(_action_times.get(key, -1000)) < 60:
 		return
-	_action_times[sender] = now
+	_action_times[key] = now
 	_execute_action(sender, kind, args)
 
 
@@ -419,7 +549,7 @@ func _valid_action_args(args: Dictionary) -> bool:
 				return false
 		elif not value_type in [TYPE_INT, TYPE_BOOL]:
 			return false
-		if str(key) in ["id", "target", "pile", "test"] and not value_type in [TYPE_INT, TYPE_FLOAT]:
+		if str(key) in ["id", "target", "cell", "fuse", "test"] and not value_type in [TYPE_INT, TYPE_FLOAT]:
 			return false
 	return true
 
@@ -428,81 +558,297 @@ func _execute_action(peer_id: int, kind: String, args: Dictionary) -> void:
 	if not players.has(peer_id):
 		return
 	match kind:
-		"scoop", "vacuum":
-			_scoop(peer_id, args, kind == "vacuum")
+		"mine":
+			_mine(peer_id, int(args.get("cell", -1)))
+		"throw":
+			_throw(peer_id, str(args.get("tier", "")), args.get("pos", []), args.get("vel", []))
+		"blast":
+			_blast(peer_id, int(args.get("fuse", -1)), args.get("pos", []))
+		"vacuum":
+			_vacuum(peer_id)
 		"pick":
 			_pick(peer_id, int(args.get("id", -1)))
 		"drop":
 			_drop(peer_id, int(args.get("id", -1)), args.get("pos", []))
 		"tray":
 			if not _near_station(peer_id, "tray"):
-				_reject(peer_id, "Bring the batch to the inspection tray.")
+				_reject(peer_id, "Bring your finds to the inspection tray.")
 				return
 			var held: Array = held_ids(peer_id)
 			for id in held:
 				_to_tray(gems[id])
-			_commit("Poured %d objects into the inspection tray." % held.size())
+			_commit("Placed %d %s in the inspection tray." % [held.size(), "find" if held.size() == 1 else "finds"])
 		"sell":
 			_sell(peer_id)
 		"buy":
 			_buy(peer_id, str(args.get("upgrade", "")))
-		"wash":
-			_wash(peer_id)
-		"process":
-			_process_pile(peer_id, int(args.get("pile", -1)))
-		"scan":
-			_scan(peer_id, int(args.get("pile", -1)), bool(args.get("portable", false)))
 		"collect":
 			_collect(peer_id, int(args.get("id", -1)))
 		"certify":
 			_certify(peer_id, int(args.get("id", -1)), int(args.get("test", -1)))
-		"recover", "machine_reset":
+		"recover":
 			if not _near_station(peer_id, "recover", 4.5):
-				_reject(peer_id, "Use the recovery bell by the workshop entrance.")
+				_reject(peer_id, "Use the lost & found bell by the camp entrance.")
 				return
 			var recovered: int = _recover_strays(true)
 			if not certified:
 				certification_step = 0
 				certification_id = -1
-			_commit("Recovered %d loose or stranded items. Machinery is ready." % recovered)
+			_commit("Recovered %d loose or stranded finds into the inspection tray." % recovered)
 		"prank":
 			_prank(peer_id, int(args.get("target", -1)), str(args.get("mode", "foam")), int(args.get("id", -1)))
 		_:
-			_reject(peer_id, "That workshop action is unavailable.")
+			_reject(peer_id, "That action is unavailable.")
 
 
-func _scoop(peer_id: int, args: Dictionary, force_vacuum: bool = false) -> void:
-	var vacuum: bool = force_vacuum or str(args.get("tool", "")) == "vacuum"
-	if vacuum and not ("vacuum" in upgrades):
-		_reject(peer_id, "Buy the vacuum before using it.")
+func _mine(peer_id: int, cell: int) -> void:
+	if not is_solid(cell):
+		return
+	var code: int = cells[cell]
+	if code == MountainScript.BEDROCK:
+		_reject(peer_id, "Bedrock. Nothing gets through this.")
+		return
+	if _peer_position(peer_id).distance_to(MountainScript.cell_center(cell)) > MINING_REACH:
+		_reject(peer_id, "Move closer to that rock.")
+		return
+	if not exposed(cell):
+		return
+	var c: Vector3i = MountainScript.coords(cell)
+	var tool: String = mining_tool()
+	if tool == "pickaxe" and mountain.needs_steel(c.x, c.y, c.z):
+		_reject(peer_id, "Granite is too hard for the old pickaxe. Buy a steel pickaxe or blast it.")
+		return
+	var ore: String = MountainScript.ore_for_code(code)
+	if not ore.is_empty() and ore_total(peer_id) >= ore_capacity():
+		_reject(peer_id, "Your satchel is full. Sell your ore at the exchange.")
+		return
+	var damage: int = int(_damage.get(cell, 0)) + (1 if tool == "pickaxe" else 2)
+	if damage < mountain.hardness(c.x, c.y, c.z, code):
+		_damage[cell] = damage
+		return
+	var result: Dictionary = _break_cells(peer_id, [cell])
+	var message: String = ""
+	if not result.released.is_empty():
+		message = "Something broke loose from the rock: %s!" % str(gems[int(result.released[0])].name).to_lower()
+	_commit_mining(peer_id, result, message)
+
+
+func _break_cells(peer_id: int, list: Array) -> Dictionary:
+	var broken := PackedInt32Array()
+	var gained: Dictionary = {}
+	var lost: int = 0
+	var released: Array = []
+	var room: int = ore_capacity() - ore_total(peer_id)
+	for value in list:
+		var cell: int = int(value)
+		if not is_solid(cell):
+			continue
+		var code: int = cells[cell]
+		if code == MountainScript.BEDROCK:
+			continue
+		cells[cell] = MountainScript.AIR
+		MountainScript.set_mined(mined, cell)
+		_damage.erase(cell)
+		broken.append(cell)
+		var ore: String = MountainScript.ore_for_code(code)
+		if not ore.is_empty():
+			if room > 0:
+				gained[ore] = int(gained.get(ore, 0)) + 1
+				room -= 1
+			else:
+				lost += 1
+		elif _buried_by_cell.has(cell):
+			var id: int = int(_buried_by_cell[cell])
+			_buried_by_cell.erase(cell)
+			var gem: Dictionary = gems[id]
+			var jitter := Vector3(float((id * 37) % 7 - 3) * 0.08, 0.0, float((id * 53) % 7 - 3) * 0.08)
+			gem["stage"] = "loose"
+			gem["owner"] = 0
+			gem["pos"] = _vector_array(settle(MountainScript.cell_center(cell) + jitter))
+			released.append(id)
+	if not gained.is_empty() and players.has(peer_id):
+		var satchel: Dictionary = ore_of(peer_id).duplicate()
+		for kind in gained:
+			satchel[kind] = int(satchel.get(kind, 0)) + int(gained[kind])
+		players[peer_id]["ore"] = satchel
+	var moved: Array = released.duplicate()
+	if not broken.is_empty():
+		for id in gems:
+			var gem: Dictionary = gems[id]
+			if str(gem.stage) != "loose" or id in released:
+				continue
+			var pos: Vector3 = _array_vector(gem.pos)
+			var rest: Vector3 = settle(pos)
+			if rest.distance_to(pos) > 0.05:
+				gem["pos"] = _vector_array(rest)
+				moved.append(int(id))
+	return {"cells": broken, "gained": gained, "lost": lost, "released": released, "moved": moved}
+
+
+## Finds rest on the highest solid block below them, or on the ground.
+func settle(pos: Vector3) -> Vector3:
+	var g: Vector3i = MountainScript.world_to_grid(pos)
+	if g.x < 0 or g.z < 0 or g.x >= MountainScript.SIZE_X or g.z >= MountainScript.SIZE_Z:
+		return Vector3(pos.x, 0.16 if absf(pos.x) < 13.0 and absf(pos.z) < 11.5 else 0.14, pos.z)
+	var y: int = clampi(g.y, 0, MountainScript.SIZE_Y - 1)
+	while y < MountainScript.SIZE_Y and solid_at(g.x, y, g.z):
+		y += 1
+	while y > 0 and not solid_at(g.x, y - 1, g.z):
+		y -= 1
+	return Vector3(pos.x, MountainScript.ORIGIN.y + float(y) + 0.16, pos.z)
+
+
+func _commit_mining(peer_id: int, result: Dictionary, message: String = "") -> void:
+	var changed_gems: Dictionary = {}
+	for id in result.moved:
+		changed_gems[int(id)] = gems[int(id)].duplicate(true)
+	_send_delta(result.cells, changed_gems, [peer_id])
+	if not message.is_empty():
+		_tell(peer_id, message)
+
+
+## Lightweight authoritative update for frequent changes: mined blocks, a few
+## items and satchels. Saves are batched; full snapshots remain for everything else.
+func _send_delta(broken: PackedInt32Array, changed_gems: Dictionary, ore_peers: Array) -> void:
+	var ore: Dictionary = {}
+	for peer in ore_peers:
+		if players.has(int(peer)):
+			ore[int(peer)] = ore_of(int(peer)).duplicate()
+	changed.emit()
+	if not broken.is_empty():
+		cells_changed.emit(broken)
+	if _network_mode == "host":
+		_receive_delta.rpc({"cells": broken, "gems": changed_gems, "ore": ore, "money": money, "searched": searched})
+	_save_dirty = true
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_delta(data: Dictionary) -> void:
+	if is_authority():
+		return
+	var broken: PackedInt32Array = data.get("cells", PackedInt32Array())
+	for cell in broken:
+		if MountainScript.valid_cell(cell):
+			MountainScript.set_mined(mined, cell)
+			if cell < cells.size():
+				cells[cell] = MountainScript.AIR
+			_buried_by_cell.erase(cell)
+	var incoming: Dictionary = data.get("gems", {})
+	for id in incoming:
+		if incoming[id] is Dictionary:
+			gems[int(id)] = incoming[id].duplicate(true)
+	var ore: Dictionary = data.get("ore", {})
+	for peer in ore:
+		if players.has(int(peer)) and ore[peer] is Dictionary:
+			players[int(peer)]["ore"] = ore[peer].duplicate()
+	money = maxi(0, int(data.get("money", money)))
+	searched = clampi(int(data.get("searched", searched)), 0, GEM_COUNT)
+	changed.emit()
+	if not broken.is_empty():
+		cells_changed.emit(broken)
+
+
+func _throw(peer_id: int, tier: String, origin: Variant, velocity: Variant) -> void:
+	if not EXPLOSIVES.has(tier):
+		return
+	if not tier in upgrades:
+		_reject(peer_id, "Buy %s at the outfitter first." % str(upgrade_names[tier]))
+		return
+	var start: Vector3 = _array_vector(origin)
+	var speed: Vector3 = _array_vector(velocity)
+	if not _valid_position(start) or start.distance_to(_peer_position(peer_id)) > 3.5 or speed.length() > 30.0:
+		return
+	var now: int = Time.get_ticks_msec()
+	var key: String = "%d:%s" % [peer_id, tier]
+	var ready_at: int = int(_throw_ready.get(key, 0))
+	if now < ready_at and not test_mode:
+		_reject(peer_id, "%s is being prepared · %.1f s" % [str(upgrade_names[tier]), float(ready_at - now) / 1000.0])
+		return
+	_throw_ready[key] = now + int(float(EXPLOSIVES[tier].cooldown) * 1000.0)
+	var fuse: int = _next_fuse
+	_next_fuse += 1
+	_fuses[fuse] = {"peer": peer_id, "tier": tier, "pos": start}
+	throw_spawned.emit(peer_id, tier, start, speed, fuse)
+	if _network_mode == "host":
+		_receive_throw.rpc(peer_id, tier, start, speed, fuse)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_throw(peer_id: int, tier: String, start: Vector3, speed: Vector3, fuse: int) -> void:
+	if is_authority() or not EXPLOSIVES.has(tier):
+		return
+	throw_spawned.emit(peer_id, tier, start, speed, fuse)
+
+
+func _blast(peer_id: int, fuse: int, location: Variant) -> void:
+	if not _fuses.has(fuse) or int(_fuses[fuse].peer) != peer_id:
+		return
+	var info: Dictionary = _fuses[fuse]
+	_fuses.erase(fuse)
+	var tier: String = str(info.tier)
+	var center: Vector3 = _array_vector(location)
+	if not (location is Array) or not _valid_position(center) or center.distance_to(_as_vector(info.pos)) > 45.0:
+		center = _as_vector(info.pos)
+	var radius: float = float(EXPLOSIVES[tier].radius)
+	var reach: int = ceili(radius)
+	var g: Vector3i = MountainScript.world_to_grid(center)
+	var targets: Array = []
+	for dy: int in range(-reach, reach + 1):
+		for dz: int in range(-reach, reach + 1):
+			for dx: int in range(-reach, reach + 1):
+				var x: int = g.x + dx
+				var y: int = g.y + dy
+				var z: int = g.z + dz
+				if not MountainScript.in_grid(x, y, z):
+					continue
+				var cell: int = MountainScript.index(x, y, z)
+				if cells[cell] != MountainScript.AIR and MountainScript.cell_center(cell).distance_to(center) <= radius:
+					targets.append(cell)
+	var result: Dictionary = _break_cells(peer_id, targets)
+	blasted.emit(fuse, center, tier)
+	if _network_mode == "host":
+		_receive_blast.rpc(fuse, center, tier)
+	var ore_count: int = 0
+	for kind in result.gained:
+		ore_count += int(result.gained[kind])
+	var message: String = "%s blasted out %d m³ of rock · +%d ore" % [str(upgrade_names[tier]), result.cells.size(), ore_count]
+	if not result.released.is_empty():
+		message += " · %d %s broke loose" % [result.released.size(), "find" if result.released.size() == 1 else "finds"]
+	if int(result.lost) > 0:
+		message += " · %d ore lost (satchel full)" % int(result.lost)
+	_commit_mining(peer_id, result, message)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_blast(fuse: int, center: Vector3, tier: String) -> void:
+	if is_authority() or not EXPLOSIVES.has(tier):
+		return
+	blasted.emit(fuse, center, tier)
+
+
+func _vacuum(peer_id: int) -> void:
+	if not "magnet" in upgrades:
 		return
 	var room: int = capacity() - held_ids(peer_id).size()
-	if room <= 0:
-		_reject(peer_id, "Your hands are full. Pour the batch into a tray.")
+	var taken: Array = []
+	for id in gems:
+		if taken.size() >= room:
+			break
+		var loose: Dictionary = gems[id]
+		if str(loose["stage"]) == "loose" and _peer_position(peer_id).distance_to(_array_vector(loose["pos"])) < 7.5:
+			_hold(loose, peer_id)
+			taken.append(int(id))
+	if taken.is_empty():
 		return
-	var pile: int = int(args.get("pile", -1))
-	if pile >= 0 and pile < SECTOR_COUNT and not _near_pile(peer_id, pile, 5.5 if vacuum else 3.8):
-		_reject(peer_id, "Move closer to that pile sector.")
-		return
-	var taken: int = 0
-	if vacuum:
-		for id in gems:
-			var loose: Dictionary = gems[id]
-			if taken >= room:
-				break
-			if str(loose["stage"]) == "loose" and _peer_position(peer_id).distance_to(_array_vector(loose["pos"])) < 6.5:
-				_hold(loose, peer_id)
-				taken += 1
-	if pile >= 0 and pile < SECTOR_COUNT:
-		for id in _pile_ids(pile):
-			if taken >= room:
-				break
-			_hold(gems[id], peer_id)
-			taken += 1
-	if taken == 0:
-		_reject(peer_id, "No reachable material here. Try another sector or recover loose items.")
-		return
-	_commit("%s collected %d objects." % ["Vacuum" if vacuum else "Scoop", taken])
+	_commit_items(peer_id, taken, "Ore magnet pulled in %d %s." % [taken.size(), "find" if taken.size() == 1 else "finds"])
+
+
+func _commit_items(peer_id: int, ids: Array, message: String) -> void:
+	var changed_gems: Dictionary = {}
+	for id in ids:
+		changed_gems[int(id)] = gems[int(id)].duplicate(true)
+	_send_delta(PackedInt32Array(), changed_gems, [])
+	_tell(peer_id, message)
 
 
 func _pick(peer_id: int, id: int) -> void:
@@ -510,17 +856,17 @@ func _pick(peer_id: int, id: int) -> void:
 		return
 	var gem: Dictionary = gems[id]
 	var stage: String = str(gem["stage"])
-	if not stage in ["pile", "tray", "loose"]:
-		_reject(peer_id, "That object is already being carried or stored.")
+	if not stage in ["tray", "loose"]:
+		_reject(peer_id, "That find is already being carried or stored.")
 		return
 	if held_ids(peer_id).size() >= capacity():
-		_reject(peer_id, "Your hands are full.")
+		_reject(peer_id, "Your hands are full. Store finds in the inspection tray.")
 		return
 	if _peer_position(peer_id).distance_to(_array_vector(gem["pos"])) > 4.2:
 		_reject(peer_id, "Move closer to pick that up.")
 		return
 	_hold(gem, peer_id)
-	_commit("Picked up %s." % str(gem["name"]))
+	_commit_items(peer_id, [id], "Picked up %s." % str(gem["name"]).to_lower())
 
 
 func _drop(peer_id: int, id: int, location: Variant) -> void:
@@ -528,20 +874,23 @@ func _drop(peer_id: int, id: int, location: Variant) -> void:
 		return
 	var target: Vector3 = _array_vector(location)
 	if not _valid_position(target) or _peer_position(peer_id).distance_to(target) > 4.5:
-		_reject(peer_id, "Drop objects within reach.")
+		_reject(peer_id, "Drop finds within reach.")
 		return
 	var gem: Dictionary = gems[id]
 	gem["stage"] = "loose"
 	gem["owner"] = 0
-	gem["pos"] = _vector_array(target)
-	_commit("Object dropped. The recovery bell can always bring it back.")
+	gem["pos"] = _vector_array(settle(target))
+	_commit_items(peer_id, [id], "Find dropped. The lost & found bell can always bring it back.")
 
 
 func _sell(peer_id: int) -> void:
 	if not _near_station(peer_id, "sell"):
-		_reject(peer_id, "Bring the batch to the recycling counter.")
+		_reject(peer_id, "Bring your satchel to the scrap exchange.")
 		return
-	var payout: int = 0
+	var ore_count: int = ore_total(peer_id)
+	var payout: int = ore_value(peer_id)
+	if players.has(peer_id):
+		players[peer_id]["ore"] = {}
 	var protected: int = 0
 	var sold: int = 0
 	for id in held_ids(peer_id):
@@ -555,91 +904,32 @@ func _sell(peer_id: int) -> void:
 			gem["owner"] = 0
 			sold += 1
 	money += payout
-	_commit("Sold %d objects for $%d. %d candidates routed safely to the tray." % [sold, payout, protected])
+	var parts: Array[String] = []
+	if ore_count > 0:
+		parts.append("%d ore" % ore_count)
+	if sold > 0:
+		parts.append("%d finds" % sold)
+	if parts.is_empty():
+		_commit("Nothing to sell. Mine some ore first.%s" % (" %d crystals went safely to the tray." % protected if protected > 0 else ""))
+		return
+	_commit("Sold %s for $%d.%s" % [" and ".join(parts), payout, " %d crystals went safely to the tray." % protected if protected > 0 else ""])
 
 
 func _buy(peer_id: int, upgrade: String) -> void:
-	if not _near_station(peer_id, "shop"):
-		_reject(peer_id, "Visit the upgrade counter.")
-		return
 	if not prices.has(upgrade) or upgrade in upgrades:
-		_reject(peer_id, "That upgrade is unavailable or already installed.")
+		_reject(peer_id, "That equipment is unavailable or already owned.")
+		return
+	var nearby: bool = _peer_position(peer_id).distance_to(_as_vector(upgrade_positions[upgrade])) <= 4.0 if upgrade_positions.has(upgrade) else _near_station(peer_id, "shop", 6.0)
+	if not nearby:
+		_reject(peer_id, "Move closer to the equipment you want to buy.")
 		return
 	var price: int = int(prices[upgrade])
 	if money < price:
-		_reject(peer_id, "Need $%d more for %s." % [price - money, upgrade.capitalize()])
+		_reject(peer_id, "Need $%d more for the %s." % [price - money, str(upgrade_names[upgrade]).to_lower()])
 		return
 	money -= price
 	upgrades.append(upgrade)
-	_commit("%s installed! %s" % [upgrade.capitalize(), str(benefits[upgrade])])
-
-
-func _wash(peer_id: int) -> void:
-	if not "wash" in upgrades or not _near_station(peer_id, "wash"):
-		_reject(peer_id, "Buy the washing station, then bring your discoveries to it.")
-		return
-	var cleaned: int = 0
-	for id in gems:
-		var gem: Dictionary = gems[id]
-		if (str(gem["stage"]) == "tray" or _owns(peer_id, int(id))) and not bool(gem["clean"]):
-			gem["clean"] = true
-			cleaned += 1
-	for id in players:
-		players[id]["foam_until"] = 0.0
-	_commit("Washed %d discoveries. Clean recyclables earn 60%% more. Foam removed!" % cleaned)
-
-
-func _process_pile(peer_id: int, pile: int) -> void:
-	if not "sorter" in upgrades or not _near_station(peer_id, "sorter"):
-		_reject(peer_id, "Buy the sorting machine, then pull its lever.")
-		return
-	if pile < 0 or pile >= SECTOR_COUNT:
-		_reject(peer_id, "Choose a pile sector to feed into the machine.")
-		return
-	var batch: int = 36 if "conveyor" in upgrades else 18
-	var count: int = 0
-	var candidates: int = 0
-	var payout: int = 0
-	for id in _pile_ids(pile):
-		if count >= batch:
-			break
-		var gem: Dictionary = gems[id]
-		_mark_searched(gem)
-		if _suspicious(gem) or str(gem["kind"]) == "collectible":
-			_to_tray(gem)
-			candidates += 1
-		else:
-			payout += _sale_value(gem)
-			gem["stage"] = "sold"
-			gem["owner"] = 0
-		count += 1
-	money += payout
-	_commit("Sorter processed %d objects: $%d recycled, %d discoveries in the tray." % [count, payout, candidates])
-
-
-func _scan(peer_id: int, pile: int, portable: bool = false) -> void:
-	if pile < 0 or pile >= SECTOR_COUNT:
-		return
-	if not "scanner" in upgrades:
-		_reject(peer_id, "Buy the scanner before scanning a batch.")
-		return
-	if (portable and not _near_pile(peer_id, pile, 4.5)) or (not portable and not _near_station(peer_id, "scanner")):
-		_reject(peer_id, "Scan within reach of a pile sector, or use the scanner control panel.")
-		return
-	var checked: int = 0
-	var promising: int = 0
-	for id in _pile_ids(pile):
-		if checked >= 24:
-			break
-		var gem: Dictionary = gems[id]
-		if bool(gem.get("scanned", false)):
-			continue
-		gem["scanned"] = true
-		gem["flagged"] = _suspicious(gem) or int(id) % 19 == 0
-		if bool(gem["flagged"]):
-			promising += 1
-		checked += 1
-	_commit("Scanned %d objects in sector %d: %d promising candidates. Inspect the clues." % [checked, pile + 1, promising])
+	_commit("%s bought. %s" % [upgrade_names[upgrade], str(benefits[upgrade])])
 
 
 func _collect(peer_id: int, id: int) -> void:
@@ -649,7 +939,7 @@ func _collect(peer_id: int, id: int) -> void:
 	if not _owns(peer_id, id) and not (str(gem["stage"]) == "tray" and _peer_position(peer_id).distance_to(_array_vector(gem["pos"])) < 4.2):
 		return
 	if not str(gem["kind"]) in ["collectible", "oddity"]:
-		_reject(peer_id, "The display shelf prefers properly ridiculous treasures.")
+		_reject(peer_id, "The specimen shelf is for fossils and curiosities.")
 		return
 	var label: String = str(gem["name"])
 	var fresh: bool = not label in collection
@@ -663,18 +953,18 @@ func _collect(peer_id: int, id: int) -> void:
 		if not reward in cosmetics:
 			cosmetics.append(reward)
 		players[peer_id]["cosmetics"] = cosmetics
-	_commit("Shelf discovery: %s! %s" % [label, "$12 curator grant + a silly hat unlocked." if fresh else "A spare for your magnificent collection."])
+	_commit("Shelf discovery: %s! %s" % [label, "$12 museum grant + a silly hat unlocked." if fresh else "A spare for your magnificent collection."])
 
 
 func _certify(peer_id: int, id: int, test: int) -> void:
 	if certified:
-		_reject(peer_id, "The genuine diamond is already certified. Keep building your ridiculous workshop!")
+		_reject(peer_id, "The genuine diamond is already certified. Keep blasting for treasure!")
 		return
 	if not _near_station(peer_id, "certify") or not _owns(peer_id, id):
-		_reject(peer_id, "Bring a held candidate to the certification bench.")
+		_reject(peer_id, "Bring a held crystal to the certification bench.")
 		return
 	if not gems.has(id) or not _suspicious(gems[id]):
-		_reject(peer_id, "The bench needs a promising crystal candidate.")
+		_reject(peer_id, "The bench needs a clear crystal candidate.")
 		return
 	if certification_id != id:
 		if test != 0:
@@ -703,7 +993,7 @@ func _certify(peer_id: int, id: int, test: int) -> void:
 		certification_step = 0
 		certification_id = -1
 		gems[id]["tag"] = true
-		_commit("Expert verdict: an exceptionally confident imitation. Candidate returned unharmed. Follow the sharp-edge, single-line clues.")
+		_commit("Expert verdict: a very convincing quartz crystal. Candidate returned unharmed. Follow the sharp-edge, single-line clues.")
 
 
 func _prank(peer_id: int, target: int, mode: String, item_id: int = -1) -> void:
@@ -713,7 +1003,7 @@ func _prank(peer_id: int, target: int, mode: String, item_id: int = -1) -> void:
 			hats.append("Gem crown")
 		var current: int = hats.find(str(players[peer_id].get("hat", "")))
 		players[peer_id]["hat"] = hats[(current + 1) % hats.size()]
-		_commit("Headwear: %s." % (str(players[peer_id]["hat"]) if not str(players[peer_id]["hat"]).is_empty() else "respectable bare head"))
+		_commit("Headwear: %s." % (str(players[peer_id]["hat"]) if not str(players[peer_id]["hat"]).is_empty() else "respectable hard hat"))
 		return
 	if target == peer_id and mode == "label":
 		var tagged: int = 0
@@ -726,12 +1016,7 @@ func _prank(peer_id: int, target: int, mode: String, item_id: int = -1) -> void:
 	if target == peer_id or not players.has(target) or _peer_position(peer_id).distance_to(_peer_position(target)) > 6.0:
 		_reject(peer_id, "Get within reach of a co-op friend.")
 		return
-	if not mode in ["foam", "scoop", "present", "label", "bucket", "reverse", "vacuum"]:
-		return
-	if mode == "reverse" and not "conveyor" in upgrades:
-		_reject(peer_id, "A reversible conveyor would help with this terrible idea.")
-		return
-	if mode == "vacuum" and not "vacuum" in upgrades:
+	if not mode in ["foam", "scoop", "present", "label", "bucket"]:
 		return
 	var now: float = Time.get_unix_time_from_system()
 	if now - float(players[peer_id].get("last_prank", 0.0)) < 2.0:
@@ -758,16 +1043,7 @@ func _prank(peer_id: int, target: int, mode: String, item_id: int = -1) -> void:
 		for id in held_ids(peer_id):
 			gems[id]["stage"] = "loose"
 			gems[id]["owner"] = 0
-			gems[id]["pos"] = _vector_array(_peer_position(target) + Vector3(0, 0.1, 0))
-	elif mode == "vacuum":
-		var room: int = capacity() - held_ids(peer_id).size()
-		for id in gems:
-			if room <= 0:
-				break
-			var gem: Dictionary = gems[id]
-			if str(gem["stage"]) == "loose" and _peer_position(target).distance_to(_array_vector(gem["pos"])) < 3.5:
-				_hold(gem, peer_id)
-				room -= 1
+			gems[id]["pos"] = _vector_array(settle(_peer_position(target) + Vector3(0, 0.5, 0)))
 	_commit("Player %d deployed %s-grade nonsense on player %d. Quick recovery guaranteed." % [peer_id, mode, target])
 
 
@@ -785,6 +1061,7 @@ func _mark_searched(gem: Dictionary) -> void:
 
 
 func _to_tray(gem: Dictionary) -> void:
+	_mark_searched(gem)
 	gem["stage"] = "tray"
 	gem["owner"] = 0
 	var id: int = int(gem["id"])
@@ -798,19 +1075,29 @@ func _recover_strays(all_loose: bool = false) -> int:
 	for id in gems:
 		var gem: Dictionary = gems[id]
 		var stage: String = str(gem["stage"])
-		if (stage == "held" and not players.has(int(gem["owner"]))) or (stage == "loose" and (all_loose or not _valid_position(_array_vector(gem["pos"])) or absf(_array_vector(gem["pos"]).x) > 11.5 or absf(_array_vector(gem["pos"]).z) > 10.5 or _array_vector(gem["pos"]).y < -0.5)):
+		var pos: Vector3 = _array_vector(gem["pos"])
+		var outside: bool = not _valid_position(pos) or absf(pos.x) > 37.0 or pos.z > 11.5 or pos.z < -80.0 or pos.y < -0.5
+		if (stage == "held" and not players.has(int(gem["owner"]))) or (stage == "loose" and (all_loose or outside)):
 			_to_tray(gem)
 			recovered += 1
 	return recovered
 
 
-func _pile_ids(pile: int) -> Array:
-	var ids: Array = []
+func _rebuild_cells() -> void:
+	if mined.size() != MountainScript.empty_mined().size():
+		mined = MountainScript.empty_mined()
+	_buried_by_cell.clear()
+	var specials: Dictionary = {}
 	for id in gems:
-		if int(gems[id]["pile"]) == pile and str(gems[id]["stage"]) == "pile":
-			ids.append(int(id))
-	ids.sort()
-	return ids
+		var gem: Dictionary = gems[id]
+		if str(gem.get("stage", "")) == "buried":
+			var cell: int = int(gem.get("cell", -1))
+			_buried_by_cell[cell] = int(id)
+			specials[cell] = MountainScript.CRYSTAL if str(gem.kind) in ["suspect", "diamond"] else MountainScript.CURIO
+	cells = mountain.build_cells(seed_value, mined, specials)
+	_cell_seed = seed_value
+	_damage.clear()
+	world_reset.emit()
 
 
 func _suspicious(gem: Dictionary) -> bool:
@@ -818,7 +1105,7 @@ func _suspicious(gem: Dictionary) -> bool:
 
 
 func _sale_value(gem: Dictionary) -> int:
-	return maxi(0, int(round(float(gem.get("value", 0)) * (1.6 if bool(gem.get("clean", false)) else 1.0))))
+	return maxi(0, int(gem.get("value", 0)))
 
 
 func _owns(peer_id: int, id: int) -> bool:
@@ -831,25 +1118,12 @@ func _near_station(peer_id: int, station: String, reach: float = 4.0) -> bool:
 	return _peer_position(peer_id).distance_to(_station_position(station)) <= reach
 
 
-func _near_pile(peer_id: int, pile: int, reach: float) -> bool:
-	if not pile_positions.has(pile):
-		return false
-	var center: Vector3 = _as_vector(pile_positions[pile])
-	return _peer_position(peer_id).distance_to(center) <= reach
-
-
 func _station_position(station: String) -> Vector3:
 	return _as_vector(station_positions.get(station, Vector3.ZERO))
 
 
 func _peer_position(peer_id: int) -> Vector3:
 	return _array_vector(players.get(peer_id, {}).get("pos", [0, 1.6, 7]))
-
-
-func _pile_gem_position(id: int, sector: int) -> Vector3:
-	var center: Vector3 = _as_vector(pile_positions.get(sector, Vector3(-4.5 + float(sector % 4) * 3.0, 0.25, -4.4 + float(sector / 4) * 2.4)))
-	var slot: int = id % 60
-	return center + Vector3(float(slot % 10) * 0.235 - 1.06, 0.08 + float(slot % 7) * 0.025, float(slot / 10) * 0.25 - 0.625)
 
 
 func _vector_array(value: Vector3) -> Array:
@@ -873,7 +1147,7 @@ func _valid_position(value: Vector3) -> bool:
 
 
 func _player_template(id: int) -> Dictionary:
-	return {"id": id, "pos": [0.0, 1.6, 7.0], "yaw": 0.0, "pitch": 0.0, "hat": "", "cosmetics": [], "prank": "", "prank_until": 0.0, "foam_until": 0.0, "last_prank": 0.0}
+	return {"id": id, "pos": [0.0, 1.6, 7.0], "yaw": 0.0, "pitch": 0.0, "hat": "", "cosmetics": [], "prank": "", "prank_until": 0.0, "foam_until": 0.0, "last_prank": 0.0, "ore": {}}
 
 
 func _commit(message: String = "") -> void:
@@ -887,11 +1161,17 @@ func _commit(message: String = "") -> void:
 	save_game()
 
 
-func _reject(peer_id: int, message: String) -> void:
+func _tell(peer_id: int, message: String) -> void:
+	if message.is_empty():
+		return
 	if peer_id == local_id():
 		notice.emit(message)
 	elif _network_mode == "host":
 		_receive_notice.rpc_id(peer_id, message)
+
+
+func _reject(peer_id: int, message: String) -> void:
+	_tell(peer_id, message)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -903,6 +1183,8 @@ func _receive_snapshot(data: Dictionary) -> void:
 
 
 func _apply_snapshot(data: Dictionary) -> void:
+	var previous_seed: int = _cell_seed
+	var previous_mined: PackedByteArray = mined
 	seed_value = int(data.get("seed", 0))
 	money = maxi(0, int(data.get("money", 0)))
 	gems.clear()
@@ -925,6 +1207,34 @@ func _apply_snapshot(data: Dictionary) -> void:
 		players[int(id)] = incoming_players[id].duplicate(true)
 	certification_step = int(data.get("certification_step", 0))
 	certification_id = int(data.get("certification_id", -1))
+	var incoming_mined: PackedByteArray = Marshalls.base64_to_raw(str(data.get("mined", "")))
+	if incoming_mined.size() != MountainScript.empty_mined().size():
+		incoming_mined = MountainScript.empty_mined()
+	mined = incoming_mined
+	# Snapshots arrive after every shared transaction; only rebuild what changed.
+	if previous_seed != seed_value or cells.size() != MountainScript.CELL_COUNT or previous_mined.size() != mined.size():
+		_rebuild_cells()
+		return
+	var broken := PackedInt32Array()
+	for byte in range(mined.size()):
+		if mined[byte] == previous_mined[byte]:
+			continue
+		if (previous_mined[byte] & ~mined[byte]) != 0:
+			_rebuild_cells()
+			return
+		var fresh: int = mined[byte] & ~previous_mined[byte]
+		for bit in range(8):
+			if fresh & (1 << bit):
+				var cell: int = byte * 8 + bit
+				if cell < cells.size():
+					cells[cell] = MountainScript.AIR
+					broken.append(cell)
+	_buried_by_cell.clear()
+	for id in gems:
+		if str(gems[id].get("stage", "")) == "buried":
+			_buried_by_cell[int(gems[id].get("cell", -1))] = int(id)
+	if not broken.is_empty():
+		cells_changed.emit(broken)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -1064,8 +1374,19 @@ func _on_peer_connected(id: int) -> void:
 			multiplayer.multiplayer_peer.disconnect_peer(id)
 		return
 	players[id] = _player_template(id)
+	_steady_voice(id)
 	peer_joined.emit(id)
-	_commit("Player %d joined the shared workshop." % id)
+	_commit("Player %d joined the claim." % id)
+
+
+## ENet thins out unreliable packets when a peer acknowledges slowly; a brief hitch
+## (for example while the mountain loads) would silence voice for seconds. Voice is
+## tiny, so keep its throttle fully open.
+func _steady_voice(peer_id: int) -> void:
+	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		var link: ENetPacketPeer = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(peer_id)
+		if link != null:
+			link.throttle_configure(5000, 32, 0)
 
 
 func _on_peer_disconnected(id: int) -> void:
@@ -1075,16 +1396,22 @@ func _on_peer_disconnected(id: int) -> void:
 		players.erase(id)
 		peer_left.emit(id)
 		return
+	# A departing miner's satchel is sold into the shared funds rather than lost.
+	var payout: int = ore_value(id)
+	money += payout
 	players.erase(id)
-	_action_times.erase(id)
+	for fuse in _fuses.keys():
+		if int(_fuses[fuse].peer) == id:
+			_fuses.erase(fuse)
 	var rescued: int = _recover_strays()
 	peer_left.emit(id)
-	_commit("Player %d left. %d carried objects returned safely to the tray." % [id, rescued])
+	_commit("Player %d left. %d carried finds returned safely to the tray; their ore sold for $%d." % [id, rescued, payout])
 
 
 func _on_connected_to_server() -> void:
 	_connecting = false
-	connection_status.emit("Connected to shared workshop · player %d" % local_id())
+	_steady_voice(1)
+	connection_status.emit("Connected to shared claim · player %d" % local_id())
 	_request_snapshot.rpc_id(1)
 
 
@@ -1113,5 +1440,5 @@ func _on_server_disconnected() -> void:
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	players = {1: _player_template(1)}
 	_recover_strays()
-	connection_status.emit("Host disconnected. Return to the menu to load your solo workshop.")
+	connection_status.emit("Host disconnected. Return to the menu to load your solo camp.")
 	changed.emit()

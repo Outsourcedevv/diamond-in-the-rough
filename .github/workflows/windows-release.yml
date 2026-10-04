@@ -45,6 +45,7 @@ jobs:
           path: |
             build/*.log
             build/verification/*report.json
+            build/redesign-verification/*report.json
           if-no-files-found: ignore
           retention-days: 14
       - name: Transfer complete release assets

@@ -56,7 +56,7 @@ Download ``DIAMOND_IN_THE_ROUGH_Update.zip``, extract it and open ``DiamondInThe
 
 The repository is private: your GitHub account must have repository access to download updates. Sign in with GitHub CLI or use the game's read-only session credential option. Credentials are never included in this build.
 
-This build passed native solo integration verification before publishing. Co-op peers should all use this build. ``latest.json`` supplies the version, build number, ZIP size and SHA256 used by the in-game updater.
+This build includes the alpine mountain claim, physical equipment purchases, a playable tutorial and a responsive interface. It passed native solo progression, mountain, tutorial and screen-layout integration checks before publishing. Co-op peers should all use this build. ``latest.json`` supplies the version, build number, ZIP size and SHA256 used by the in-game updater.
 "@
     [IO.File]::WriteAllText($notesPath, $notes, [Text.UTF8Encoding]::new($false))
     Invoke-GitHub @('release', 'create', $tag, '--repo', $Repository, '--target', $Commit, '--title', "DIAMOND IN THE ROUGH $($manifest.version)", '--notes-file', $notesPath, '--draft') | Write-Host

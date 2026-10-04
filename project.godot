@@ -5,15 +5,17 @@ config_version=5
 config/name="DIAMOND IN THE ROUGH"
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
-config/description="One real diamond. An unreasonable amount of rubbish."
+config/description="Explore a mountain claim and recover one real diamond."
 config/icon="res://icon.svg"
 
 [display]
-window/size/viewport_width=1440
-window/size/viewport_height=900
+window/size/viewport_width=1280
+window/size/viewport_height=720
 window/size/window_width_override=1280
-window/size/window_height_override=800
-window/stretch/mode="canvas_items"
+window/size/window_height_override=720
+window/stretch/mode="disabled"
+window/size/min_width=800
+window/size/min_height=600
 window/handheld/orientation=0
 
 [rendering]
@@ -21,7 +23,7 @@ renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/default_filters/use_nearest_mipmap_filter=false
 anti_aliasing/quality/msaa_3d=2
-environment/defaults/default_clear_color=Color(0.055, 0.095, 0.105, 1)
+environment/defaults/default_clear_color=Color(0.52, 0.63, 0.71, 1)
 
 [physics]
 common/physics_ticks_per_second=60

@@ -19,6 +19,15 @@ var output_capture: AudioEffectCapture
 var output_bus := ""
 var output_bus_index := -1
 var original_voice_send := "Master"
+var phase_marks: Dictionary = {}
+var measuring_output := false
+var phase_output_peak := 0.0
+var phase_decoded_peak := 0.0
+var phase_speaker_seen := false
+var phase_generator_valid := false
+var phase_echo_seen := false
+var phase_output_timeline: Array[Dictionary] = []
+var next_telemetry_at := 0
 
 func begin(owner_game: Node, mode: String, args: PackedStringArray) -> void:
 	game = owner_game
@@ -84,13 +93,29 @@ func advance(value: int, name: String) -> void:
 	write_report()
 
 func write_report() -> void:
-	var data := {"role": role, "phase": phase, "stage": stage, "checks": checks, "errors": errors, "elapsed_ms": Time.get_ticks_msec() - started, "local_id": game.state.local_id(), "players": game.state.players.size(), "measurements": measurements, "counters": counters()}
+	var data := {"role": role, "phase": phase, "stage": stage, "checks": checks, "errors": errors, "elapsed_ms": Time.get_ticks_msec() - started, "local_id": game.state.local_id(), "remote_id": remote_peer, "players": game.state.players.size(), "phase_marks": phase_marks, "measurements": measurements, "counters": counters()}
 	var file := FileAccess.open(report_dir.path_join("voice_%s_report.json" % role), FileAccess.WRITE)
 	if file:
 		file.store_string(JSON.stringify(data, "  "))
 
 func counters() -> Dictionary:
-	return {"captured": game.voice.captured_packets, "received": game.voice.received_packets, "played": game.voice.played_packets, "decoded_samples": game.voice.decoded_samples, "network_sent": game.state.voice_sent_packets, "network_received": game.state.voice_received_packets, "network_relayed": game.state.voice_relayed_packets}
+	return {"captured": game.voice.captured_packets, "received": game.voice.received_packets, "played": game.voice.played_packets, "decoded_samples": game.voice.decoded_samples, "network_sent": game.state.voice_sent_packets, "network_received": game.state.voice_received_packets, "network_relayed": game.state.voice_relayed_packets, "last_accepted_voice_sequence":int(game.state._voice_received_sequences.get(remote_peer,-1)), "next_capture_sequence":game.voice._sequence}
+
+func diagnostics() -> Dictionary:
+	var data := {"elapsed_ms":Time.get_ticks_msec()-started, "fps":Engine.get_frames_per_second(), "counters":counters()}
+	var transport: MultiplayerPeer = game.state.multiplayer.multiplayer_peer
+	if transport is ENetMultiplayerPeer and remote_peer > 0 and game.state.players.has(remote_peer) and transport.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+		var peer: ENetPacketPeer = transport.get_peer(remote_peer)
+		if peer != null:
+			data["enet"] = {
+				"throttle":peer.get_statistic(ENetPacketPeer.PEER_PACKET_THROTTLE),
+				"throttle_limit":peer.get_statistic(ENetPacketPeer.PEER_PACKET_THROTTLE_LIMIT),
+				"round_trip_ms":peer.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME),
+				"round_trip_variance_ms":peer.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME_VARIANCE),
+				"last_round_trip_ms":peer.get_statistic(ENetPacketPeer.PEER_LAST_ROUND_TRIP_TIME),
+				"reliable_packet_loss":peer.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS)
+			}
+	return data
 
 func peer_report() -> Dictionary:
 	var peer_role := "client" if role == "host" else "host"
@@ -115,6 +140,22 @@ func wait_for(condition: Callable, limit: float = 30.0) -> bool:
 
 func peer_reached(value: int) -> bool:
 	return int(peer_report().get("stage", -1)) >= value
+
+func peer_marked(name: String) -> bool:
+	var report := peer_report()
+	# Ignore reports from an older pair when a report directory is reused.
+	# The authenticated ENet client ID changes for each new connection.
+	if int(report.get("local_id",-1)) != remote_peer or int(report.get("remote_id",-1)) != game.state.local_id():
+		return false
+	var marks: Variant = report.get("phase_marks",{})
+	return marks is Dictionary and bool(marks.get(name,false))
+
+func phase_barrier(name: String, message: String) -> bool:
+	phase_marks[name] = true
+	write_report()
+	var ready := await wait_for(func(): return peer_marked(name))
+	check(ready,message)
+	return ready
 
 func pause(seconds: float) -> void:
 	await get_tree().create_timer(seconds).timeout
@@ -169,6 +210,41 @@ func output_rms() -> float:
 		energy += (frame.x * frame.x + frame.y * frame.y) * 0.5
 	return sqrt(energy / frames.size())
 
+func _process(_delta: float) -> void:
+	if measuring_output and is_instance_valid(output_capture):
+		phase_output_peak = maxf(phase_output_peak,output_rms())
+		sample_live_voice()
+		var now := Time.get_ticks_msec()
+		if now >= next_telemetry_at:
+			phase_output_timeline.append(diagnostics())
+			next_telemetry_at = now+250
+
+func sample_live_voice() -> void:
+	phase_decoded_peak = maxf(phase_decoded_peak,float(game.voice.received_rms.get(remote_peer,0.0)))
+	phase_echo_seen = phase_echo_seen or game.voice.playback_streams.has(game.state.local_id())
+	if game.voice.playback_streams.has(remote_peer):
+		phase_speaker_seen = true
+		var entry: Dictionary = game.voice.playback_streams[remote_peer]
+		var speaker: Variant = entry.get("player")
+		phase_generator_valid = phase_generator_valid or (speaker is AudioStreamPlayer3D and is_instance_valid(speaker) and speaker.stream is AudioStreamGenerator and is_equal_approx(speaker.stream.mix_rate,16000.0))
+
+func start_output_measurement() -> void:
+	output_capture.clear_buffer()
+	phase_output_peak = 0.0
+	phase_decoded_peak = 0.0
+	phase_speaker_seen = false
+	phase_generator_valid = false
+	phase_echo_seen = false
+	phase_output_timeline = []
+	next_telemetry_at = 0
+	measuring_output = true
+
+func finish_output_measurement() -> float:
+	phase_output_peak = maxf(phase_output_peak,output_rms())
+	sample_live_voice()
+	measuring_output = false
+	return phase_output_peak
+
 func tone_capture(allow_send: bool = true) -> void:
 	# Stereo 48 kHz microphone-shaped samples exercise the actual resampler.
 	var samples := PackedVector2Array()
@@ -181,34 +257,53 @@ func tone_capture(allow_send: bool = true) -> void:
 	game.voice.ingest_capture(samples, 48000.0, allow_send)
 
 func tones(count: int, take_screenshot: bool = false) -> void:
+	var batch_started := Time.get_ticks_msec()
+	var frames_before := Engine.get_process_frames()
+	var before := diagnostics()
 	for index in range(count):
 		tone_capture()
 		if take_screenshot and index == count - 5:
 			await screenshot("voice_near_%s" % role)
 		await pause(0.02)
+	var duration_ms := Time.get_ticks_msec()-batch_started
+	var batches: Array = measurements.get("tone_batches",[])
+	batches.append({"phase":phase,"frames_requested":count,"wall_duration_ms":duration_ms,"process_frames":Engine.get_process_frames()-frames_before,"mean_fps":float(Engine.get_process_frames()-frames_before)*1000.0/maxi(1,duration_ms),"before":before,"after":diagnostics()})
+	measurements["tone_batches"] = batches
+	write_report()
 
 func near_probe() -> void:
 	var before := counters()
-	output_capture.clear_buffer()
+	start_output_measurement()
+	# Both baselines must exist before either process starts sending. A faster
+	# renderer may finish its tone loop long before the other process does.
+	if not await phase_barrier("near_listening_ready","Both listeners record a baseline before the near-range batch"):
+		finish_output_measurement()
+		return
 	await tones(72, true)
-	await pause(0.1)
+	await phase_barrier("near_tones_sent","Both processes finish sending the full near-range tone batch")
+	# Allow the final unreliable packets and queued audio to be processed.
+	# RMS is sampled throughout the batch, so this drain cannot hide output.
+	await pause(0.4)
 	var after := counters()
 	measurements["near_before"] = before
 	measurements["near_after"] = after
-	measurements["near_output_rms"] = output_rms()
-	measurements["received_decoded_rms"] = float(game.voice.received_rms.get(remote_peer, 0.0))
+	measurements["near_output_rms"] = finish_output_measurement()
+	measurements["near_timeline"] = phase_output_timeline.duplicate(true)
+	measurements["near_transport_end"] = diagnostics()
+	measurements["near_peer_measurements"] = peer_report().get("measurements",{}).duplicate(true)
+	measurements["received_decoded_rms"] = phase_decoded_peak
 	check(int(after.captured) - int(before.captured) >= 60, "48 kHz stereo capture resamples into 16 kHz twenty-millisecond frames")
 	check(int(after.network_sent) - int(before.network_sent) >= 60, "Synthetic speech uses the live ENet voice sender")
 	check(int(after.received) - int(before.received) >= 30, "Nearby remote peer is heard through real two-process ENet")
 	check(int(after.played) - int(before.played) >= 20, "Received voice passes through the bounded playback buffer")
 	check(int(after.decoded_samples) - int(before.decoded_samples) >= 30 * 320, "Received mu-law frames decode into real float audio samples")
+	check(int(after.decoded_samples) - int(before.decoded_samples) == (int(after.received) - int(before.received)) * 320, "Every accepted remote voice frame decodes to exactly 320 float samples")
 	check(float(measurements.received_decoded_rms) > 0.08, "Remote synthetic voice retains audible decoded energy")
-	check(not game.voice.playback_streams.has(game.state.local_id()), "Local speech never creates a local echo stream")
-	check(game.voice.playback_streams.has(remote_peer), "Remote speech creates an individual spatial speaker")
-	if game.voice.playback_streams.has(remote_peer):
-		var entry: Dictionary = game.voice.playback_streams[remote_peer]
-		var speaker: Variant = entry.get("player")
-		check(speaker is AudioStreamPlayer3D and speaker.stream is AudioStreamGenerator and is_equal_approx(speaker.stream.mix_rate, 16000.0), "Remote voice uses a 16 kHz AudioStreamGenerator on a 3D speaker")
+	# Receivers intentionally expire 450 ms after the final packet. Inspect their
+	# real live properties while speech arrives, rather than after the drain.
+	check(not phase_echo_seen, "Local speech never creates a local echo stream")
+	check(phase_speaker_seen, "Remote speech creates an individual spatial speaker")
+	check(phase_generator_valid, "Remote voice uses a 16 kHz AudioStreamGenerator on a 3D speaker")
 	if DisplayServer.get_name() != "headless":
 		check(float(measurements.near_output_rms) > 0.005, "Native audio bus contains synthetic voice after spatial speaker output")
 	else:
@@ -238,13 +333,18 @@ func blocked_capture_probe() -> void:
 func far_probe() -> void:
 	await pause(0.35)
 	var before := counters()
-	output_capture.clear_buffer()
+	start_output_measurement()
+	if not await phase_barrier("far_listening_ready","Both peers drain prior audio before checking out-of-range silence"):
+		finish_output_measurement()
+		return
 	await tones(24)
+	await phase_barrier("far_tones_sent","Both processes finish the out-of-range network speech batch")
 	await pause(0.15)
 	var after := counters()
 	measurements["far_before"] = before
 	measurements["far_after"] = after
-	measurements["far_output_rms"] = output_rms()
+	measurements["far_output_rms"] = finish_output_measurement()
+	measurements["far_timeline"] = phase_output_timeline.duplicate(true)
 	check(int(after.network_sent) > int(before.network_sent), "Out-of-range speech still exercises authenticated sending")
 	check(int(after.network_received) == int(before.network_received), "Server relays no speech between players more than twelve metres apart")
 	check(int(after.played) == int(before.played), "Out-of-range speech produces no new playback frames")
@@ -269,12 +369,17 @@ func check_disabled(played_before: int) -> void:
 
 func resume_probe() -> void:
 	var played_before: int = game.voice.played_packets
-	output_capture.clear_buffer()
+	start_output_measurement()
+	if not await phase_barrier("resume_listening_ready","Both re-enabled listeners are ready before speech resumes"):
+		finish_output_measurement()
+		return
 	await tones(24)
+	await phase_barrier("resume_tones_sent","Both peers finish sending the restored voice batch")
 	await pause(0.12)
 	check(game.voice.played_packets > played_before and game.voice.playback_streams.has(remote_peer), "Re-enabling voice restores live remote playback in the same session")
-	var resumed_rms := output_rms()
+	var resumed_rms := finish_output_measurement()
 	measurements["resumed_output_rms"] = resumed_rms
+	measurements["resume_timeline"] = phase_output_timeline.duplicate(true)
 	if DisplayServer.get_name() != "headless":
 		check(resumed_rms > 0.005, "Re-enabled spatial speaker resumes synthetic audio output")
 
