@@ -23,9 +23,9 @@ function RockStyle.forCell(key: number)
 	return {
 		shape = shape,
 		-- Overlap closes seams while offsets, tilts and unequal axes break the grid.
-		x = 1.30 + b * 0.30,
-		y = 1.08 + c * 0.20,
-		z = 1.28 + d * 0.30,
+		x = 1.55 + b * 0.35,
+		y = 1.30 + c * 0.24,
+		z = 1.54 + d * 0.35,
 		ox = (c - 0.5) * 0.12,
 		oy = (a - 0.5) * 0.08,
 		oz = (b - 0.5) * 0.12,

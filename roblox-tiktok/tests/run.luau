@@ -62,7 +62,7 @@ for x = -128, 127 do
 	local rock = RockStyle.forCell(key)
 	local again = RockStyle.forCell(key)
 	check(rock.shape == again.shape and rock.yaw == again.yaw and rock.shade == again.shade, "uncovered rock keeps its appearance")
-	check(rock.x >= 1.3 and rock.x <= 1.6 and rock.y >= 1.08 and rock.y <= 1.28 and rock.z >= 1.28 and rock.z <= 1.58, "stone sizes stay within the compact rubble envelope")
+	check(rock.x >= 1.55 and rock.x <= 1.9 and rock.y >= 1.30 and rock.y <= 1.54 and rock.z >= 1.54 and rock.z <= 1.89, "stone sizes stay within the compact rubble envelope")
 	check(math.abs(rock.ox) <= 0.06 and math.abs(rock.oz) <= 0.06 and math.abs(rock.oy) <= 0.04, "stone jitter stays tied to its diggable cell")
 	styles[rock.shape] = true
 	if rock.shape ~= previousShape then changesInRow += 1 end
@@ -91,10 +91,35 @@ local x, y, z = Grid.coords(Grid.key(-15, 13, 7))
 check(x == -15 and y == 13 and z == 7, "keys round-trip coordinates")
 check(not grid:isSolid(hidden) and not grid:isOpenAround(hidden), "the diamond starts sealed inside the rock")
 check(grid.exposedIndex[hidden] == nil, "rock around the diamond does not count as uncovered")
+-- Model the rendered shell across a blast; newly exposed cells must bring their
+-- backing neighbours forward, and removed cells must never remain in the shell.
+local shell = {}
+local function drawShell(key)
+	if not grid:isSolid(key) then return end
+	shell[key] = true
+	for _, neighbour in grid:solidNeighbours(key) do shell[neighbour] = true end
+end
+for _, key in grid.exposedList do drawShell(key) end
+local shellCount = 0
+for _ in shell do shellCount += 1 end
+check(shellCount > grid:exposedCount() and shellCount < 40000, "two layers have a bounded part count: " .. shellCount)
+check(not shell[hidden], "backing never fills the diamond cavity")
 grid:takeFresh()
 local removed, centre = grid:blast(400)
 check(#removed == 400 and centre ~= nil, "a blast removes exactly the requested number of rocks")
-check(#grid:takeFresh() > 0, "a blast uncovers new rocks to draw")
+for _, key in removed do shell[key] = nil end
+local fresh = grid:takeFresh()
+check(#fresh > 0, "a blast uncovers new rocks to draw")
+for _, key in fresh do drawShell(key) end
+local backed = true
+for _, key in grid.exposedList do
+	if not shell[key] then backed = false end
+	for _, neighbour in grid:solidNeighbours(key) do
+		if not shell[neighbour] then backed = false end
+	end
+end
+check(backed, "every crater surface keeps a second layer after blasting")
+for _, key in removed do check(not shell[key], "removed stones do not leave backing behind") end
 local cx, cy, cz = Grid.coords(centre :: number)
 local far = 0
 for _, key in removed do

@@ -665,8 +665,15 @@ UserInputService.WindowFocusReleased:Connect(function()
 end)
 RunService.Heartbeat:Connect(function(dt: number)
 	local phase = attr("Phase", "Digging")
-	if not digging or panel.Visible or phase == "Won"
-		or (phase == "Holding" and attr("HolderUserId", 0) == player.UserId) then
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	local target = mouse.Target
+	local allowed = digging and not panel.Visible and phase ~= "Won"
+		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
+	local onRock = allowed and root ~= nil and root:IsA("BasePart")
+		and target ~= nil and target.Name == "Stone"
+		and (root.Position - target.Position).Magnitude <= 16
+	player:SetAttribute("DiggingRock", onRock == true)
+	if not allowed then
 		return
 	end
 	digClock += dt

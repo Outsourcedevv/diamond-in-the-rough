@@ -129,6 +129,20 @@ function Grid.isSolid(self: Grid, key: number): boolean
 	return self.solid[key] == true
 end
 
+-- One solid layer behind a surface cell, excluding ground and the diamond cavity.
+function Grid.solidNeighbours(self: Grid, key: number): { number }
+	local x, y, z = Grid.coords(key)
+	local result = {}
+	for _, step in NEIGHBOURS do
+		local ny = y + step[2]
+		local neighbour = Grid.key(x + step[1], ny, z + step[3])
+		if ny >= 0 and self:isSolid(neighbour) then
+			table.insert(result, neighbour)
+		end
+	end
+	return result
+end
+
 function Grid.remaining(self: Grid): number
 	return self.total - self.removed
 end

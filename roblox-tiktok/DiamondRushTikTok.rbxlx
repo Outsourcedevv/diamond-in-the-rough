@@ -1004,6 +1004,20 @@ function Grid.isSolid(self: Grid, key: number): boolean
 	return self.solid[key] == true
 end
 
+-- One solid layer behind a surface cell, excluding ground and the diamond cavity.
+function Grid.solidNeighbours(self: Grid, key: number): { number }
+	local x, y, z = Grid.coords(key)
+	local result = {}
+	for _, step in NEIGHBOURS do
+		local ny = y + step[2]
+		local neighbour = Grid.key(x + step[1], ny, z + step[3])
+		if ny >= 0 and self:isSolid(neighbour) then
+			table.insert(result, neighbour)
+		end
+	end
+	return result
+end
+
 function Grid.remaining(self: Grid): number
 	return self.total - self.removed
 end
@@ -1233,9 +1247,8 @@ return Grid
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
--- Draws the mountain: one small rock per stone. To keep Roblox fast only the
--- rocks on the outside exist as parts; rocks inside are tracked by the grid
--- and get a part the moment digging uncovers them, so it looks solid.
+-- Draws the exposed stones plus one solid layer behind them. The shell advances
+-- as digging opens the mountain, without instantiating all 250,000 cells.
 local Debris = game:GetService("Debris")
 
 local Grid = require(script.Parent.Grid)
@@ -1298,7 +1311,7 @@ function Mountain.new(parent: Instance, stones: number, blockSize: number, onDia
 		self.tops[column] = math.max(self.tops[column] or 0, y)
 	end
 	for _, key in grid.exposedList do
-		self:_draw(key)
+		self:_drawShell(key)
 	end
 	grid:takeFresh()
 	folder.Parent = parent
@@ -1317,19 +1330,35 @@ end
 
 function Mountain._draw(self: Mountain, key: number)
 	local existing: BasePart? = self.parts[key]
-	if existing ~= nil or not self.grid:isSolid(key) then
+	if not self.grid:isSolid(key) then
 		return
+	end
+	local backing = self.grid.exposedIndex[key] == nil
+	if existing ~= nil then
+		if backing or not existing:GetAttribute("BackingRock") then return end
+		-- The inner stone becomes a faceted, diggable surface stone when uncovered.
+		self.keys[existing] = nil
+		existing:Destroy()
 	end
 	local x, y, z = Grid.coords(key)
 	local size = self.blockSize
 	local style = RockStyle.forCell(key)
-	local part = Instance.new(style.shape) :: BasePart
+	local part = Instance.new(if backing then "Part" else style.shape) :: BasePart
 	part.Name = "Stone"
 	part.Anchored = true
 	part.CastShadow = false
 	part.Size = Vector3.new(style.x, style.y, style.z) * size
 	part.CFrame = CFrame.new(self:cellPosition(x, y, z) + Vector3.new(style.ox, style.oy, style.oz) * size)
 		* CFrame.Angles(style.pitch, style.yaw, style.roll)
+	if backing then
+		-- Flush blocks close sightlines between the larger irregular surface rocks.
+		part.Size = Vector3.new(1.02, 1.02, 1.02) * size
+		part.CFrame = CFrame.new(self:cellPosition(x, y, z))
+		part:SetAttribute("BackingRock", true)
+	end
+	part.CanCollide = not backing
+	part.CanQuery = not backing
+	part.CanTouch = false
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
 	local height = self.grid.height
@@ -1355,6 +1384,14 @@ function Mountain._draw(self: Mountain, key: number)
 	part.Parent = self.folder
 	self.parts[key] = part
 	self.keys[part] = key
+end
+
+function Mountain._drawShell(self: Mountain, key: number)
+	if not self.grid:isSolid(key) then return end
+	self:_draw(key)
+	for _, neighbour in self.grid:solidNeighbours(key) do
+		self:_draw(neighbour)
+	end
 end
 
 function Mountain.total(self: Mountain): number
@@ -1401,7 +1438,7 @@ function Mountain._settle(self: Mountain, removed: { number }, centre: Vector3?)
 		end
 	end
 	for _, key in self.grid:takeFresh() do
-		self:_draw(key)
+		self:_drawShell(key)
 	end
 	if not self.revealed and self.grid:isOpenAround(self.diamondKey) then
 		self.revealed = true
@@ -1492,9 +1529,9 @@ function RockStyle.forCell(key: number)
 	return {
 		shape = shape,
 		-- Overlap closes seams while offsets, tilts and unequal axes break the grid.
-		x = 1.30 + b * 0.30,
-		y = 1.08 + c * 0.20,
-		z = 1.28 + d * 0.30,
+		x = 1.55 + b * 0.35,
+		y = 1.30 + c * 0.24,
+		z = 1.54 + d * 0.35,
 		ox = (c - 0.5) * 0.12,
 		oy = (a - 0.5) * 0.08,
 		oz = (b - 0.5) * 0.12,
@@ -2575,8 +2612,15 @@ UserInputService.WindowFocusReleased:Connect(function()
 end)
 RunService.Heartbeat:Connect(function(dt: number)
 	local phase = attr("Phase", "Digging")
-	if not digging or panel.Visible or phase == "Won"
-		or (phase == "Holding" and attr("HolderUserId", 0) == player.UserId) then
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	local target = mouse.Target
+	local allowed = digging and not panel.Visible and phase ~= "Won"
+		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
+	local onRock = allowed and root ~= nil and root:IsA("BasePart")
+		and target ~= nil and target.Name == "Stone"
+		and (root.Position - target.Position).Magnitude <= 16
+	player:SetAttribute("DiggingRock", onRock == true)
+	if not allowed then
 		return
 	end
 	digClock += dt
@@ -2598,10 +2642,10 @@ end)
             <string name="Source"><![CDATA[--!strict
 -- First-person view with two hands in front of the camera (like the PC game).
 -- The hands follow the camera, bob while walking and swing when you click.
--- You dig with your hands: each click punches with the other hand.
+-- Alternating hands reach, curl around stone and rake rubble back.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+
 
 local FirstPerson = {}
 
@@ -2687,25 +2731,14 @@ function FirstPerson.start()
 			end
 		end
 	end)
-	local swing = 0
+	local cycle = 1
 	local punchSide = 1
 	local bob = 0
-	local held = false
-	UserInputService.InputBegan:Connect(function(input, processed)
-		if not processed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-			held = true
-			swing = 1
-			punchSide = -punchSide
-		end
-	end)
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			held = false
-		end
-	end)
-	UserInputService.WindowFocusReleased:Connect(function()
-		held = false
-	end)
+	local digBlend = 0
+	local function smooth(value: number): number
+		value = math.clamp(value, 0, 1)
+		return value * value * (3 - 2 * value)
+	end
 
 	-- Position the hands after both Roblox's camera and our hold-camera update.
 	RunService:BindToRenderStep("DiamondRushHands", Enum.RenderPriority.Camera.Value + 2, function(dt: number)
@@ -2733,28 +2766,36 @@ function FirstPerson.start()
 		local moving = humanoid.MoveDirection.Magnitude > 0.1 and humanoid.FloorMaterial ~= Enum.Material.Air
 		bob += dt * (if moving then 9 else 2)
 		local sway = if moving then 0.05 else 0.015
-		swing = math.max(0, swing - dt * 7)
-		-- Holding dig keeps both hands tearing at the rock in turn.
 		local holding = isHolding()
-		if holding then held = false end
-		if held and swing <= 0 then
-			swing = 1
+		local digging = player:GetAttribute("DiggingRock") == true and not holding
+		digBlend += ((if digging then 1 else 0) - digBlend) * (1 - math.exp(-dt * 14))
+		if holding then
+			cycle = 1
+		elseif cycle < 1 then
+			cycle = math.min(1, cycle + dt / 0.38)
+		elseif digging then
+			cycle = 0
 			punchSide = -punchSide
 		end
-		local strike = math.sin(swing * math.pi)
+		-- Wind up, reach quickly into the stone, rake down, then pull the rubble back.
+		local wind = smooth(cycle / 0.18) * (1 - smooth((cycle - 0.18) / 0.16))
+		local reach = smooth((cycle - 0.18) / 0.20)
+		local pull = smooth((cycle - 0.48) / 0.52)
+		local extension = reach * (1 - pull) * digBlend
+		local scoop = math.sin(math.clamp((cycle - 0.38) / 0.62, 0, 1) * math.pi) * digBlend
 		-- While you hold the diamond your right hand lifts it to the sky.
 		lift += ((if holding then 1 else 0) - lift) * math.min(1, dt * 8)
 		worldDiamond.LocalTransparencyModifier = if holding then 1 else 0
 		local worldLight = worldDiamond:FindFirstChildOfClass("PointLight")
 		if worldLight then worldLight.Enabled = State:GetAttribute("Phase") == "Holding" and not holding end
-		if lift > 0.01 then
-			strike = 0
-		end
 		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
 		for _, h in hands do
-			local hit = if h.side == punchSide then strike else 0
-			local normal = base * CFrame.new(h.side * 0.75, hit * 0.25, -hit * 0.4)
-				* CFrame.Angles(math.rad(10 + hit * -55), math.rad(-h.side * 8), 0)
+			local active = if h.side == punchSide then 1 - lift else 0
+			local hit = extension * active
+			local rake = scoop * active
+			local prep = wind * digBlend * active
+			local normal = base * CFrame.new(h.side * (0.58 - hit * 0.24), hit * 0.27 - rake * 0.19, -hit * 0.62 + prep * 0.12 + rake * 0.16)
+				* CFrame.Angles(math.rad(10 - hit * 22 + rake * 34 + prep * 12), math.rad(-h.side * (8 + hit * 12)), math.rad(h.side * (rake * 16 - hit * 8)))
 			-- Camera-relative grip stays below the countdown, well inside the lens.
 			-- 62-degree camera tilt + 28-degree arm tilt still points up at the sky.
 			local raised = if h.side == 1
@@ -2765,7 +2806,7 @@ function FirstPerson.start()
 			h.hand.CFrame = arm * CFrame.new(0, 0, -0.35)
 			h.hand.Color = skin
 			h.hand.LocalTransparencyModifier = 0
-			local grip = if h.side == 1 then lift else 0
+			local grip = math.max(if h.side == 1 then lift else 0, rake * 0.85)
 			for index, finger in h.fingers do
 				finger.Color = skin
 				finger.CFrame = h.hand.CFrame * CFrame.new((index - 2.5) * 0.09, grip * 0.16, -0.27 + grip * 0.16)

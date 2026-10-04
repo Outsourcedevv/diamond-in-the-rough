@@ -1,6 +1,6 @@
 # Diamond Rush: TikTok Live Roblox game
 
-A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 tiny rocks** (one rock is one stone) is shown counting down at the top of the screen. Uneven slate chips, broken wedges and stone fragments overlap in muted rock colours: finding the one small diamond should feel like finding a needle in a haystack. Every gift, like, follow and share from your viewers blasts stone out of it. Once the diamond is exposed, find it, click it and **hold it for 15 seconds** to win.
+A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 rocks** (one rock is one stone) is shown counting down at the top of the screen. Larger uneven slate chips and broken wedges overlap over a second solid stone layer that advances as you dig: finding the one small diamond should feel like finding a needle in a haystack. Every gift, like, follow and share from your viewers blasts stone out of it. Once the diamond is exposed, find it, click it and **hold it for 15 seconds** to win.
 
 - **Stone counter.** The top of the screen shows how much stone is left (250,000 to start), with a progress bar.
 - **Gifts blast the mountain.** Each TikTok coin removes 100 rocks, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. The counter always equals the rocks really left. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
@@ -11,7 +11,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 - **Scenery.** Rolling hills, a ring of snowy peaks, a lake, a pine forest, boulders, clouds and a campfire at the camp.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and ⭐ NEW BEST! when you beat it). Then a fresh mountain appears.
-- **Dig with your hands.** First-person view with two hands: hold the left mouse button on the mountain and your hands tear out about 100 rocks a second.
+- **Dig with your hands.** First-person view with two hands: hold the left mouse button on the mountain and your hands alternate between reaching, scooping and pulling rubble back, removing about 100 rocks a second. Fingers curl during the scoop; the animation pauses when you aim away from reachable stone.
 
 ## What you need
 

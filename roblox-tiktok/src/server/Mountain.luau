@@ -1,7 +1,6 @@
 --!strict
--- Draws the mountain: one small rock per stone. To keep Roblox fast only the
--- rocks on the outside exist as parts; rocks inside are tracked by the grid
--- and get a part the moment digging uncovers them, so it looks solid.
+-- Draws the exposed stones plus one solid layer behind them. The shell advances
+-- as digging opens the mountain, without instantiating all 250,000 cells.
 local Debris = game:GetService("Debris")
 
 local Grid = require(script.Parent.Grid)
@@ -64,7 +63,7 @@ function Mountain.new(parent: Instance, stones: number, blockSize: number, onDia
 		self.tops[column] = math.max(self.tops[column] or 0, y)
 	end
 	for _, key in grid.exposedList do
-		self:_draw(key)
+		self:_drawShell(key)
 	end
 	grid:takeFresh()
 	folder.Parent = parent
@@ -83,19 +82,35 @@ end
 
 function Mountain._draw(self: Mountain, key: number)
 	local existing: BasePart? = self.parts[key]
-	if existing ~= nil or not self.grid:isSolid(key) then
+	if not self.grid:isSolid(key) then
 		return
+	end
+	local backing = self.grid.exposedIndex[key] == nil
+	if existing ~= nil then
+		if backing or not existing:GetAttribute("BackingRock") then return end
+		-- The inner stone becomes a faceted, diggable surface stone when uncovered.
+		self.keys[existing] = nil
+		existing:Destroy()
 	end
 	local x, y, z = Grid.coords(key)
 	local size = self.blockSize
 	local style = RockStyle.forCell(key)
-	local part = Instance.new(style.shape) :: BasePart
+	local part = Instance.new(if backing then "Part" else style.shape) :: BasePart
 	part.Name = "Stone"
 	part.Anchored = true
 	part.CastShadow = false
 	part.Size = Vector3.new(style.x, style.y, style.z) * size
 	part.CFrame = CFrame.new(self:cellPosition(x, y, z) + Vector3.new(style.ox, style.oy, style.oz) * size)
 		* CFrame.Angles(style.pitch, style.yaw, style.roll)
+	if backing then
+		-- Flush blocks close sightlines between the larger irregular surface rocks.
+		part.Size = Vector3.new(1.02, 1.02, 1.02) * size
+		part.CFrame = CFrame.new(self:cellPosition(x, y, z))
+		part:SetAttribute("BackingRock", true)
+	end
+	part.CanCollide = not backing
+	part.CanQuery = not backing
+	part.CanTouch = false
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
 	local height = self.grid.height
@@ -121,6 +136,14 @@ function Mountain._draw(self: Mountain, key: number)
 	part.Parent = self.folder
 	self.parts[key] = part
 	self.keys[part] = key
+end
+
+function Mountain._drawShell(self: Mountain, key: number)
+	if not self.grid:isSolid(key) then return end
+	self:_draw(key)
+	for _, neighbour in self.grid:solidNeighbours(key) do
+		self:_draw(neighbour)
+	end
 end
 
 function Mountain.total(self: Mountain): number
@@ -167,7 +190,7 @@ function Mountain._settle(self: Mountain, removed: { number }, centre: Vector3?)
 		end
 	end
 	for _, key in self.grid:takeFresh() do
-		self:_draw(key)
+		self:_drawShell(key)
 	end
 	if not self.revealed and self.grid:isOpenAround(self.diamondKey) then
 		self.revealed = true

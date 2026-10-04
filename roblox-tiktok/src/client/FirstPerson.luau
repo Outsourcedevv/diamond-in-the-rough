@@ -1,10 +1,10 @@
 --!strict
 -- First-person view with two hands in front of the camera (like the PC game).
 -- The hands follow the camera, bob while walking and swing when you click.
--- You dig with your hands: each click punches with the other hand.
+-- Alternating hands reach, curl around stone and rake rubble back.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+
 
 local FirstPerson = {}
 
@@ -90,25 +90,14 @@ function FirstPerson.start()
 			end
 		end
 	end)
-	local swing = 0
+	local cycle = 1
 	local punchSide = 1
 	local bob = 0
-	local held = false
-	UserInputService.InputBegan:Connect(function(input, processed)
-		if not processed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-			held = true
-			swing = 1
-			punchSide = -punchSide
-		end
-	end)
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			held = false
-		end
-	end)
-	UserInputService.WindowFocusReleased:Connect(function()
-		held = false
-	end)
+	local digBlend = 0
+	local function smooth(value: number): number
+		value = math.clamp(value, 0, 1)
+		return value * value * (3 - 2 * value)
+	end
 
 	-- Position the hands after both Roblox's camera and our hold-camera update.
 	RunService:BindToRenderStep("DiamondRushHands", Enum.RenderPriority.Camera.Value + 2, function(dt: number)
@@ -136,28 +125,36 @@ function FirstPerson.start()
 		local moving = humanoid.MoveDirection.Magnitude > 0.1 and humanoid.FloorMaterial ~= Enum.Material.Air
 		bob += dt * (if moving then 9 else 2)
 		local sway = if moving then 0.05 else 0.015
-		swing = math.max(0, swing - dt * 7)
-		-- Holding dig keeps both hands tearing at the rock in turn.
 		local holding = isHolding()
-		if holding then held = false end
-		if held and swing <= 0 then
-			swing = 1
+		local digging = player:GetAttribute("DiggingRock") == true and not holding
+		digBlend += ((if digging then 1 else 0) - digBlend) * (1 - math.exp(-dt * 14))
+		if holding then
+			cycle = 1
+		elseif cycle < 1 then
+			cycle = math.min(1, cycle + dt / 0.38)
+		elseif digging then
+			cycle = 0
 			punchSide = -punchSide
 		end
-		local strike = math.sin(swing * math.pi)
+		-- Wind up, reach quickly into the stone, rake down, then pull the rubble back.
+		local wind = smooth(cycle / 0.18) * (1 - smooth((cycle - 0.18) / 0.16))
+		local reach = smooth((cycle - 0.18) / 0.20)
+		local pull = smooth((cycle - 0.48) / 0.52)
+		local extension = reach * (1 - pull) * digBlend
+		local scoop = math.sin(math.clamp((cycle - 0.38) / 0.62, 0, 1) * math.pi) * digBlend
 		-- While you hold the diamond your right hand lifts it to the sky.
 		lift += ((if holding then 1 else 0) - lift) * math.min(1, dt * 8)
 		worldDiamond.LocalTransparencyModifier = if holding then 1 else 0
 		local worldLight = worldDiamond:FindFirstChildOfClass("PointLight")
 		if worldLight then worldLight.Enabled = State:GetAttribute("Phase") == "Holding" and not holding end
-		if lift > 0.01 then
-			strike = 0
-		end
 		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
 		for _, h in hands do
-			local hit = if h.side == punchSide then strike else 0
-			local normal = base * CFrame.new(h.side * 0.75, hit * 0.25, -hit * 0.4)
-				* CFrame.Angles(math.rad(10 + hit * -55), math.rad(-h.side * 8), 0)
+			local active = if h.side == punchSide then 1 - lift else 0
+			local hit = extension * active
+			local rake = scoop * active
+			local prep = wind * digBlend * active
+			local normal = base * CFrame.new(h.side * (0.58 - hit * 0.24), hit * 0.27 - rake * 0.19, -hit * 0.62 + prep * 0.12 + rake * 0.16)
+				* CFrame.Angles(math.rad(10 - hit * 22 + rake * 34 + prep * 12), math.rad(-h.side * (8 + hit * 12)), math.rad(h.side * (rake * 16 - hit * 8)))
 			-- Camera-relative grip stays below the countdown, well inside the lens.
 			-- 62-degree camera tilt + 28-degree arm tilt still points up at the sky.
 			local raised = if h.side == 1
@@ -168,7 +165,7 @@ function FirstPerson.start()
 			h.hand.CFrame = arm * CFrame.new(0, 0, -0.35)
 			h.hand.Color = skin
 			h.hand.LocalTransparencyModifier = 0
-			local grip = if h.side == 1 then lift else 0
+			local grip = math.max(if h.side == 1 then lift else 0, rake * 0.85)
 			for index, finger in h.fingers do
 				finger.Color = skin
 				finger.CFrame = h.hand.CFrame * CFrame.new((index - 2.5) * 0.09, grip * 0.16, -0.27 + grip * 0.16)
