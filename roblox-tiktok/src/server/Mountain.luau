@@ -120,6 +120,17 @@ function Mountain._draw(self: Mountain, key: number)
 		part.Material = if shade > 0.5 then Enum.Material.Slate else Enum.Material.Rock
 		part.Color = ROCK[math.clamp(1 + math.floor(y / height * #ROCK + shade), 1, #ROCK)]
 	end
+	-- A rounded pebble instead of a cube: a slightly squashed sphere with a
+	-- random tilt, a little oversized so neighbours close the gaps.
+	local pebble = Instance.new("SpecialMesh")
+	pebble.MeshType = Enum.MeshType.Sphere
+	local r1 = ((key * 7919) % 97) / 97
+	local r2 = ((key * 104729) % 89) / 89
+	local r3 = ((key * 1299709) % 83) / 83
+	pebble.Scale = Vector3.new(1.18 + r1 * 0.22, 1.02 + r2 * 0.2, 1.18 + r3 * 0.22)
+	pebble.Parent = part
+	-- Only turn around the vertical axis so the collision boxes stay level to walk on.
+	part.CFrame = CFrame.new(part.Position) * CFrame.Angles(0, r2 * math.pi, 0)
 	part.Parent = self.folder
 	self.parts[key] = part
 	self.keys[part] = key

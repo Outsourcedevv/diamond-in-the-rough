@@ -297,11 +297,12 @@ local function teleportHome(player: Player)
 	end
 end
 
--- Raises both arms straight up to the sky (R15 and R6 rigs) while holding.
+-- Raises the right arm straight up to the sky (R15 and R6 rigs) while holding.
 local raisedArms: { [Motor6D]: CFrame } = {}
 local function raiseArms(character: Model)
 	local motors: { { motor: Motor6D, up: CFrame } } = {}
-	for _, spec in { { "RightUpperArm", "RightShoulder" }, { "LeftUpperArm", "LeftShoulder" }, { "Torso", "Right Shoulder" }, { "Torso", "Left Shoulder" } } do
+	-- One arm up: only the right shoulder lifts.
+	for _, spec in { { "RightUpperArm", "RightShoulder" }, { "Torso", "Right Shoulder" } } do
 		local parent = character:FindFirstChild(spec[1])
 		local motor = parent and parent:FindFirstChild(spec[2])
 		if motor ~= nil and motor:IsA("Motor6D") then
@@ -381,7 +382,8 @@ local function grab(player: Player)
 	diamond.Anchored = false
 	diamond.Massless = true
 	diamond.CanCollide = false
-	diamond.CFrame = head.CFrame * CFrame.new(0, 3.4, 0) * DIAMOND_TILT
+	-- Above the raised right hand.
+	diamond.CFrame = head.CFrame * CFrame.new(1.4, 3.6, 0) * DIAMOND_TILT
 	local weld = Instance.new("WeldConstraint")
 	weld.Part0 = head
 	weld.Part1 = diamond

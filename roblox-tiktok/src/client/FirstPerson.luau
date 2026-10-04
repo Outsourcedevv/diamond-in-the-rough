@@ -58,6 +58,28 @@ function FirstPerson.start()
 	shine.Parent = gem
 	gem.Parent = rig
 	local lift = 0 -- 0 = digging pose, 1 = diamond raised to the sky
+
+	-- While you hold the diamond the camera is locked, tilted up towards it.
+	local lockedYaw: number? = nil
+	RunService:BindToRenderStep("DiamondRushHoldCamera", Enum.RenderPriority.Camera.Value + 1, function()
+		local camera = workspace.CurrentCamera
+		local character = player.Character
+		local head = character and character:FindFirstChild("Head")
+		local holding = State:GetAttribute("Phase") == "Holding" and State:GetAttribute("Holder") == player.DisplayName
+		if holding and camera and head and head:IsA("BasePart") then
+			if lockedYaw == nil then
+				local look = camera.CFrame.LookVector
+				lockedYaw = math.atan2(-look.X, -look.Z)
+				camera.CameraType = Enum.CameraType.Scriptable
+			end
+			camera.CFrame = CFrame.new(head.Position + Vector3.new(0, 0.6, 0)) * CFrame.Angles(0, lockedYaw :: number, 0) * CFrame.Angles(math.rad(62), 0, 0)
+		elseif lockedYaw ~= nil then
+			lockedYaw = nil
+			if camera then
+				camera.CameraType = Enum.CameraType.Custom
+			end
+		end
+	end)
 	local swing = 0
 	local punchSide = 1
 	local bob = 0
@@ -106,26 +128,30 @@ function FirstPerson.start()
 			punchSide = -punchSide
 		end
 		local strike = math.sin(swing * math.pi)
-		-- While you hold the diamond both hands lift it up to the sky.
+		-- While you hold the diamond your right hand lifts it to the sky.
 		local holding = State:GetAttribute("Phase") == "Holding" and State:GetAttribute("Holder") == player.DisplayName
 		lift += ((if holding then 1 else 0) - lift) * math.min(1, dt * 8)
 		if lift > 0.01 then
 			strike = 0
 		end
-		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway + lift * 1.55, -1.6 + lift * 0.25)
+		local base = camera.CFrame * CFrame.new(0, -0.95 + math.abs(math.sin(bob)) * sway, -1.6)
 		for _, h in hands do
 			local hit = if h.side == punchSide then strike else 0
+			-- Right arm: reaches up and slightly in, pointing at the sky.
+			-- Left arm: drops out of view.
+			local raise = if h.side == 1 then lift else 0
+			local drop = if h.side == -1 then lift else 0
 			local arm = base
-				* CFrame.new(h.side * (0.75 - lift * 0.5), hit * 0.25, -hit * 0.4)
-				* CFrame.Angles(math.rad(10 + hit * -55 + lift * 70), math.rad(-h.side * (8 - lift * 30)), 0)
+				* CFrame.new(h.side * 0.75 - raise * 0.4, hit * 0.25 + raise * 1.5 - drop * 1.6, -hit * 0.4 + raise * 0.3)
+				* CFrame.Angles(math.rad(10 + hit * -55 + raise * 75), math.rad(-h.side * 8), math.rad(raise * 10))
 			h.sleeve.CFrame = arm * CFrame.new(0, 0, 0.55)
 			h.hand.CFrame = arm * CFrame.new(0, 0, -0.35)
 			h.hand.Color = skin
 		end
 		gem.Transparency = if lift > 0.3 then 0.1 else 1
 		shine.Enabled = lift > 0.3
-		local between = hands[1].hand.CFrame.Position:Lerp(hands[2].hand.CFrame.Position, 0.5)
-		gem.CFrame = CFrame.new(between + camera.CFrame.UpVector * 0.35) * CFrame.Angles(math.rad(45), os.clock() * 2, math.rad(35))
+		local palm = hands[2].hand.CFrame
+		gem.CFrame = CFrame.new((palm * CFrame.new(0, 0.05, -0.45)).Position) * CFrame.Angles(math.rad(45), os.clock() * 2, math.rad(35))
 		pickHandle.Transparency = 1
 		pickHead.Transparency = pickHandle.Transparency
 		local grip = hands[2].hand.CFrame * CFrame.Angles(math.rad(-70), 0, 0)
