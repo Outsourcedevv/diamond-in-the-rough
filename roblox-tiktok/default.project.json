@@ -1,0 +1,34 @@
+{
+  "name": "DiamondRushTikTok",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "DiamondRush": {
+        "$path": "src/shared"
+      }
+    },
+    "ServerScriptService": {
+      "DiamondRushServer": {
+        "$path": "src/server"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "DiamondRushHud": {
+          "$path": "src/client"
+        }
+      }
+    },
+    "HttpService": {
+      "$properties": {
+        "HttpEnabled": true
+      }
+    },
+    "Workspace": {
+      "$className": "Workspace"
+    },
+    "Lighting": {
+      "$className": "Lighting"
+    }
+  }
+}

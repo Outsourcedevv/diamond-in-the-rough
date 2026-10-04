@@ -6,6 +6,8 @@ A playable native first-person 3D mining game built with Godot 4.6.2. Start with
 
 ![The mountain claim and first-session guide](screenshots/01_workshop.png)
 
+Looking for the TikTok LIVE version? **[Diamond Rush](roblox-tiktok/README.md)** is a Roblox game where viewers' gifts blast stone out of the mountain.
+
 ![Dynamite going off on the mountainside](screenshots/06_dynamite.png)
 
 ![A Mountain Buster crater with deep gem ore in its walls](screenshots/07_crater.png)
