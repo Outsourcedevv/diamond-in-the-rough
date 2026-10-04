@@ -7,6 +7,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 - **Hold the diamond.** When it is uncovered, a banner says "THE DIAMOND IS EXPOSED — GRAB IT!". Walk into it (or press E) and your character holds it up to the sky with one arm and your view locks, looking up at it, until the countdown ends.
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
   - If you fall or leave, the diamond drops.
+- **Scenery.** Rolling hills, a ring of snowy peaks, a lake, a pine forest, boulders, clouds and a campfire at the camp.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and ⭐ NEW BEST! when you beat it). Then a fresh mountain appears.
 - **Dig with your hands.** First-person view with two hands: hold the left mouse button on the mountain and your hands tear out about 100 rocks a second.

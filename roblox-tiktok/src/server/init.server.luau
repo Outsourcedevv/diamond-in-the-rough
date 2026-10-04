@@ -95,15 +95,6 @@ local blockSize = Config.BlockSize
 -- A cone of about this many rocks reaches out roughly this far.
 local spawnDistance = math.ceil((math.min(Config.StartingStone, 1500000) * 1.06 / 0.94) ^ (1 / 3)) * blockSize + 30
 
-local ground = Instance.new("Part")
-ground.Name = "Ground"
-ground.Anchored = true
-ground.Size = Vector3.new(800, 4, 800)
-ground.Position = Vector3.new(0, -2, 0)
-ground.Material = Enum.Material.Grass
-ground.Color = Color3.fromRGB(96, 150, 78)
-ground.TopSurface = Enum.SurfaceType.Smooth
-ground.Parent = workspace
 
 local spawn = Instance.new("SpawnLocation")
 spawn.Name = "Camp"
@@ -115,6 +106,9 @@ spawn.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, spawnDistance), Vector3.new(0, 
 spawn.Material = Enum.Material.WoodPlanks
 spawn.Color = Color3.fromRGB(150, 110, 70)
 spawn.Parent = workspace
+
+-- Hills, distant peaks, a lake, a pine forest, boulders and a campfire.
+require(script.Scenery).build(spawnDistance - 30, spawn.Position)
 
 Lighting.ClockTime = 14.5
 Lighting.Brightness = 2.2
