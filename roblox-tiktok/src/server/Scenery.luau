@@ -10,6 +10,7 @@
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PartShapes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))
+local ScenePack = require(script.Parent.ScenePack)
 
 local Scenery = {}
 local random = Random.new(4207)
@@ -125,7 +126,7 @@ local function birch(parent: Instance, at: Vector3, height: number)
 end
 
 -- Terrain height (studs) at a point, before the arena, camp, lake and path are cut in.
-local function hillHeight(x: number, z: number, radius: number): number
+local function hillHeight(x: number, z: number, radius: number, foothills: boolean): number
 	local distance = math.sqrt(x * x + z * z)
 	local fade = math.clamp((distance - radius) / 60, 0, 1)
 	fade = fade * fade * (3 - 2 * fade)
@@ -135,16 +136,18 @@ local function hillHeight(x: number, z: number, radius: number): number
 	ring = ring * ring * (3 - 2 * ring)
 	local ridged = 1 - math.abs(math.noise(x / 95, z / 95, 17)) * 2
 	local peaks = ring * (50 + ridged * 75 + math.noise(x / 41, z / 41, 23) * 16)
+	-- With the Blender mountains behind them, the terrain peaks become foothills.
+	if foothills then peaks *= 0.32 end
 	return fade * (8 + hills) + peaks
 end
 
-export type Site = { radius: number, camp: Vector3, lake: Vector3 }
+export type Site = { radius: number, camp: Vector3, lake: Vector3, foothills: boolean }
 
 local function terrainHeight(x: number, z: number, site: Site): number
 	local radius, camp, lake = site.radius, site.camp, site.lake
 	local distance = math.sqrt(x * x + z * z)
 	if distance < radius then return 0 end
-	local height = hillHeight(x, z, radius)
+	local height = hillHeight(x, z, radius, site.foothills)
 	local campDistance = math.sqrt((x - camp.X) ^ 2 + (z - camp.Z) ^ 2)
 	height *= math.clamp((campDistance - 27) / 22, 0, 1)
 	local shore = math.sqrt(((x - lake.X) / 35) ^ 2 + ((z - lake.Z) / 27) ^ 2) + math.noise(x / 16, z / 16, 3) * 0.08
@@ -235,10 +238,17 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	local folder = Instance.new("Folder")
 	folder.Name = "Scenery"
 	folder.Parent = workspace
+	-- Look for the Blender scenery pack first, before any yielding work.
+	local pack = ScenePack.find()
+	if pack then
+		print("[DiamondRush] Using the imported scenery pack (" .. ScenePack.NAME .. ").")
+	else
+		print("[DiamondRush] Scenery pack not imported: using the built-in scenery. See the README to import art/DiamondRushScenery.fbx.")
+	end
 	local clearRadius = math.max(mountainRadius + 14, 55)
 	local camp = Vector3.new(spawnPosition.X, 0, spawnPosition.Z)
 	local lake = Vector3.new(clearRadius + 72, 0, camp.Z + 15)
-	local site: Site = { radius = clearRadius, camp = camp, lake = lake }
+	local site: Site = { radius = clearRadius, camp = camp, lake = lake, foothills = pack ~= nil }
 	local keepClear: { { at: Vector3, radius: number } } = reserved or {}
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
@@ -279,23 +289,6 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	terrain.WaterWaveSize = 0.06
 	terrain.WaterWaveSpeed = 4
 
-	-- Weathered boulders and outcrops are smooth terrain rock, half buried.
-	local boulders = 0
-	for _ = 1, 400 do
-		if boulders >= 34 then break end
-		local angle = random:NextNumber(0, math.pi * 2)
-		local distance = random:NextNumber(clearRadius + 10, 230)
-		local at = ground(math.cos(angle) * distance, math.sin(angle) * distance)
-		if not clear(at, 4) and at.Y < 90 then
-			local size = random:NextNumber(2.6, if distance > 140 then 7.5 else 4.5)
-			for i = 1, random:NextInteger(1, 3) do
-				local offset = Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)) * size * 0.8
-				terrain:FillBall(at + offset - Vector3.new(0, size * 0.35, 0), size * (1 - i * 0.18), Enum.Material.Rock)
-			end
-			boulders += 1
-		end
-	end
-
 	-- A lakeside timber dock, supported above the shallow water.
 	local dock = lake + Vector3.new(-34, 0.5, 0)
 	for i = 0, 11 do
@@ -309,40 +302,163 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	lantern(folder, dock + Vector3.new(0, 0, -4.2))
 
 	-- Forests grow in clumps on the hills, thinning out towards the treeline.
-	local trees: { Vector3 } = {}
+	-- Placed things are bucketed in 32-stud cells, so spacing checks stay quick
+	-- with hundreds of trees, rocks and flowers.
+	local buckets: { [number]: { Vector3 } } = {}
+	local function cell(x: number, z: number): number
+		return (math.floor(x / 32) + 1024) * 4096 + (math.floor(z / 32) + 1024)
+	end
 	local function spaced(at: Vector3, gap: number): boolean
-		for _, other in trees do
-			if (at - other).Magnitude < gap then return false end
+		local cx, cz = math.floor(at.X / 32), math.floor(at.Z / 32)
+		for dx = -1, 1 do
+			for dz = -1, 1 do
+				local bucket: { Vector3 }? = buckets[(cx + dx + 1024) * 4096 + (cz + dz + 1024)]
+				if bucket then
+					for _, other in bucket do
+						if (at - other).Magnitude < gap then return false end
+					end
+				end
+			end
 		end
 		return true
 	end
-	local conifers = 0
-	for attempt = 1, 2400 do
-		if conifers >= 120 then break end
-		local angle = random:NextNumber(0, math.pi * 2)
-		local distance = random:NextNumber(clearRadius + 26, 300)
-		local x, z = math.cos(angle) * distance, math.sin(angle) * distance
-		local density = math.noise(x / 90, z / 90, 51) + (if distance > 120 then 0.2 else 0)
-		if density > -0.12 and steepness(x, z) < 0.9 then
-			local at = ground(x, z)
-			if at.Y < 96 and not clear(at, 6) and spaced(at, 7.5) then
-				conifer(folder, at, random:NextNumber(15, 30), at.Y > 58)
-				table.insert(trees, at)
-				conifers += 1
+	local trees = {}
+	function trees.add(at: Vector3)
+		local key = cell(at.X, at.Z)
+		local bucket = buckets[key]
+		if bucket == nil then
+			bucket = {}
+			buckets[key] = bucket
+		end
+		table.insert(bucket, at)
+	end
+	-- Scatters up to `count` items in a ring of distances, where `accept` agrees.
+	local function scatter(count: number, near: number, far: number, gap: number, accept: (Vector3, number) -> boolean, put: (Vector3, number) -> ())
+		local placed = 0
+		for attempt = 1, count * 25 do
+			if placed >= count then break end
+			local angle = random:NextNumber(0, math.pi * 2)
+			local distance = random:NextNumber(near, far)
+			local at = ground(math.cos(angle) * distance, math.sin(angle) * distance)
+			if accept(at, distance) and spaced(at, gap) then
+				put(at, distance)
+				trees.add(at)
+				placed += 1
+			end
+			if attempt % 64 == 0 then task.wait() end
+		end
+	end
+	if pack then
+		local meshes = pack :: ScenePack.Pack
+		-- A ring of Blender mountains closes the valley, long sides facing in.
+		local massifs = { "Mountain_A", "Mountain_B", "Mountain_C", "Mountain_D" }
+		local count = 12
+		for i = 0, count - 1 do
+			local angle = i / count * math.pi * 2 + random:NextNumber(-0.08, 0.08)
+			local distance = random:NextNumber(410, 470)
+			local at = Vector3.new(math.sin(angle) * distance, 0, math.cos(angle) * distance)
+			ScenePack.place(meshes, folder, massifs[i % #massifs + 1], at, random:NextNumber(0.95, 1.3), angle + random:NextNumber(-0.15, 0.15), { sink = 22 })
+		end
+		-- Pine forests on the hills, snow-dusted higher up.
+		scatter(210, clearRadius + 24, 330, 6.5, function(at, distance)
+			local density = math.noise(at.X / 90, at.Z / 90, 51) + (if distance > 120 then 0.25 else 0)
+			return density > -0.15 and at.Y < 120 and not clear(at, 6) and steepness(at.X, at.Z) < 1.1
+		end, function(at)
+			local name = if at.Y > 34 then (if random:NextNumber() < 0.5 then "Pine_Snow_A" else "Pine_Snow_B")
+				else ({ "Pine_A", "Pine_B", "Pine_C" })[random:NextInteger(1, 3)]
+			ScenePack.place(meshes, folder, name, at, random:NextNumber(0.75, 1.25), random:NextNumber(0, math.pi * 2), { sink = 0.4 })
+		end)
+		-- Birches and oaks dot the meadows near the camp and the lake.
+		scatter(26, clearRadius + 10, 170, 9, function(at)
+			return at.Y < 26 and not clear(at, 3)
+		end, function(at)
+			local name = ({ "Birch_A", "Birch_B", "Oak_A" })[random:NextInteger(1, 3)]
+			ScenePack.place(meshes, folder, name, at, random:NextNumber(0.85, 1.2), random:NextNumber(0, math.pi * 2), { sink = 0.3 })
+		end)
+		-- Rock outcrops on the hillsides and boulders in the grass.
+		scatter(10, 140, 320, 26, function(at)
+			return not clear(at, 12) and at.Y < 70
+		end, function(at)
+			local name = if random:NextNumber() < 0.5 then "Cliff_A" else "Cliff_B"
+			ScenePack.place(meshes, folder, name, at, random:NextNumber(0.8, 1.35), random:NextNumber(0, math.pi * 2), { sink = 3, collide = true })
+		end)
+		scatter(48, clearRadius + 8, 260, 5, function(at)
+			return not clear(at, 3) and at.Y < 90
+		end, function(at, distance)
+			local name = ({ "Rock_A", "Rock_B", "Rock_C", "Rock_D" })[random:NextInteger(1, 4)]
+			local size = random:NextNumber(0.7, if distance > 140 then 1.8 else 1.3)
+			ScenePack.place(meshes, folder, name, at, size, random:NextNumber(0, math.pi * 2), {
+				sink = ScenePack.height(meshes, name) * size * 0.28, collide = true, tilt = random:NextNumber(-0.12, 0.12),
+			})
+		end)
+		-- Undergrowth: bushes along the forest edge, flowers in the meadows,
+		-- fallen logs and stumps between the trees.
+		scatter(70, clearRadius + 12, 250, 4, function(at)
+			return not clear(at, 2) and at.Y < 60
+		end, function(at)
+			ScenePack.place(meshes, folder, if random:NextNumber() < 0.5 then "Bush_A" else "Bush_B", at, random:NextNumber(0.75, 1.3), random:NextNumber(0, math.pi * 2), { sink = 0.4 })
+		end)
+		scatter(190, clearRadius + 3, 150, 2.2, function(at)
+			return not clear(at, 0) and at.Y < 24 and steepness(at.X, at.Z) < 0.5
+		end, function(at)
+			local name = ({ "Flowers_Yellow", "Flowers_Purple", "Flowers_White" })[random:NextInteger(1, 3)]
+			ScenePack.place(meshes, folder, name, at, random:NextNumber(1.0, 1.6), random:NextNumber(0, math.pi * 2), { sink = 0.1, shadow = false })
+		end)
+		scatter(18, clearRadius + 30, 240, 8, function(at)
+			return not clear(at, 4) and at.Y < 60 and steepness(at.X, at.Z) < 0.6
+		end, function(at)
+			if random:NextNumber() < 0.45 then
+				ScenePack.place(meshes, folder, "Log_A", at, random:NextNumber(0.8, 1.2), random:NextNumber(0, math.pi * 2), { sink = 0.3, collide = true })
+			else
+				ScenePack.place(meshes, folder, "Stump_A", at, random:NextNumber(0.8, 1.3), random:NextNumber(0, math.pi * 2), { sink = 0.1, collide = true })
+			end
+		end)
+	else
+		-- Weathered boulders and outcrops are smooth terrain rock, half buried.
+		local boulders = 0
+		for _ = 1, 400 do
+			if boulders >= 34 then break end
+			local angle = random:NextNumber(0, math.pi * 2)
+			local distance = random:NextNumber(clearRadius + 10, 230)
+			local at = ground(math.cos(angle) * distance, math.sin(angle) * distance)
+			if not clear(at, 4) and at.Y < 90 then
+				local size = random:NextNumber(2.6, if distance > 140 then 7.5 else 4.5)
+				for i = 1, random:NextInteger(1, 3) do
+					local offset = Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)) * size * 0.8
+					terrain:FillBall(at + offset - Vector3.new(0, size * 0.35, 0), size * (1 - i * 0.18), Enum.Material.Rock)
+				end
+				boulders += 1
 			end
 		end
-		if attempt % 64 == 0 then task.wait() end
-	end
-	local birches = 0
-	for _ = 1, 600 do
-		if birches >= 16 then break end
-		local angle = random:NextNumber(0, math.pi * 2)
-		local distance = random:NextNumber(clearRadius + 12, 160)
-		local at = ground(math.cos(angle) * distance, math.sin(angle) * distance)
-		if at.Y < 30 and not clear(at, 3) and spaced(at, 9) then
-			birch(folder, at, random:NextNumber(12, 19))
-			table.insert(trees, at)
-			birches += 1
+
+		local conifers = 0
+		for attempt = 1, 2400 do
+			if conifers >= 120 then break end
+			local angle = random:NextNumber(0, math.pi * 2)
+			local distance = random:NextNumber(clearRadius + 26, 300)
+			local x, z = math.cos(angle) * distance, math.sin(angle) * distance
+			local density = math.noise(x / 90, z / 90, 51) + (if distance > 120 then 0.2 else 0)
+			if density > -0.12 and steepness(x, z) < 0.9 then
+				local at = ground(x, z)
+				if at.Y < 96 and not clear(at, 6) and spaced(at, 7.5) then
+					conifer(folder, at, random:NextNumber(15, 30), at.Y > 58)
+					trees.add(at)
+					conifers += 1
+				end
+			end
+			if attempt % 64 == 0 then task.wait() end
+		end
+		local birches = 0
+		for _ = 1, 600 do
+			if birches >= 16 then break end
+			local angle = random:NextNumber(0, math.pi * 2)
+			local distance = random:NextNumber(clearRadius + 12, 160)
+			local at = ground(math.cos(angle) * distance, math.sin(angle) * distance)
+			if at.Y < 30 and not clear(at, 3) and spaced(at, 9) then
+				birch(folder, at, random:NextNumber(12, 19))
+				trees.add(at)
+				birches += 1
+			end
 		end
 	end
 

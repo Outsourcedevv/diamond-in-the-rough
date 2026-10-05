@@ -1,3 +1,4 @@
 sourcemap.json
 tests/*.generated.luau
 __pycache__/
+art/previews/layout.txt

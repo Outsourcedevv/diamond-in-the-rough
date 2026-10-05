@@ -115,7 +115,7 @@ local Enum = setmetatable({}, { __index = function(_, group)
 end })
 
 local instances = {}
-local baseParts = { Part = true, WedgePart = true, CornerWedgePart = true }
+local baseParts = { Part = true, WedgePart = true, CornerWedgePart = true, MeshPart = true }
 local newInstance
 newInstance = function(className: string): any
 	local attributes = {}
@@ -147,6 +147,21 @@ newInstance = function(className: string): any
 			if other.Parent == self then table.insert(children, other) end
 		end
 		return children
+	end
+	object.IsDescendantOf = function(self, ancestor)
+		local parent = self.Parent
+		while parent ~= nil do
+			if parent == ancestor then return true end
+			parent = if type(parent) == "table" then rawget(parent, "Parent") else nil
+		end
+		return false
+	end
+	object.GetDescendants = function(self)
+		local out = {}
+		for _, other in instances do
+			if other ~= self and other.IsDescendantOf and other:IsDescendantOf(self) then table.insert(out, other) end
+		end
+		return out
 	end
 	object.ClearAllChildren = function(self)
 		for _, other in instances do
