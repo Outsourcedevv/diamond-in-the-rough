@@ -318,7 +318,7 @@ function GiftEffects.play(data: any)
 		bannerTier = tier
 		bannerSerial += 1
 		local serial = bannerSerial
-		text.Text = (if data.adding then (if data.blocks == 0 then "MOUNTAIN FULL" elseif data.blocks == nil then "RESTORE QUEUED" else "ROCKS RESTORED") else titles[tier]) .. "  •  " .. Format.commas(data.coins) .. " COINS\n" .. tostring(data.name or "Someone") .. " sent " .. tostring(data.gift or "a gift")
+		text.Text = (if data.adding then (if data.blocks == 0 then "MOUNTAIN FULL" elseif data.blocks == nil then "REBUILDING" else "ROCKS RESTORED") else titles[tier]) .. "  •  " .. Format.commas(data.coins) .. " COINS\n" .. tostring(data.name or "Someone") .. " sent " .. tostring(data.gift or "a gift")
 		text.TextColor3 = colour
 		if bannerTween then bannerTween:Cancel() end
 		text.TextTransparency = 0

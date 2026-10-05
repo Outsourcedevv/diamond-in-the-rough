@@ -190,7 +190,7 @@ function Mountain._drawShell(self: Mountain, key: number)
 end
 
 -- Reconcile only the changed cells and the two surrounding rock layers.
-function Mountain.restore(self: Mountain, count: number, near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
+function Mountain._restoreBatch(self: Mountain, count: number, near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
 	local focus = if near then { x = near.X / self.blockSize, z = near.Z / self.blockSize, radius = 4 / self.blockSize } else nil
 	local restored = self.grid:restore(count, focus, checkpoint)
 	if capacity and #restored < count then
@@ -203,14 +203,21 @@ function Mountain.restore(self: Mountain, count: number, near: Vector3?, capacit
 			self.tops[column] = math.max(self.tops[column] or 0, y)
 		end
 	end
-	local affected = {}
+	-- Visit each changed cell's neighbourhood once, rather than expanding
+	-- all six neighbours again for every interior rock in a large refill.
+	local firstRing = {}
 	for index, key in restored do
+		firstRing[key] = true
+		for _, neighbour in self.grid:solidNeighbours(key) do firstRing[neighbour] = true end
 		if checkpoint and index % 128 == 0 then checkpoint() end
+	end
+	local affected = {}
+	local expanded = 0
+	for key in firstRing do
 		affected[key] = true
-		for _, neighbour in self.grid:solidNeighbours(key) do
-			affected[neighbour] = true
-			for _, second in self.grid:solidNeighbours(neighbour) do affected[second] = true end
-		end
+		for _, neighbour in self.grid:solidNeighbours(key) do affected[neighbour] = true end
+		expanded += 1
+		if checkpoint and expanded % 128 == 0 then checkpoint() end
 	end
 	local processed = 0
 	for key in affected do
@@ -241,6 +248,24 @@ function Mountain.restore(self: Mountain, count: number, near: Vector3?, capacit
 		end
 	end
 	return #restored, samples
+end
+
+-- Commit visible geometry before starting the next batch. Previously the entire
+-- gift (up to 1.5 million cells) was computed before the first rock appeared.
+function Mountain.restore(self: Mountain, count: number, near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
+	local total = 0
+	local samples = {}
+	while total < count do
+		local batch = math.min(2048, count - total)
+		local placed, stones = self:_restoreBatch(batch, if total == 0 then near else nil, capacity, checkpoint)
+		total += placed
+		for _, stone in stones do
+			if #samples < 24 then table.insert(samples, stone) end
+		end
+		if checkpoint then checkpoint() end
+		if placed < batch then break end
+	end
+	return total, samples
 end
 
 function Mountain.total(self: Mountain): number
