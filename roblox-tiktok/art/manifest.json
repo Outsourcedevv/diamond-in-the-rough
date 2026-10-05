@@ -1,0 +1,202 @@
+{
+ "Mountain_A": {
+  "triangles": 13560,
+  "size": [
+   420.0,
+   300.0,
+   256.9
+  ]
+ },
+ "Mountain_B": {
+  "triangles": 13948,
+  "size": [
+   380.0,
+   280.0,
+   274.5
+  ]
+ },
+ "Mountain_C": {
+  "triangles": 12396,
+  "size": [
+   400.0,
+   260.0,
+   235.4
+  ]
+ },
+ "Mountain_D": {
+  "triangles": 14336,
+  "size": [
+   340.0,
+   260.0,
+   211.9
+  ]
+ },
+ "Pine_A": {
+  "triangles": 616,
+  "size": [
+   19.1,
+   18.3,
+   25.7
+  ]
+ },
+ "Pine_B": {
+  "triangles": 716,
+  "size": [
+   24.6,
+   22.1,
+   31.7
+  ]
+ },
+ "Pine_C": {
+  "triangles": 524,
+  "size": [
+   14.4,
+   15.2,
+   19.8
+  ]
+ },
+ "Pine_Snow_A": {
+  "triangles": 616,
+  "size": [
+   21.1,
+   20.8,
+   27.7
+  ]
+ },
+ "Pine_Snow_B": {
+  "triangles": 524,
+  "size": [
+   16.7,
+   15.5,
+   21.8
+  ]
+ },
+ "Birch_A": {
+  "triangles": 1096,
+  "size": [
+   12.7,
+   12.3,
+   16.1
+  ]
+ },
+ "Birch_B": {
+  "triangles": 1096,
+  "size": [
+   14.8,
+   13.2,
+   19.1
+  ]
+ },
+ "Oak_A": {
+  "triangles": 1288,
+  "size": [
+   17.3,
+   16.7,
+   18.0
+  ]
+ },
+ "Rock_A": {
+  "triangles": 1280,
+  "size": [
+   7.0,
+   5.2,
+   3.5
+  ]
+ },
+ "Rock_B": {
+  "triangles": 1280,
+  "size": [
+   4.1,
+   3.5,
+   2.6
+  ]
+ },
+ "Rock_C": {
+  "triangles": 1280,
+  "size": [
+   11.2,
+   8.2,
+   4.9
+  ]
+ },
+ "Rock_D": {
+  "triangles": 1280,
+  "size": [
+   2.5,
+   2.1,
+   1.2
+  ]
+ },
+ "Cliff_A": {
+  "triangles": 960,
+  "size": [
+   33.5,
+   17.8,
+   20.8
+  ]
+ },
+ "Cliff_B": {
+  "triangles": 960,
+  "size": [
+   24.5,
+   13.5,
+   15.0
+  ]
+ },
+ "Bush_A": {
+  "triangles": 1600,
+  "size": [
+   5.4,
+   5.5,
+   3.2
+  ]
+ },
+ "Bush_B": {
+  "triangles": 1600,
+  "size": [
+   4.2,
+   3.9,
+   2.4
+  ]
+ },
+ "Flowers_Yellow": {
+  "triangles": 308,
+  "size": [
+   1.6,
+   1.6,
+   1.6
+  ]
+ },
+ "Flowers_Purple": {
+  "triangles": 308,
+  "size": [
+   1.8,
+   1.8,
+   1.5
+  ]
+ },
+ "Flowers_White": {
+  "triangles": 308,
+  "size": [
+   1.8,
+   2.0,
+   1.6
+  ]
+ },
+ "Log_A": {
+  "triangles": 232,
+  "size": [
+   11.0,
+   2.4,
+   1.8
+  ]
+ },
+ "Stump_A": {
+  "triangles": 148,
+  "size": [
+   3.8,
+   3.8,
+   1.6
+  ]
+ }
+}

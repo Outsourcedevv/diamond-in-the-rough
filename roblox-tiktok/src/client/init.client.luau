@@ -21,6 +21,26 @@ local RebuildEffects = require(script:WaitForChild("RebuildEffects"))
 local GiftEffects = require(script:WaitForChild("GiftEffects"))
 GiftEffects.start(player:WaitForChild("PlayerGui"))
 
+-- The rock is drawn here, not replicated from the server: the server sends a
+-- snapshot and compact change lists, and MountainView keeps local parts in step.
+local MountainView = require(script:WaitForChild("MountainView"))
+local MountainSync = Remotes:WaitForChild("MountainSync") :: RemoteEvent
+local view = MountainView.new()
+view.onRebuild = RebuildEffects.play
+view.onRestore = RebuildEffects.restore
+MountainSync.OnClientEvent:Connect(function(kind: string, payload: any)
+	view:push(kind, payload)
+end)
+view:start()
+-- Ask for the mountain until a snapshot arrives; the first request can reach
+-- the server before its handlers are ready.
+task.spawn(function()
+	repeat
+		Request:FireServer("mountainReady")
+		task.wait(4)
+	until view.round > 0
+end)
+
 local FONT = Enum.Font.FredokaOne
 local WHITE = Color3.fromRGB(255, 255, 255)
 local GOLD = Color3.fromRGB(255, 205, 70)
@@ -55,6 +75,15 @@ end
 
 local function rounded(parent: Instance, radius: number)
 	make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+end
+
+-- Text changes force a relayout; per-frame labels only update when they differ.
+local shownText: { [TextLabel]: string } = {}
+local function setText(label: TextLabel, text: string)
+	if shownText[label] ~= text then
+		shownText[label] = text
+		label.Text = text
+	end
 end
 
 local function outline(parent: Instance, thickness: number)
@@ -555,6 +584,108 @@ panelButtons({
 	{ "Grow to limit", function() send("testRebuildGift", 1500000) end },
 })
 
+-- A destructive button only acts on a second click within three seconds.
+local function confirmed(button: TextButton, label: string, action: () -> ())
+	local armed = false
+	button.Activated:Connect(function()
+		if armed then
+			armed = false
+			button.Text = label
+			action()
+			return
+		end
+		armed = true
+		button.Text = "Click again to confirm"
+		task.delay(3, function()
+			if armed then
+				armed = false
+				button.Text = label
+			end
+		end)
+	end)
+end
+local function panelButton(text: string): TextButton
+	panelOrder += 1
+	local button = make("TextButton", {
+		LayoutOrder = panelOrder,
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundColor3 = Color3.fromRGB(90, 70, 150),
+		Font = FONT,
+		TextSize = 16,
+		TextColor3 = WHITE,
+		Text = text,
+		ZIndex = 12,
+	}, panel)
+	rounded(button, 8)
+	return button
+end
+
+panelLabel("LEADERBOARDS (behind the mountain)")
+panelLabel("Test gifts and likes never count.")
+panelButtons({
+	{ "Preview with sample names", function() send("previewBoards") end },
+})
+confirmed(panelButton("Reset top gifters"), "Reset top gifters", function() send("resetBoard", "gifts") end)
+confirmed(panelButton("Reset top likers"), "Reset top likers", function() send("resetBoard", "likes") end)
+
+panelLabel("GOLD STATUES (saved in your game)")
+local statueName = panelBox("", function() end)
+statueName.PlaceholderText = "Gifter's name for the plaque"
+local statueCoins = panelBox("", function() end)
+statueCoins.PlaceholderText = "Coins they sent, e.g. 5000"
+panelButtons({
+	{ "Place statue in front of me", function()
+		send("placeStatue", { name = statueName.Text, coins = tonumber((string.gsub(statueCoins.Text, "[^%d]", ""))) or 0 })
+	end },
+})
+panelOrder += 1
+local statueList = make("Frame", {
+	LayoutOrder = panelOrder,
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	ZIndex = 11,
+}, panel)
+make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) }, statueList)
+local function refreshStatues()
+	for _, child in statueList:GetChildren() do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	local ok, statues = pcall(function()
+		return game:GetService("HttpService"):JSONDecode(attr("Statues", "[]"))
+	end)
+	if not ok or type(statues) ~= "table" then return end
+	for index, statue in statues do
+		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, statueList)
+		make("TextLabel", {
+			Size = UDim2.new(1, -40, 1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 15,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextColor3 = GOLD,
+			Text = string.format("🏆 %s · %s coins", tostring(statue.name), Format.commas(tonumber(statue.coins) or 0)),
+			ZIndex = 12,
+		}, row)
+		local remove = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.fromOffset(34, 30),
+			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
+			Font = FONT,
+			TextSize = 16,
+			TextColor3 = WHITE,
+			Text = "✕",
+			ZIndex = 12,
+		}, row)
+		rounded(remove, 8)
+		confirmed(remove, "✕", function() send("removeStatue", index) end)
+	end
+end
+State:GetAttributeChangedSignal("Statues"):Connect(refreshStatues)
+refreshStatues()
+
 local function refreshPanelFields()
 	titleBox.Text = attr("WinTitle", "WINS")
 	winsInput.Text = tostring(attr("Wins", 0))
@@ -624,7 +755,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 	if math.abs(stone - shownStone) < 1 then
 		shownStone = stone
 	end
-	stoneValue.Text = Format.commas(shownStone)
+	setText(stoneValue, Format.commas(shownStone))
 	barFill.Size = UDim2.fromScale(math.clamp(shownStone / starting, 0, 1), 1)
 
 	local phase = attr("Phase", "Digging")
@@ -633,15 +764,15 @@ RunService.RenderStepped:Connect(function(dt: number)
 	timerLabel.Visible = phase ~= "Holding"
 	local now = workspace:GetServerTimeNow()
 	local roundStart = attr("RoundStart", now)
-	timerLabel.Text = "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart)
-	status.Text = "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else "")
+	setText(timerLabel, "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart))
+	setText(status, "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else ""))
 
 	if phase == "Holding" then
 		local elapsed = now - attr("HoldStart", now)
 		local shown = HoldTimer.display(elapsed, Config.HoldSeconds, Config.HoldCountFrom, Config.HoldSlowdown)
 		countdown.Visible = true
-		countHolder.Text = "💎 " .. tostring(attr("Holder", "")) .. " — HOLD IT!"
-		countNumber.Text = tostring(shown)
+		setText(countHolder, "💎 " .. tostring(attr("Holder", "")) .. " — HOLD IT!")
+		setText(countNumber, tostring(shown))
 		if shown ~= lastCount then
 			lastCount = shown
 			countNumber.TextColor3 = WHITE:Lerp(GOLD, 1 - shown / Config.HoldCountFrom)
@@ -665,16 +796,14 @@ RunService.RenderStepped:Connect(function(dt: number)
 end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
-	if kind == "rebuild" and type(data) == "table" then
-		RebuildEffects.play(data)
-	elseif kind == "restore" and type(data) == "table" then
-		RebuildEffects.restore(data)
-	elseif kind == "giftEffect" and type(data) == "table" then
+	if kind == "giftEffect" and type(data) == "table" then
 		GiftEffects.play(data)
 	elseif kind == "feed" and type(data) == "table" then
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
 	elseif kind == "win" and type(data) == "table" then
 		showWin(data)
+	elseif kind == "notice" and type(data) == "string" then
+		addFeed(data, 0, "notice")
 	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then
 		addFeed(tostring(data.name) .. (if data.reason == "rebuild" then " — rebuild cancelled the countdown! Pick up the diamond again." else " dropped the diamond!"), 0, "drop")
 	end
@@ -730,11 +859,10 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 		local result = workspace:Raycast(ray.Origin, ray.Direction * 500, aimParams)
 		if result then aimTarget = result.Instance end
 	end
-	local mountain = workspace:FindFirstChild("Mountain")
 	local target = aimTarget
-	local stone = target ~= nil and mountain ~= nil and target:IsDescendantOf(mountain)
-		and target.Name == "Stone" and not target:GetAttribute("BackingRock")
-	rockOutline.Adornee = if stone then target else nil
+	local stone = target ~= nil and view:keyForPart(target) ~= nil
+	local adornee = if stone then target else nil
+	if rockOutline.Adornee ~= adornee then rockOutline.Adornee = adornee end
 	rockOutline.Enabled = stone
 end)
 local digging = false
@@ -767,9 +895,9 @@ RunService.Heartbeat:Connect(function(dt: number)
 	local target = aimTarget
 	local allowed = digging and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
+	local key = if target then view:keyForPart(target) else nil
 	local onRock = allowed and root ~= nil and root:IsA("BasePart")
-		and target ~= nil and target.Name == "Stone"
-		and (root.Position - target.Position).Magnitude <= 16
+		and key ~= nil and (root.Position - (target :: BasePart).Position).Magnitude <= 16
 	player:SetAttribute("DiggingRock", onRock == true)
 	if not allowed then
 		return
@@ -782,7 +910,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 	local character = player.Character
 	local tool = character and character:FindFirstChildOfClass("Tool")
 	if tool == nil and onRock then
-		Request:FireServer("mine", target)
+		Request:FireServer("mine", key)
 	end
 end)
 

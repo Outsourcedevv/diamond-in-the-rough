@@ -1,6 +1,8 @@
 --!strict
+--!native
 -- Pure block-grid logic for the mountain, with no Roblox instances, so it can be
--- tested outside Roblox. Cells are keyed by one integer; a cell is "exposed"
+-- tested outside Roblox. The server owns the real grid; each client keeps a
+-- replica to draw the rock. Cells are keyed by one integer; a cell is "exposed"
 -- when at least one of its six neighbours is open air, and only exposed cells
 -- can be blasted away.
 local Grid = {}
@@ -8,11 +10,26 @@ Grid.__index = Grid
 
 local OFFSET = 128
 local SPAN = 256
+local LAYER = SPAN * SPAN
 local NEIGHBOURS = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
+-- The same six neighbours as key offsets. x and z never reach the edge of the
+-- key space, so only a step below layer 0 can leave it.
+local STEPS = { 1, -1, LAYER, -LAYER, SPAN, -SPAN }
+Grid.SPAN = SPAN
+Grid.LAYER = LAYER
+Grid.STEPS = STEPS
+
+-- Reads one bit straight from the pages behind a cell map, skipping the
+-- metatable call that the dictionary interface needs.
+local function hasBit(pages: { [number]: buffer }, key: number): boolean
+	local page = pages[key // 4096]
+	return page ~= nil and bit32.btest(buffer.readu8(page, (key % 4096) // 8), bit32.lshift(1, key % 8))
+end
+Grid.hasBit = hasBit
 
 -- Bit-packed pages avoid resizing a million-entry hash table during a gift.
 -- The dictionary interface keeps all callers using the same cell keys.
-local function newCellMap(): { [number]: boolean }
+local function newCellMap(): ({ [number]: boolean }, { [number]: buffer })
 	local pages: { [number]: buffer } = {}
 	local masks = { 1, 2, 4, 8, 16, 32, 64, 128 }
 	return setmetatable({}, {
@@ -45,15 +62,18 @@ local function newCellMap(): { [number]: boolean }
 						slot = 0
 					end
 					local bit = slot
-						slot += 1
+					slot += 1
 					if bit32.band(buffer.readu8(page :: buffer, bit // 8), masks[bit % 8 + 1]) ~= 0 then
 						return (pageIndex :: number) * 4096 + bit, true
 					end
 				end
 			end
 		end,
-	}) :: any
+	}) :: any, pages
 end
+
+-- A bit-packed set of cell keys, plus its pages for hasBit.
+Grid.cellMap = newCellMap
 
 -- Surface indices change continuously as the frontier moves. Paging these
 -- numbers also avoids hash-table expansion pauses around large surface sizes.
@@ -84,6 +104,7 @@ export type Grid = typeof(setmetatable(
 		radius: number,
 		height: number,
 		solid: { [number]: boolean },
+		solidPages: { [number]: buffer },
 		order: { number },
 		total: number,
 		removed: number,
@@ -110,18 +131,13 @@ function Grid.coords(key: number): (number, number, number)
 	return (rest % SPAN) - OFFSET, y, (rest // SPAN) - OFFSET
 end
 
--- Builds a mountain of exactly `target` cells (one cell = one stone).
--- rand(): a number in [0, 1); rand(a, b): a whole number from a to b.
-function Grid.new(target: number, seed: number, rand: (number?, number?) -> number): Grid
-	target = math.max(1, math.floor(target))
-	-- Allocate the rock budget across tapered columns. Removing excess rocks
-	-- from the highest layers would cut the summit into a broad flat stump.
-	local radius = math.clamp(math.ceil((target * 1.06 / 0.94) ^ (1 / 3)), 3, OFFSET - 4)
-	local height = math.max(2, math.floor(radius * 1.05 + 0.5))
-	local self = setmetatable({
-		radius = radius,
-		height = height,
-		solid = newCellMap(),
+local function empty(rand: (number?, number?) -> number): Grid
+	local solid, pages = newCellMap()
+	return setmetatable({
+		radius = 0,
+		height = 0,
+		solid = solid,
+		solidPages = pages,
 		order = {},
 		total = 0,
 		removed = 0,
@@ -135,6 +151,26 @@ function Grid.new(target: number, seed: number, rand: (number?, number?) -> numb
 		growthScores = nil,
 		growthQueued = nil,
 	}, Grid)
+end
+
+-- An empty replica for a client. Clients only flip cells and ask whether they
+-- are exposed; the server's bookkeeping lists stay empty.
+function Grid.blank(): Grid
+	return empty(function(a: number?, _b: number?): number return a or 0 end)
+end
+
+-- Builds a mountain of exactly `target` cells (one cell = one stone).
+-- rand(): a number in [0, 1); rand(a, b): a whole number from a to b.
+-- checkpoint, when given, is called regularly so the caller can yield.
+function Grid.new(target: number, seed: number, rand: (number?, number?) -> number, checkpoint: (() -> ())?): Grid
+	target = math.max(1, math.floor(target))
+	-- Allocate the rock budget across tapered columns. Removing excess rocks
+	-- from the highest layers would cut the summit into a broad flat stump.
+	local radius = math.clamp(math.ceil((target * 1.06 / 0.94) ^ (1 / 3)), 3, OFFSET - 4)
+	local height = math.max(2, math.floor(radius * 1.05 + 0.5))
+	local self = empty(rand)
+	self.radius = radius
+	self.height = height
 	local scale = 15 / radius
 	local columns = {}
 	local weightTotal = 0
@@ -166,36 +202,65 @@ function Grid.new(target: number, seed: number, rand: (number?, number?) -> numb
 	end)
 	for i = 1, target - count do columns[i].height += 1 end
 	self.height = 0
-	for _, column in columns do
+	local order = table.create(target)
+	self.order = order
+	for index, column in columns do
 		self.height = math.max(self.height, column.height)
 		for y = 0, column.height - 1 do
 			local key = Grid.key(column.x, y, column.z)
 			self.solid[key] = true
-			table.insert(self.order, key)
+			table.insert(order, key)
 		end
+		if checkpoint and index % 512 == 0 then checkpoint() end
 	end
-	self.total = #self.order
-	for _, key in self.order do
+	self.total = #order
+	for index, key in order do
 		if self:isExposed(key) then
 			self:_expose(key)
 		end
+		if checkpoint and index % 4096 == 0 then checkpoint() end
 	end
 	table.clear(self.fresh)
 	return self
 end
 
 function Grid.isSolid(self: Grid, key: number): boolean
-	return self.solid[key] == true
+	return hasBit(self.solidPages, key)
+end
+
+-- Open air: not rock, not the sealed diamond cavity and not the ground below layer 0.
+function Grid.isAir(self: Grid, key: number): boolean
+	return key >= 0 and not hasBit(self.solidPages, key) and not self.sealed[key]
+end
+
+-- Visits every solid cell in ascending key order (layer by layer). The visitor
+-- may yield; the grid must not change until the walk finishes.
+function Grid.eachSolid(self: Grid, visit: (number) -> ())
+	local pages = self.solidPages
+	local indices = {}
+	for index in pages do table.insert(indices, index) end
+	table.sort(indices)
+	for _, index in indices do
+		local page = pages[index]
+		local base = index * 4096
+		for byte = 0, 511 do
+			local bits = buffer.readu8(page, byte)
+			if bits ~= 0 then
+				for bit = 0, 7 do
+					if bit32.btest(bits, bit32.lshift(1, bit)) then visit(base + byte * 8 + bit) end
+				end
+			end
+		end
+	end
 end
 
 -- One solid layer behind a surface cell, excluding ground and the diamond cavity.
 function Grid.solidNeighbours(self: Grid, key: number): { number }
-	local x, y, z = Grid.coords(key)
+	local pages = self.solidPages
 	local result = {}
-	for _, step in NEIGHBOURS do
-		local ny = y + step[2]
-		local neighbour = Grid.key(x + step[1], ny, z + step[3])
-		if ny >= 0 and self:isSolid(neighbour) then
+	for _, step in STEPS do
+		local neighbour = key + step
+		if neighbour >= 0 and hasBit(pages, neighbour) then
 			table.insert(result, neighbour)
 		end
 	end
@@ -207,12 +272,11 @@ function Grid.remaining(self: Grid): number
 end
 
 function Grid.isExposed(self: Grid, key: number): boolean
-	local x, y, z = Grid.coords(key)
-	for _, step in NEIGHBOURS do
-		local ny = y + step[2]
-		-- The ground under the mountain counts as solid.
-		local neighbour = Grid.key(x + step[1], ny, z + step[3])
-		if ny >= 0 and not self.solid[neighbour] and not self.sealed[neighbour] then
+	local pages, sealed = self.solidPages, self.sealed
+	for _, step in STEPS do
+		local neighbour = key + step
+		-- The ground under the mountain (below layer 0) counts as solid.
+		if neighbour >= 0 and not hasBit(pages, neighbour) and not sealed[neighbour] then
 			return true
 		end
 	end
@@ -255,14 +319,11 @@ function Grid.remove(self: Grid, key: number): boolean
 	self.removed += 1
 	table.insert(self.removedOrder, key)
 	self:_unexpose(key)
-	local x, y, z = Grid.coords(key)
-	for _, step in NEIGHBOURS do
-		local ny = y + step[2]
-		if ny >= 0 then
-			local neighbour = Grid.key(x + step[1], ny, z + step[3])
-			if self.solid[neighbour] then
-				self:_expose(neighbour)
-			end
+	local pages = self.solidPages
+	for _, step in STEPS do
+		local neighbour = key + step
+		if neighbour >= 0 and hasBit(pages, neighbour) then
+			self:_expose(neighbour)
 		end
 	end
 	return true
@@ -316,7 +377,8 @@ function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?,
 		self.removedOrder = distant
 	end
 	local restored = {}
-	local affected = {}
+	-- Bit-packed sets: plain tables rehash with long stalls at this size.
+	local affected = (newCellMap())
 	while #restored < count and #self.removedOrder > 0 do
 		local key = table.remove(self.removedOrder) :: number
 		if not self.solid[key] and not self.sealed[key] then
@@ -399,9 +461,10 @@ function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() 
 	end
 	local cx, cy, cz = Grid.coords(start)
 	local heap: { { number } } = {}
-	local queued: { [number]: boolean } = {}
+	local queued = (newCellMap())
+	local pages = self.solidPages
 	local function enqueue(key: number)
-		if queued[key] or not self.solid[key] then
+		if queued[key] or not hasBit(pages, key) then
 			return
 		end
 		queued[key] = true
@@ -428,12 +491,9 @@ function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() 
 			table.insert(removed, key)
 			if onRemoved then onRemoved(key) end
 			if checkpoint and #removed % 256 == 0 then checkpoint() end
-			local x, y, z = Grid.coords(key)
-			for _, step in NEIGHBOURS do
-				local ny = y + step[2]
-				if ny >= 0 then
-					enqueue(Grid.key(x + step[1], ny, z + step[3]))
-				end
+			for _, step in STEPS do
+				local neighbour = key + step
+				if neighbour >= 0 then enqueue(neighbour) end
 			end
 		end
 	end
@@ -449,7 +509,7 @@ function Grid.grow(self: Grid, count: number, capacity: number, checkpoint: (() 
 	if count == 0 then return added end
 	local heap = self.growthHeap or {}
 	local scores = self.growthScores or {}
-	local queued = self.growthQueued or {}
+	local queued = self.growthQueued or (newCellMap())
 	-- Parallel numeric arrays avoid allocating a tiny table for every new cell.
 	local function pushCandidate(key: number, score: number)
 		local i = #heap + 1
@@ -540,8 +600,8 @@ end
 -- Takes a buried cell out of the rock for the diamond (all six neighbours
 -- solid, in the lower two thirds so it is not found straight away). The
 -- diamond is not stone: it does not count towards the total.
-function Grid.carveHiddenCell(self: Grid): number
-	local key = self:pickHiddenCell()
+function Grid.carveHiddenCell(self: Grid, checkpoint: (() -> ())?): number
+	local key = self:pickHiddenCell(checkpoint)
 	if self.solid[key] then
 		-- Sealed: not stone, but it still counts as rock around it until the
 		-- digging reaches it.
@@ -557,15 +617,16 @@ function Grid.carveHiddenCell(self: Grid): number
 	return key
 end
 
-function Grid.pickHiddenCell(self: Grid): number
+function Grid.pickHiddenCell(self: Grid, checkpoint: (() -> ())?): number
 	local buried: { number } = {}
-	for _, key in self.order do
+	local low, high, reach = math.max(1, math.floor(self.height * 0.15)), self.height * 0.35, (self.radius * 0.3) ^ 2
+	for index, key in self.order do
 		local x, y, z = Grid.coords(key)
-		if self.solid[key] and not self:isExposed(key)
-			and y >= math.max(1, math.floor(self.height * 0.15)) and y <= self.height * 0.35
-			and x * x + z * z <= (self.radius * 0.3) ^ 2 then
+		-- Cheap position tests first; only central cells need the exposure test.
+		if y >= low and y <= high and x * x + z * z <= reach and self:isSolid(key) and not self:isExposed(key) then
 			table.insert(buried, key)
 		end
+		if checkpoint and index % 8192 == 0 then checkpoint() end
 	end
 	if #buried == 0 then
 		for _, key in self.order do

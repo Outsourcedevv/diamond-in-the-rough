@@ -1,5 +1,5 @@
 -- Reports CPU intervals between cooperative checkpoints; not a Roblox FPS test.
-local Grid = require("../src/server/Grid")
+local Grid = require("../src/shared/Grid")
 local function rand(a, b) return if a then math.floor((a + b) / 2) else 0.5 end
 local grid = Grid.new(250000, 3.7, rand)
 grid:carveHiddenCell()

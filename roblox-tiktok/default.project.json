@@ -35,7 +35,19 @@
       }
     },
     "Lighting": {
-      "$className": "Lighting"
+      "$className": "Lighting",
+      "$properties": {
+        "Technology": "Future",
+        "LightingStyle": "Realistic",
+        "PrioritizeLightingQuality": true,
+        "GlobalShadows": true
+      }
+    },
+    "MaterialService": {
+      "$className": "MaterialService",
+      "$properties": {
+        "Use2022Materials": true
+      }
     }
   }
 }

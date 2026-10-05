@@ -1,15 +1,17 @@
 # Diamond Rush: TikTok Live Roblox game
 
-A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 rocks** (one rock is one stone) is shown counting down at the top of the screen. Larger uneven slate chips and broken wedges overlap over a second solid stone layer that advances as you dig: finding the one small diamond should feel like finding a needle in a haystack. Every gift, like, follow and share from your viewers blasts stone out of it. Once the diamond is exposed, find it, click it and **hold it for 15 seconds** to win.
+A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 rocks** (one rock is one stone) is shown counting down at the top of the screen. The rock slopes smoothly towards open air, with snow on the summit, grassy foothills over a dirt layer and layered stone inside: finding the one small diamond should feel like finding a needle in a haystack. Every gift, like, follow and share from your viewers blasts stone out of it. Once the diamond is exposed, find it, click it and **hold it for 15 seconds** to win.
 
 - **Stone counter.** The top of the screen shows how much stone is left (250,000 to start), with a progress bar.
 - **Gifts blast the mountain.** Each TikTok coin removes 100 rocks, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. The counter always equals the rocks really left. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
 - **Gift animations.** Total coins (gift price × combo count) scale the effects: 1–9 sparks, 10–99 shockwaves, 100–499 Diamond Fracture (cyan cracks spread over the remaining rock, flash into a pulse, and release sparkling fragments), 500–999 orbital strikes, 1,000–9,999 galaxy collapses, and 10,000+ a cosmic burst with a light column and rising rings. Shockwaves use smooth expanding light rings; meteors accelerate along curved paths with tapered trails, flashes and arcing debris. A brief banner shows the sender, gift and coin value. Gift blasts only remove mountain stones: they never target the diamond. The gem settles above the actual visible stone or ground after each blast. Effects are cosmetic, do not block digging, and are capped at two simultaneous sequences and 80 live effect parts; expensive gifts take priority. The Y-panel has 12 test presets, including Hand Hearts, Money Gun, Lion and gift combos, with total test coins shown on each button. The bridge control page includes the same presets. Test gifts use these same effects.
 - **Find and click the diamond.** The uncovered message tells you when it can be found, but there is no floating location label, through-rock outline or light beacon. Aim directly at the gem and left-click (tap on mobile) within 12 studs. Walking into it and pressing E do not pick it up; rocks cannot be clicked through.
-- **Hold the diamond.** Your character raises one arm and your view looks up. The eight-sided gem has a flat crown, triangular facets and a pointed base. A visible palm, thumb and curled fingers grip the diamond in front of you. The countdown occupies the top-centre HUD while holding, leaving the hand and gem clear below it. Other players see the diamond attached to your avatar's hand.
+- **Hold the diamond.** The gem flies from where it lay into your right hand, your hand lifts it high and your view eases upward, framing a large, sparkling diamond against the sky. The eight-sided gem has a pale crown, a bright table and a deeper blue pointed base, so it reads clearly as a diamond on stream. A visible palm, thumb and curled fingers grip it. **You cannot move while holding it:** you stay frozen in place until you win or a rebuild gift cancels the hold. The countdown occupies the top-centre HUD while holding, leaving the hand and gem clear below it. Other players see a big sparkling diamond in your avatar's raised hand.
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
   - If you fall or leave, the diamond drops.
-- **Scenery.** Rolling hills, a ring of snowy peaks, a lake, a pine forest, boulders, clouds and a campfire at the camp.
+- **Scenery.** An alpine valley in smooth terrain, with grassy meadows and animated grass, a lake with a dock, and a log-cabin mining camp with a porch, warm windows, a campfire, lanterns and a trail sign. With the [Blender scenery pack](#blender-scenery-pack-one-time-import) imported, the valley is ringed by huge snow-capped mountains and filled with about 200 pines (snow-dusted higher up), birches, oaks, mossy boulders, rock outcrops, bushes, wildflower patches, fallen logs and stumps. Without it, built-in low-poly trees, terrain boulders and terrain peaks are used instead. The place uses Future lighting and Roblox's 2022 material pack, with atmosphere haze, sun rays, bloom and a gentle colour grade.
+- **Leaderboards.** Two giant 3D wooden boards stand behind the mountain, either side of the summit, angled towards the camp: **TOP GIFTERS** (blue border, a gift box on the roof) ranks viewers by coins sent, and **TOP LIKERS** (red border, a heart on the roof) by likes. Each shows the top 10 on a shingle-roofed board with log posts. Totals are saved between streams, viewer names are text-filtered, and test gifts and likes never count.
+- **Gold statues.** Honour a big gifter with a gold statue holding a diamond aloft on a marble pedestal. An engraved brass plaque shows their name and coins. Statues are placed from the settings panel and saved in your game.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and ⭐ NEW BEST! when you beat it). Then the mountain rebuilds from base to peak in 16 waves, with flying stones snapping into place and a final glint at the summit. Gifts arriving during the rebuild are saved and applied when digging resumes.
 - **Aim at stone.** A small dot marks the centre of the screen. The surface rock directly under it gets a white outline; the outline follows the same target used for digging and disappears when aiming away or opening settings.
@@ -25,7 +27,7 @@ Add gifts refill previously dug spaces, with stones flying and snapping into pla
 
 ## Rebuild tests
 
-Rebuilding any rocks during a diamond hold cancels that hold and clears the countdown. Nearby dug spaces under the holder refill first, from the bottom upwards. Players covered by restored rock are lifted onto the new surface. A rebuild that actually restores at least 10,000 rocks moves the former holder to the highest restored rock surface instead. The diamond is released beside the player, above the rock, ready to click again for a fresh countdown. An add gift at the growth limit that restores zero rocks does not interrupt the hold. During the countdown, the holder sees a larger bright outlined gem above their palm; other players see an outlined diamond in the raised hand.
+Rebuilding any rocks during a diamond hold cancels that hold, clears the countdown and lets the holder move again. Dug spaces refill from the diamond outward. Players covered by restored rock are lifted onto the new surface. A rebuild that actually restores at least 10,000 rocks moves the former holder to the highest restored rock surface instead. The diamond is released beside the player, above the rock, ready to click again for a fresh countdown. An add gift at the growth limit that restores zero rocks does not interrupt the hold. During the countdown, the holder sees a larger bright outlined gem above their palm; other players see an outlined diamond in the raised hand.
 
 In the game's **Y settings panel**, scroll to **REBUILD TEST GIFTS**. Choose **+1,000**, **+10,000**, **+100,000**, or **Grow to limit**. These tests work offline and always rebuild, regardless of existing gift rules. They refill previously dug spaces, then enlarge the mountain up to its growth limit, and preserve the round and wins. They also work on an undug mountain. The localhost bridge page has the same four buttons.
 
@@ -35,9 +37,9 @@ The gift catalogue refresh now accepts the username typed on the page directly, 
 
 Gift mutations run through one ordered worker. Large blasts, restoration and growth yield between short chunks rather than doing all work in one frame. Animations start when a gift begins processing; the status shows queued work and the stone counter updates as work progresses. Digging and diamond pickup wait while rock changes are reconciled. Round resets wait for the current mutation to finish. Players are kept above newly built surfaces.
 
-Cell occupancy and exposed indices use paged buffers, and visible rock references use fixed-size pages, avoiding large sparse numeric hash-table resize spikes. Crater drawing deduplicates surviving surface/backing cells, and the growth frontier is cached between consecutive add gifts. Progress-bar capacity follows the enlarged mountain while StartingStone keeps the original round value.
+**The server has no rock parts.** It keeps only the rock grid and streams compact change lists (column runs, 6 bytes each) to every client, which draws the rock itself. Each client spends at most a few milliseconds a frame on rock work, so a huge gift opens its crater over a second or so instead of freezing the game. A 100,000-rock blast is about 23 KB of network traffic; it used to replicate thousands of parts. A 250,000-rock mountain needs about 13,400 parts (it used to need about 26,200): slope-shaped surface rock closes the shell by itself, so the hidden backing layer is gone. Cell occupancy, crater queues and growth frontiers use bit-packed buffers to avoid hash-table resize stalls.
 
-Run `luau tests/gift-performance.luau` for a CPU checkpoint timing report. Local 100,000-rock logic checks measured approximately 3-6 ms between checkpoints after paging, compared with a roughly 64 ms growth spike before it. These timings exclude Roblox part replication, rendering and physics; live Studio frame rate still requires checking on the streaming PC. Large gifts finish over several frames, and a queue can build during rapid gifts.
+Run `luau tests/gift-performance.luau` for a CPU checkpoint timing report and `python3 tests/mountain-sync.py` for client build and network sizes. Rendering cost and frame rate still need checking on the streaming PC.
 
 ## What you need
 
@@ -90,6 +92,33 @@ In the **Y** panel:
 
 Everything is saved with your other settings.
 
+## Blender scenery pack (one-time import)
+
+The surroundings look best with the scenery pack made in Blender: real 3D meshes instead of Roblox parts. Roblox does not let a game load models from a file by itself, so you import the pack into your place once:
+
+![The valley as the game lays it out, rendered in Blender from the camp](art/previews/game_view.png)
+
+![The trees, bushes, rocks and logs in the pack](art/previews/assets.png)
+
+1. Open **DiamondRushTikTok.rbxlx** in Roblox Studio (you need to be logged in).
+2. Click **File → Import**, and choose **art/DiamondRushScenery.fbx** from this folder.
+3. In the import window keep the default settings. Leave **Merge Meshes** off and the name as **DiamondRushScenery**. Ticking **Anchored** is a good idea. Click **Import**.
+4. A row of mountains, trees and rocks appears in the Workspace. Leave it there: when the game runs, it moves the pack out of sight and builds the valley from it. You can also drag **DiamondRushScenery** into **ServerStorage**.
+5. Save the place (**Ctrl+S**) and press **Play**. The Output window says *Using the imported scenery pack*.
+
+Without the pack the game still works, with its built-in scenery. If you download a new version of the place file later, import the pack again (or keep using your saved place).
+
+The preview pictures are Blender renders. Roblox's own lighting, haze and terrain textures will look a little different.
+
+## Leaderboards and gold statues
+
+The two leaderboards fill up by themselves as viewers send gifts and likes. In the **Y** panel:
+
+- **Preview with sample names** fills both boards with made-up viewers for 20 seconds, so you can check them before going live.
+- **Reset top gifters** / **Reset top likers** clear a board (click twice to confirm), for example at the start of a new stream.
+
+To place a **gold statue**, stand where you want it (outside the mountain area), face that spot and open the **Y** panel. Under **GOLD STATUES**, type the gifter's name and how many coins they sent, then press **Place statue in front of me**. The statue appears a few steps ahead, facing you. Up to 12 statues are kept, and the ✕ next to each one removes it (click twice to confirm). Like wins and best times, statues and leaderboard totals are remembered between sessions once the game is published to Roblox and **Enable Studio Access to API Services** is on (Game Settings → Security).
+
 You can also type these in the Roblox chat:
 
 | Command | What it does |
@@ -118,7 +147,7 @@ In Studio, open **ReplicatedStorage → DiamondRush → Config**:
 | `HoldCountFrom` | 10 | Number the countdown starts at |
 | `HoldSlowdown` | 0.6 | 0 = even countdown, 1 = slows down a lot at the end |
 | `WinScreenSeconds` | 4 | How long the win screen shows |
-| `BlockSize` | 0.4 | Size of one rock in studs; the diamond is the same size |
+| `BlockSize` | 0.4 | Size of one rock in studs; the diamond is about twice that when found |
 | `DigPerSecond` | 100 | Rocks dug per second while holding the dig button |
 
 With the defaults, clearing the whole mountain takes 2,500 coins of gifts. The diamond often shows up before that, depending on where the blasts land.
@@ -144,23 +173,30 @@ The game listens on the topic `DiamondRushTikTok`. Studio keeps working at the s
 - **TikTok "could not connect"**: check the username (no @ needed). TikTok sometimes rate-limits; wait a minute.
 - **Nothing happens on gifts but test gifts work**: make sure the control page says *connected to @yourname*.
 - **The page says "waiting for Roblox Studio"**: press Play in Studio. HTTP requests must be allowed (see above).
+- **No mountain in Studio's Server view**: that is expected. Each player's client draws the rock; switch back to the Client view. Use **Play** (F5), not **Run** (F8), which has no client.
+- **The world looks flat or old-fashioned**: open the place file from this folder. It sets Future lighting and the 2022 material pack, which scripts cannot change. In an older copy, set **Lighting → LightingStyle** to Realistic and **MaterialService → Use2022Materials** on.
 
 ## For developers
 
 The source is a [Rojo](https://rojo.space) project:
 
-- `src/shared`: config, the hold countdown curve and formatting.
-- `src/server`: rounds, the mountain, the diamond, the TikTok feed and saving.
-- `src/client`: the on-screen display and the settings panel.
+- `src/shared`: config, the rock grid, rock shapes and looks, the network codec, the diamond shape, the hold countdown curve and formatting.
+- `src/server`: rounds, the authoritative mountain grid, the diamond, scenery, the TikTok feed and saving.
+- `src/client`: the mountain renderer (`MountainView`), first-person hands, effects, the on-screen display and the settings panel.
 
-Rebuild the place with `rojo build -o DiamondRushTikTok.rbxlx`, or use `rojo serve` with the Studio plugin while editing.
+Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o DiamondRushTikTok.rbxlx`), or use `rojo serve` with the Studio plugin while editing. `python3 tools/build_place.py --check` fails if the committed place is out of date; `--sourcemap` writes a `sourcemap.json` for luau-lsp.
 
-- Logic tests: `luau tests/run.luau` (Luau CLI).
+- Logic tests: `luau tests/run.luau`, `luau tests/mountain-shape.luau`, `luau tests/diamond-rebuild.luau` (Luau CLI).
+- Server/client sync and watertight rock: `python3 tests/mountain-sync.py [path/to/luau]`.
+- Scenery: `python3 tests/scenery.py [path/to/luau]`.
+- Leaderboards and statues: `python3 tests/showcase.py [path/to/luau]`.
+
+The Blender scenery pack is generated by `art/scenery_assets.py` (no hand-made files): every mesh is closed, vertex-coloured, under Roblox's 20,000-triangle limit, and modelled at real size. Rebuild it with `pip install bpy` (Python 3.11), then `python art/scenery_assets.py`, or with `blender --background --python art/scenery_assets.py`. This writes the `.fbx`, `art/manifest.json` and the preview renders. `python3 tests/scenery.py --dump` writes the game's layout so the build also renders `art/previews/game_view.png`. In the game, `src/server/ScenePack.luau` finds the imported pack and sizes each copy from a reference tree, so it works whatever units or up-axis the importer used. `tests/scenery.py` checks both with and without the pack.
 - Bridge tests: `npm test` inside `bridge/`.
 
 TikTok events come from the community [tiktok-live-connector](https://github.com/zerodytrash/TikTok-Live-Connector) package, which is not an official TikTok API.
 
 ### How 250,000 rocks stay fast
 
-Every stone is a real rock, but only the rocks on the outside of the mountain exist as Roblox parts (about 14,000). Rocks inside are kept as numbers and get a part the instant digging uncovers them, so the mountain always looks solid and the counter always matches.
+Every stone is a real rock, but only the rocks on the outside of the mountain exist as Roblox parts (about 13,400), and only on each player's own client. Rocks inside are kept as numbers and get a part the instant digging uncovers them, so the mountain always looks solid and the counter always matches. The server keeps the authoritative grid, checks digging and the diamond's sightline against it, and sends each client a snapshot when it joins plus a change list for every blast, dig and rebuild. Surface rocks slope towards open air only where every face they leave open borders air or another drawn rock, so the drawn shell stays watertight without a second layer behind it.
 

@@ -31,6 +31,11 @@ Notify.Parent = Remotes
 local Request = Instance.new("RemoteEvent")
 Request.Name = "Request"
 Request.Parent = Remotes
+-- Mountain snapshots and change lists travel in order on one remote; every
+-- client draws its own rock from them (see Mountain and MountainView).
+local MountainSync = Instance.new("RemoteEvent")
+MountainSync.Name = "MountainSync"
+MountainSync.Parent = Remotes
 Remotes.Parent = ReplicatedStorage
 
 -- Saved settings --------------------------------------------------------------
@@ -49,6 +54,9 @@ local settings = {
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
+	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
+	leaderboards = { gifts = {}, likes = {} } :: { gifts: { any }, likes: { any } },
+	statues = {} :: { any },
 }
 local saved = Store.load()
 if saved then
@@ -64,6 +72,17 @@ if saved then
 		end
 	end
 	settings.giftRules = rules
+	if type(settings.leaderboards.gifts) ~= "table" or type(settings.leaderboards.likes) ~= "table" then
+		settings.leaderboards = { gifts = {}, likes = {} }
+	end
+	local statues = {}
+	for _, statue in settings.statues do
+		if type(statue) == "table" and type(statue.n) == "string" and type(statue.c) == "number"
+			and type(statue.x) == "number" and type(statue.y) == "number" and type(statue.z) == "number" and type(statue.r) == "number" then
+			table.insert(statues, statue)
+		end
+	end
+	settings.statues = statues
 end
 
 local function publishSettings()
@@ -81,6 +100,9 @@ local function publishSettings()
 	State:SetAttribute("PerShare", settings.perShare)
 	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
+	local statueList = {}
+	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
+	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
 end
 
 local function saveSettings()
@@ -109,8 +131,16 @@ spawn.Material = Enum.Material.WoodPlanks
 spawn.Color = Color3.fromRGB(129, 105, 79)
 spawn.Parent = workspace
 
+-- Leaderboards stand behind the mountain; the scenery keeps their ground clear.
+local Leaderboards = require(script.Leaderboards)
+local mountainRadius = spawnDistance - 30
+local arenaRadius = math.max(mountainRadius + 14, 55)
+local boardSpots = Leaderboards.spots(arenaRadius, mountainRadius, spawn.Position)
+local reserved = {}
+for _, spot in boardSpots do table.insert(reserved, { at = spot.at, radius = 30 }) end
+
 -- Hills, distant peaks, a lake, a pine forest, boulders and a campfire.
-require(script.Scenery).build(spawnDistance - 30, spawn.Position)
+require(script.Scenery).build(mountainRadius, spawn.Position, reserved)
 
 -- Every player carries a pickaxe to chip at the rock themselves.
 local function makePickaxe(): Tool
@@ -150,10 +180,11 @@ local _ = StarterPack
 local DiamondShape = require(Shared:WaitForChild("DiamondShape"))
 local diamond = Instance.new("Part")
 diamond.Name = "Diamond"
--- Sizes are relative to the original gem, with a larger held silhouette.
+-- Sizes are relative to the original gem. Held high, it must read clearly as a
+-- diamond to everyone watching, so it is well over twice the found size.
 local DIAMOND_BASE_SIZE = Vector3.new(blockSize, blockSize, blockSize) * 0.85
 local DIAMOND_WORLD_SIZE = DIAMOND_BASE_SIZE * 2
-local DIAMOND_HELD_SIZE = DIAMOND_BASE_SIZE * 4
+local DIAMOND_HELD_SIZE = DIAMOND_BASE_SIZE * 6.5
 diamond.Size = DIAMOND_WORLD_SIZE
 diamond.Material = Enum.Material.Glass
 diamond.Color = Color3.fromRGB(175, 240, 255)
@@ -166,9 +197,26 @@ diamond.Parent = workspace
 DiamondShape.attach(diamond)
 local glow = Instance.new("PointLight")
 glow.Color = Color3.fromRGB(140, 230, 255)
-glow.Range = 4
-glow.Brightness = 0.6
+glow.Range = 8
+glow.Brightness = 1.2
+glow.Shadows = false
 glow.Parent = diamond
+-- Sparkles around the raised gem while it is held (default sparkle texture).
+local sparkleAttachment = Instance.new("Attachment")
+sparkleAttachment.Name = "Sparkle"
+sparkleAttachment.Parent = diamond
+local sparkles = Instance.new("ParticleEmitter")
+sparkles.Name = "HeldSparkles"
+sparkles.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(150, 235, 255))
+sparkles.LightEmission = 1
+sparkles.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 0) })
+sparkles.Transparency = NumberSequence.new(0.1, 1)
+sparkles.Lifetime = NumberRange.new(0.4, 0.9)
+sparkles.Rate = 14
+sparkles.Speed = NumberRange.new(0.6, 1.8)
+sparkles.SpreadAngle = Vector2.new(180, 180)
+sparkles.Enabled = false
+sparkles.Parent = sparkleAttachment
 local holdOutline = Instance.new("Highlight")
 holdOutline.Name = "CountdownDiamond"
 holdOutline.Adornee = diamond
@@ -226,7 +274,31 @@ local function showDiamond(visible: boolean)
 	-- No through-rock outline, beacon or floating location label while searching.
 	glow.Enabled = visible and phase == "Holding"
 	holdOutline.Enabled = visible and phase == "Holding"
+	sparkles.Enabled = visible and phase == "Holding"
 	click.MaxActivationDistance = if visible and phase == "Revealed" then PICKUP_DISTANCE else 0
+end
+
+-- Mountain sync --------------------------------------------------------------------
+-- Players whose client asked for the mountain; only they receive changes.
+local synced: { [Player]: boolean } = {}
+local readyAt: { [Player]: number } = {}
+local function sendMessages(messages: { { any } }, player: Player?)
+	for _, message in messages do
+		if player then
+			MountainSync:FireClient(player, message[1], message[2])
+		else
+			for listener in synced do MountainSync:FireClient(listener, message[1], message[2]) end
+		end
+	end
+end
+local lastFlush = 0
+local function flushMountain(effect: string?, at: Vector3?)
+	local current = mountain
+	if current == nil then return end
+	lastFlush = os.clock()
+	for _, diff in current:flush(effect, at) do
+		for listener in synced do MountainSync:FireClient(listener, "diff", diff) end
+	end
 end
 
 -- The find stays at its reserved lower, central cell even when support is dug
@@ -259,15 +331,21 @@ local cancelHoldForRebuild: () -> Player? = function() return nil end
 local function growthCapacity(): number
 	return math.max(Config.GrowthMaxStone, startingStone * 2)
 end
-local function workCheckpoint(onYield: (() -> ())?): () -> ()
+-- Long rock work yields every few milliseconds so the server keeps its frame
+-- rate. Changes stream to clients while the work continues.
+local function workCheckpoint(onYield: (() -> ())?, effect: string?, budget: number?): () -> ()
 	local frameStart = os.clock()
 	local lastCountUpdate = frameStart
+	local slice = budget or 0.003
 	return function()
-		if os.clock() - frameStart >= 0.003 then
+		if os.clock() - frameStart >= slice then
 			if os.clock() - lastCountUpdate >= 0.1 then
 				-- Publish the final count after geometry is reconciled, not ahead of it.
 				if onYield then onYield() end
 				lastCountUpdate = os.clock()
+			end
+			if mountain and mountain:hasChanges() and os.clock() - lastFlush >= 0.05 then
+				flushMountain(effect)
 			end
 			task.wait()
 			frameStart = os.clock()
@@ -283,26 +361,23 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 		table.insert(pendingChanges, amount)
 		return
 	end
-	local checkpoint = workCheckpoint()
 	if amount < 0 then
-		local character = holder and holder.Character
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		local focus = if phase == "Holding" and root and root:IsA("BasePart") then root.Position else nil
 		local capacity = growthCapacity()
 		local interrupted = if current:remaining() < capacity then cancelHoldForRebuild() else nil
-		checkpoint = workCheckpoint(function() interruptRebuildHold(0, interrupted) end)
-		local restored, samples = current:restore(-amount, focus, capacity, checkpoint)
+		local checkpoint = workCheckpoint(function() interruptRebuildHold(0, interrupted) end, "restore")
+		local restored, at = current:restore(-amount, capacity, checkpoint)
+		flushMountain("restore", at)
 		if restored > 0 then interruptRebuildHold(restored, interrupted) end
 		refreshStone()
 		if phase == "Revealed" then
 			stopSettling()
 			settleDiamond()
 		end
-		Notify:FireAllClients("restore", { stones = samples, count = restored })
-		return (if #samples > 0 then samples[1].frame.Position else nil), -restored
+		return at, -restored
 	end
 	local count = math.min(amount, current:remaining())
-	local centre = current:blast(count, checkpoint, centreKey)
+	local centre = current:blast(count, workCheckpoint(nil, "blast"), centreKey)
+	flushMountain("blast", centre)
 	-- Gift spectacle is rendered by GiftEffects on each client. Never create a
 	-- physics Explosion: blasts may remove grid stones, never the diamond or rigs.
 	refreshStone()
@@ -352,7 +427,48 @@ local function lowerArms()
 	table.clear(raisedArms)
 end
 
+-- The diamond holder cannot move until a rebuild cancels the hold or they win.
+local frozen: { player: Player, humanoid: Humanoid, root: BasePart, walk: number, jump: number, jumpHeight: number, autoRotate: boolean }? = nil
+local function freeze(player: Player, character: Model)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if humanoid == nil or root == nil or not root:IsA("BasePart") then return end
+	frozen = {
+		player = player,
+		humanoid = humanoid,
+		root = root,
+		walk = humanoid.WalkSpeed,
+		jump = humanoid.JumpPower,
+		jumpHeight = humanoid.JumpHeight,
+		autoRotate = humanoid.AutoRotate,
+	}
+	humanoid.WalkSpeed = 0
+	humanoid.JumpPower = 0
+	humanoid.JumpHeight = 0
+	humanoid.AutoRotate = false
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	root.Anchored = true
+end
+local function unfreeze()
+	local state = frozen
+	frozen = nil
+	if state == nil then return end
+	if state.humanoid.Parent then
+		state.humanoid.WalkSpeed = state.walk
+		state.humanoid.JumpPower = state.jump
+		state.humanoid.JumpHeight = state.jumpHeight
+		state.humanoid.AutoRotate = state.autoRotate
+	end
+	if state.root.Parent then
+		state.root.Anchored = false
+		-- Hand physics back to the player's own client.
+		pcall(function() state.root:SetNetworkOwner(state.player) end)
+	end
+end
+
 local rebuilding = false
+local REBUILD_SECONDS = 0.5 + 16 * 0.15 -- matches the client's base-to-summit waves
 local function newRound(animated: boolean?)
 	if stoneBusy then requestedRound = animated == true; return end
 	if rebuilding then return end
@@ -360,10 +476,9 @@ local function newRound(animated: boolean?)
 	setPhase("Rebuilding")
 	showDiamond(false)
 	stopSettling()
-	if mountain ~= nil then
-		mountain:destroy()
-	end
+	mountain = nil
 	holder = nil
+	unfreeze()
 	lowerArms()
 	if holdWeld ~= nil then
 		holdWeld:Destroy()
@@ -373,7 +488,8 @@ local function newRound(animated: boolean?)
 		teleportHome(player)
 	end
 	startingStone = math.clamp(settings.startingStone, 100, 1500000)
-	local created = Mountain.new(workspace, startingStone, blockSize, reveal, animated == true)
+	-- Larger slices while nothing else runs; the win screen covers the build.
+	local created = Mountain.new(startingStone, blockSize, reveal, workCheckpoint(nil, nil, 0.008))
 	mountain = created
 	startingStone = created:total()
 	diamond.Anchored = true
@@ -385,33 +501,9 @@ local function newRound(animated: boolean?)
 	State:SetAttribute("HolderUserId", 0)
 	State:SetAttribute("HoldStart", 0)
 	refreshStone()
+	sendMessages(created:snapshot(animated == true, workspace:GetServerTimeNow() + 0.5))
 	if animated then
-		local layers = {}
-		local samples = {}
-		for _, part in created.parts do
-			local layer = math.clamp(math.floor(part.Position.Y / (created.grid.height * blockSize) * 16) + 1, 1, 16)
-			layers[layer] = layers[layer] or {}
-			table.insert(layers[layer], part)
-		end
-		for layer = 1, 16 do
-			local bucket = layers[layer] or {}
-			local taken = 0
-			for _, part in bucket do
-				if not part:GetAttribute("BackingRock") then
-					table.insert(samples, { frame = part.CFrame, size = part.Size, colour = part.Color, layer = layer })
-					taken += 1
-					if taken >= 5 then break end
-				end
-			end
-		end
-		local start = workspace:GetServerTimeNow() + 0.5
-		Notify:FireAllClients("rebuild", { stones = samples, start = start })
-		task.wait(0.5)
-		for layer = 1, 16 do
-			task.wait(0.15)
-			for _, part in layers[layer] or {} do part.Transparency = 0 end
-		end
-		created.folder:SetAttribute("Building", false)
+		task.wait(REBUILD_SECONDS)
 	end
 	rebuilding = false
 	setPhase("Digging")
@@ -437,15 +529,10 @@ local function grab(player: Player)
 	end
 	-- ClickDetector events can be forged: range and an unobstructed sightline
 	-- are checked again on the server before claiming the single diamond.
+	-- Rock only exists on clients, so the sightline is checked on the grid.
+	local current = mountain
 	local direction = diamond.Position - head.Position
-	if direction.Magnitude > PICKUP_DISTANCE then
-		return
-	end
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { character :: Model }
-	local hit = workspace:Raycast(head.Position, direction, params)
-	if hit == nil or hit.Instance ~= diamond then
+	if current == nil or direction.Magnitude > PICKUP_DISTANCE or current:lineBlocked(head.Position, diamond.Position) then
 		return
 	end
 	stopSettling()
@@ -470,6 +557,7 @@ local function grab(player: Player)
 	weld.Parent = diamond
 	holdWeld = weld
 	raiseArms(character :: Model)
+	freeze(player, character :: Model)
 	Notify:FireAllClients("grabbed", player.DisplayName)
 end
 
@@ -481,6 +569,7 @@ local function drop(reason: string)
 	local lost = holder
 	holder = nil
 	holdStarted = 0
+	unfreeze()
 	lowerArms()
 	if holdWeld ~= nil then
 		holdWeld:Destroy()
@@ -505,36 +594,23 @@ end
 interruptRebuildHold = function(restored: number, interrupted: Player?)
 	local current = mountain
 	if current == nil then return end
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { current.folder }
-	local height = current.grid.height * blockSize * 2 + 50
-	local function surface(x: number, z: number): RaycastResult?
-		return workspace:Raycast(Vector3.new(x, height, z), Vector3.new(0, -height - 100, 0), params)
-	end
-	-- Find the highest actual restored surface, including partially dug summits.
-	local summit: Vector3? = nil
-	if interrupted and restored >= 10000 then
-		local highest: BasePart? = nil
-		for _, part in current.parts do
-			if highest == nil or part.Position.Y > highest.Position.Y then highest = part end
-		end
-		if highest then
-			local hit = surface(highest.Position.X, highest.Position.Z)
-			if hit then summit = hit.Position end
-		end
-	end
+	-- The former holder goes to the highest restored surface after a big rebuild.
+	local summit = if interrupted and restored >= 10000 then current:summit() else nil
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if character == nil or root == nil or not root:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then continue end
-		local ground = surface(root.Position.X, root.Position.Z)
 		local clearance = humanoid.HipHeight + root.Size.Y / 2
 		-- R6 rigs use zero HipHeight; account for their legs.
 		if humanoid.RigType == Enum.HumanoidRigType.R6 then clearance += 2 end
 		local destination = if player == interrupted then summit else nil
-		if destination == nil and ground and ground.Position.Y > root.Position.Y - clearance + 0.1 then destination = ground.Position end
+		if destination == nil then
+			-- Lift players whose body is now inside restored rock onto its surface.
+			local feet = root.Position.Y - clearance
+			local top = current:coveredTop(root.Position, feet + 0.15, root.Position.Y + 1.5)
+			if top then destination = Vector3.new(root.Position.X, top, root.Position.Z) end
+		end
 		if destination then
 			local target = destination + Vector3.new(0, clearance + 1, 0)
 			character:PivotTo(character:GetPivot() + (target - root.Position))
@@ -547,6 +623,8 @@ end
 
 local function win(player: Player)
 	setPhase("Won")
+	-- The winner may move again; the arm stays raised until the next round.
+	unfreeze()
 	click.MaxActivationDistance = 0
 	local roundTime = workspace:GetServerTimeNow() - roundStart
 	local newBest = settings.best <= 0 or roundTime < settings.best
@@ -587,6 +665,123 @@ RunService.Heartbeat:Connect(function()
 	end
 end)
 
+-- Leaderboards --------------------------------------------------------------------
+local showcase = Instance.new("Folder")
+showcase.Name = "Leaderboards"
+showcase.Parent = workspace
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Include
+groundParams.FilterDescendantsInstances = { workspace.Terrain }
+local function groundAt(position: Vector3): number
+	local hit = workspace:Raycast(Vector3.new(position.X, 400, position.Z), Vector3.new(0, -520, 0), groundParams)
+	return if hit then hit.Position.Y else 0
+end
+-- Raised so both boards show over the summit as seen from the camp.
+local boardLift = math.max(14, mountainRadius * 0.55)
+local giftBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1].facing, boardLift, {
+	title = "🎁 TOP GIFTERS",
+	unit = "coins",
+	trim = Color3.fromRGB(36, 92, 204),
+	valueColour = Color3.fromRGB(255, 214, 120),
+	emblem = "gift",
+	empty = "Send a gift to get on the board!",
+}, groundAt)
+local likeBoard = Leaderboards.build(showcase, boardSpots[2].at, boardSpots[2].facing, boardLift, {
+	title = "❤️ TOP LIKERS",
+	unit = "likes",
+	trim = Color3.fromRGB(196, 36, 44),
+	valueColour = Color3.fromRGB(255, 178, 188),
+	emblem = "heart",
+	empty = "Tap the screen to like the live!",
+}, groundAt)
+local giftTally = Leaderboards.tally(settings.leaderboards.gifts)
+local likeTally = Leaderboards.tally(settings.leaderboards.likes)
+local SAMPLE_GIFTS: { { any } } = { { "DiamondDave", 34999 }, { "LunaStreams", 12500 }, { "rocky_road", 5000 }, { "GemHunter99", 2999 }, { "Pixel Pam", 1000 },
+	{ "tiktok_tom", 520 }, { "MinerMia", 300 }, { "Sir Digs-a-Lot", 150 }, { "glitterbug", 99 }, { "rose_rain", 30 } }
+local SAMPLE_LIKES: { { any } } = { { "TapQueen", 48210 }, { "likeitlikeit", 23005 }, { "Pebble", 15400 }, { "Mo", 9870 }, { "skyler.digs", 6120 },
+	{ "heart_spammer", 4400 }, { "Ava", 2950 }, { "quarry_kid", 1200 }, { "bubbles", 640 }, { "newviewer22", 75 } }
+
+-- Viewer names come from TikTok, so they are filtered like any other text
+-- shown to players. Results are cached; a name that cannot be checked shows as "Viewer".
+local shownNames: { [string]: string } = {}
+local shownNameCount = 0
+local function boardName(raw: string): string?
+	local cached = shownNames[raw]
+	if cached then return cached end
+	local author: Player? = nil
+	for player, isAdmin in admins do
+		if isAdmin then author = player; break end
+	end
+	author = author or Players:GetPlayers()[1]
+	if author == nil then return nil end
+	local authorId = (author :: Player).UserId
+	local ok, result = pcall(function()
+		return TextService:FilterStringAsync(raw, authorId, Enum.TextFilterContext.PublicChat):GetNonChatStringForBroadcastAsync()
+	end)
+	local clean = if ok and type(result) == "string" and result ~= "" then result else "Viewer"
+	if shownNameCount > 3000 then
+		table.clear(shownNames)
+		shownNameCount = 0
+	end
+	shownNames[raw] = clean
+	shownNameCount += 1
+	return clean
+end
+
+local boardsScheduled = false
+local boardsDirty = false
+local lastBoardSave = 0
+local previewUntil = 0
+local function refreshBoards()
+	boardsScheduled = false
+	local previewing = os.clock() < previewUntil
+	local function draw(board: Leaderboards.Board, tally: Leaderboards.Tally, samples: { { any } })
+		local entries: { Leaderboards.Entry } = {}
+		if previewing then
+			for _, sample in samples do table.insert(entries, { key = sample[1], name = sample[1], value = sample[2] }) end
+		else
+			for _, entry in tally.top(Leaderboards.ROWS) do
+				local name = boardName(entry.name)
+				table.insert(entries, { key = entry.key, name = name or "…", value = entry.value })
+			end
+		end
+		board.show(entries)
+	end
+	draw(giftBoard, giftTally, SAMPLE_GIFTS)
+	draw(likeBoard, likeTally, SAMPLE_LIKES)
+	settings.leaderboards = { gifts = giftTally.serialize(100), likes = likeTally.serialize(100) }
+	if boardsDirty and os.clock() - lastBoardSave >= 20 then
+		boardsDirty = false
+		lastBoardSave = os.clock()
+		saveSettings()
+	end
+end
+-- Coalesces bursts of likes and gifts into one refresh a second.
+local function scheduleBoards()
+	if boardsScheduled then return end
+	boardsScheduled = true
+	task.delay(1, refreshBoards)
+end
+local function recordViewer(event: TikTokFeed.Event, kind: string, amount: number)
+	-- Test gifts and likes (from the settings panel or the bridge page) never count.
+	if event.user == "tester" or string.sub(event.id, 1, 5) == "test-" then return end
+	local key = string.lower(event.user or event.name or "")
+	local name = event.name or event.user or "Viewer"
+	if kind == "gift" then giftTally.add(key, name, amount) else likeTally.add(key, name, amount) end
+	boardsDirty = true
+	scheduleBoards()
+end
+Players.PlayerAdded:Connect(scheduleBoards)
+-- Unsaved totals are written every 20 seconds while they change.
+task.spawn(function()
+	while true do
+		task.wait(20)
+		if boardsDirty then scheduleBoards() end
+	end
+end)
+-- Name filtering can yield, so the first draw runs on its own.
+task.spawn(refreshBoards)
+
 -- TikTok ------------------------------------------------------------------------
 local function processTikTok(event: TikTokFeed.Event)
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
@@ -610,10 +805,12 @@ local function processTikTok(event: TikTokFeed.Event)
 		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
 		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
+		recordViewer(event, "gift", coins * count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
 		amount = likes * settings.perLike
 		text = string.format("%s liked x%d", who, likes)
+		recordViewer(event, "like", likes)
 	elseif event.type == "follow" then
 		amount = settings.perFollow
 		text = who .. " followed"
@@ -721,6 +918,65 @@ local function testGift(coins: number, count: number, name: string, rocks: numbe
 	})
 end
 
+-- Gold statues ---------------------------------------------------------------------
+local Statue = require(script.Statue)
+local MAX_STATUES = 12
+local statueFolder = Instance.new("Folder")
+statueFolder.Name = "Statues"
+statueFolder.Parent = workspace
+local function notice(player: Player, text: string)
+	Notify:FireClient(player, "notice", text)
+end
+local function buildStatues()
+	statueFolder:ClearAllChildren()
+	for _, statue in settings.statues do
+		Statue.build(statueFolder, { name = statue.n, coins = statue.c, position = Vector3.new(statue.x, statue.y, statue.z), yaw = statue.r })
+	end
+end
+buildStatues()
+
+-- Places a statue 9 studs in front of the streamer, facing them.
+local function placeStatue(player: Player, value: any)
+	local name = if type(value.name) == "string" then string.gsub(string.sub(value.name, 1, 30), "^%s*(.-)%s*$", "%1") else ""
+	if name == "" then
+		notice(player, "Type the gifter's name for the plaque first.")
+		return
+	end
+	if #settings.statues >= MAX_STATUES then
+		notice(player, "You already have " .. MAX_STATUES .. " statues. Remove one first.")
+		return
+	end
+	local coins = if type(value.coins) == "number" and value.coins == value.coins then math.clamp(math.floor(value.coins), 0, 999999999) else 0
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if character == nil or root == nil or not root:IsA("BasePart") then return end
+	local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+	local forward = if look.Magnitude > 0.1 then look.Unit else Vector3.new(0, 0, -1)
+	local spot = root.Position + forward * 9
+	if Vector3.new(spot.X, 0, spot.Z).Magnitude < arenaRadius then
+		notice(player, "Too close to the mountain: walk back towards the camp and try again.")
+		return
+	end
+	local clean = filtered(player, name)
+	if clean == nil then
+		notice(player, "Could not check that name. Try again in a moment.")
+		return
+	end
+	local exclude = { statueFolder, diamond } :: { Instance }
+	for _, other in Players:GetPlayers() do
+		if other.Character then table.insert(exclude, other.Character) end
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = exclude
+	local hit = workspace:Raycast(spot + Vector3.new(0, 40, 0), Vector3.new(0, -140, 0), params)
+	local y = if hit then hit.Position.Y else 0
+	table.insert(settings.statues, { n = clean, c = coins, x = spot.X, y = y, z = spot.Z, r = math.atan2(forward.X, forward.Z) })
+	buildStatues()
+	saveSettings()
+	notice(player, "Gold statue placed for " .. clean .. "!")
+end
+
 local function applySetting(player: Player, action: string, value: any)
 	if action == "setWins" and type(value) == "number" then
 		settings.wins = math.clamp(math.floor(value), 0, 999999)
@@ -763,6 +1019,26 @@ local function applySetting(player: Player, action: string, value: any)
 		end
 	elseif action == "resetBest" then
 		settings.best = 0
+	elseif action == "placeStatue" and type(value) == "table" then
+		placeStatue(player, value)
+		return
+	elseif action == "removeStatue" and type(value) == "number" then
+		local index = math.floor(value)
+		if settings.statues[index] == nil then return end
+		table.remove(settings.statues, index)
+		buildStatues()
+	elseif action == "resetBoard" and (value == "gifts" or value == "likes") then
+		if value == "gifts" then giftTally.reset() else likeTally.reset() end
+		boardsDirty = true
+		lastBoardSave = 0
+		scheduleBoards()
+		return
+	elseif action == "previewBoards" then
+		-- Sample names for 20 seconds, so the boards can be checked before going live.
+		previewUntil = os.clock() + 20
+		scheduleBoards()
+		task.delay(20.5, scheduleBoards)
+		return
 	elseif action == "newRound" then
 		if phase ~= "Won" then
 			newRound()
@@ -791,8 +1067,10 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 	if action == "mine" then
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
+		-- The client names the rock cell it is aiming at (rock parts are local).
 		local current = mountain
-		if stoneBusy or current == nil or phase == "Won" or phase == "Rebuilding" or holder == player or typeof(value) ~= "Instance" or value == diamond then
+		if stoneBusy or current == nil or phase == "Won" or phase == "Rebuilding" or holder == player
+			or type(value) ~= "number" or value ~= math.floor(value) or value < 0 or value >= 2 ^ 32 then
 			return
 		end
 		local now = os.clock()
@@ -801,19 +1079,35 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		if allowed < 1 then
 			return
 		end
-		local key = current:keyForPart(value)
+		local key: number = value
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if key == nil or root == nil or not root:IsA("BasePart") then
+		if root == nil or not root:IsA("BasePart") or not current:isExposed(key) then
 			return
 		end
-		if (root.Position - current:keyPosition(key)).Magnitude > 16 then
+		local at = current:keyPosition(key)
+		if (root.Position - at).Magnitude > 16 then
 			return
 		end
 		mineCooldown[player] = now
 		if current:dig(key, allowed) > 0 then
+			flushMountain("dig", at)
 			refreshStone()
 			settleDiamond()
+		end
+		return
+	end
+	if action == "mountainReady" then
+		-- Sent by each client when its renderer is listening (and repeated until
+		-- a snapshot arrives): it gets the whole mountain now and every change
+		-- after it. During a rebuild the new round's snapshot follows shortly.
+		local now = os.clock()
+		if now - (readyAt[player] or -math.huge) < 2 then return end
+		readyAt[player] = now
+		synced[player] = true
+		local current = mountain
+		if current then
+			sendMessages(current:snapshot(false), player)
 		end
 		return
 	end
@@ -894,6 +1188,8 @@ end
 Players.PlayerRemoving:Connect(function(player)
 	admins[player] = nil
 	mineCooldown[player] = nil
+	synced[player] = nil
+	readyAt[player] = nil
 end)
 
 publishSettings()
