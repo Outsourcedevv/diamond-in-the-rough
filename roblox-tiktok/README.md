@@ -21,13 +21,23 @@ Open the updated bridge control page at **http://localhost:8787**. Enter your Ti
 
 Search by gift name or coin price, click a gift, choose **Add blocks** or **Remove blocks**, enter the amount per gift, and pick an optional keybind. **Save & test** sends a simulated gift through the same path as live gifts. Settings are saved locally and synced to Roblox, including published games configured with Open Cloud. Keybinds work in the bridge window and in Roblox for admins once synced; they do not fire while typing or using the settings panel. Duplicate keybinds are rejected.
 
-Add gifts refill previously dug spaces, with stones flying and snapping into place. They stop at the original mountain size and never fill the diamond cell; a revealed diamond is moved above the restored surface. Gifts queued during a win/rebuild are applied in arrival order. Existing gifts keep removing blocks until you assign an Add rule. In the Y-menu's manual rules, negative amounts add and positive amounts remove.
+Add gifts refill previously dug spaces, with stones flying and snapping into place. After refilling dug spaces, surplus blocks grow new connected rock outside the existing surface. Growth stops at GrowthMaxStone (1,500,000 by default), or twice the starting stone if larger, and never fills the diamond cell; a revealed diamond is moved above the restored surface. Gifts queued during a win/rebuild are applied in arrival order. Existing gifts keep removing blocks until you assign an Add rule. In the Y-menu's manual rules, negative amounts add and positive amounts remove.
 
 ## Rebuild tests
 
-In the game's **Y settings panel**, scroll to **REBUILD TEST GIFTS**. Choose **+1,000**, **+10,000**, **+100,000**, or **Refill mountain**. These tests work offline and always rebuild, regardless of existing gift rules. They refill previously dug spaces, stop at the original mountain size, and preserve the round and wins. Dig first to see the effect. The localhost bridge page has the same four buttons.
+Rebuilding any rocks during a diamond hold cancels that hold and clears the countdown. Nearby dug spaces under the holder refill first, from the bottom upwards. Players covered by restored rock are lifted onto the new surface. A rebuild that actually restores at least 10,000 rocks moves the former holder to the highest restored rock surface instead. The diamond is released beside the player, above the rock, ready to click again for a fresh countdown. An add gift at the growth limit that restores zero rocks does not interrupt the hold. During the countdown, the holder sees a larger bright outlined gem above their palm; other players see an outlined diamond in the raised hand.
+
+In the game's **Y settings panel**, scroll to **REBUILD TEST GIFTS**. Choose **+1,000**, **+10,000**, **+100,000**, or **Grow to limit**. These tests work offline and always rebuild, regardless of existing gift rules. They refill previously dug spaces, then enlarge the mountain up to its growth limit, and preserve the round and wins. They also work on an undug mountain. The localhost bridge page has the same four buttons.
 
 The gift catalogue refresh now accepts the username typed on the page directly, without first connecting live events. It loads every gift TikTok returns for that account, with no display limit, and caches the result. TikTok must be reachable and may require the account to be LIVE; the eight offline starter gifts are not a complete worldwide list.
+
+## Gift performance and mountain growth
+
+Gift mutations run through one ordered worker. Large blasts, restoration and growth yield between short chunks rather than doing all work in one frame. Animations start when a gift begins processing; the status shows queued work and the stone counter updates as work progresses. Digging and diamond pickup wait while rock changes are reconciled. Round resets wait for the current mutation to finish. Players are kept above newly built surfaces.
+
+Cell occupancy and exposed indices use paged buffers, and visible rock references use fixed-size pages, avoiding large sparse numeric hash-table resize spikes. Crater drawing deduplicates surviving surface/backing cells, and the growth frontier is cached between consecutive add gifts. Progress-bar capacity follows the enlarged mountain while StartingStone keeps the original round value.
+
+Run `luau tests/gift-performance.luau` for a CPU checkpoint timing report. Local 100,000-rock logic checks measured approximately 3-6 ms between checkpoints after paging, compared with a roughly 64 ms growth spike before it. These timings exclude Roblox part replication, rendering and physics; live Studio frame rate still requires checking on the streaming PC. Large gifts finish over several frames, and a queue can build during rapid gifts.
 
 ## What you need
 
@@ -101,6 +111,7 @@ In Studio, open **ReplicatedStorage → DiamondRush → Config**:
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `StartingStone` | 250000 | Rocks in each new mountain (one rock = one stone, up to 1,500,000) |
+| `GrowthMaxStone` | 1500000 | Maximum growth, or twice starting stone if larger |
 | `StonePerCoin` | 100 | Stone removed per TikTok coin |
 | `StonePerLike` / `StonePerFollow` / `StonePerShare` | 2 / 500 / 300 | Stone for likes, follows and shares |
 | `HoldSeconds` | 15 | Real seconds the diamond must be held |

@@ -64,9 +64,18 @@ function FirstPerson.start()
 			if face:IsA("BasePart") then face.LocalTransparencyModifier = if hidden then 1 else 0 end
 		end
 	end
-	local gem = part("HeldDiamond", worldDiamond.Size, worldDiamond.Color, Enum.Material.SmoothPlastic)
+	local gem = part("HeldDiamond", worldDiamond.Size * 1.8, worldDiamond.Color, Enum.Material.SmoothPlastic)
 	DiamondShape.attach(gem)
 	DiamondShape.visible(gem, false)
+	local outline = Instance.new("Highlight")
+	outline.Adornee = gem
+	outline.FillColor = Color3.fromRGB(135, 235, 255)
+	outline.FillTransparency = 0.8
+	outline.OutlineColor = Color3.new(1, 1, 1)
+	outline.OutlineTransparency = 0.15
+	outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	outline.Enabled = false
+	outline.Parent = gem
 	local shine = Instance.new("PointLight")
 	shine.Color = Color3.fromRGB(150, 235, 255)
 	shine.Range = 4
@@ -215,12 +224,13 @@ function FirstPerson.start()
 				* CFrame.Angles(math.rad(-35 * grip), math.rad(h.side * 20 * grip), math.rad(h.side * (15 + 35 * grip)))
 
 		end
-		local showGem = holding and lift > 0.3
+		local showGem = holding
 		DiamondShape.visible(gem, showGem)
+		outline.Enabled = showGem
 		shine.Enabled = showGem
 		if showGem then
 			local palm = hands[2].hand.CFrame
-			gem.CFrame = palm * CFrame.new(0, 0.25, -0.14) * CFrame.Angles(0, math.rad(22.5), 0)
+			gem.CFrame = palm * CFrame.new(0, 0.34, -0.22) * CFrame.Angles(0, math.rad(22.5), 0)
 			gem.Parent = rig
 		else
 			gem.Parent = nil

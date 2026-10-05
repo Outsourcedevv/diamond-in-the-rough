@@ -4,6 +4,7 @@
 local Config = {
 	-- Stone -----------------------------------------------------------------
 	StartingStone = 250000, -- (live) rocks in the mountain at the start of a round (one rock = one stone, max 1,500,000)
+	GrowthMaxStone = 1500000, -- growth limit, or twice starting stone for larger starting mountains
 	StonePerCoin = 100, -- (live) rocks removed per TikTok coin, for gifts without their own rule
 	-- (live) Gift rules: gift name -> rocks removed per gift. Change them in the
 	-- settings panel (press Y) while playing.
@@ -37,3 +38,4 @@ local Config = {
 }
 
 return Config
+

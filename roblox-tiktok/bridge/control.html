@@ -79,7 +79,7 @@
       </fieldset>
     </form>
     <p id="catalogueMessage" role="status"></p>
-    <small>Keybinds work in this window or in Roblox for the streamer once settings sync. They pause while typing or using in-game settings. Adding blocks refills dug spaces up to the original mountain size.</small>
+    <small>Keybinds work in this window or in Roblox for the streamer once settings sync. They pause while typing or using in-game settings. Adding blocks refills dug spaces first, then grows the mountain beyond its starting size.</small>
   </section>
 
   <section>
@@ -87,7 +87,7 @@
     <p>These send pretend gifts to the game, exactly like real ones.</p>
     <div class="grid" id="tests"></div>
     <h2 style="margin-top:20px">Rebuild test gifts</h2>
-    <p>Dig or send a destructive gift first. These refill dug spaces up to the original mountain size without changing your gift rules.</p>
+    <p>These refill dug spaces, then grow new rock beyond the starting mountain size without changing your gift rules. Growth stops at the game's configured limit.</p>
     <div class="grid" id="rebuildTests"></div>
     <p id="testMessage" role="status"></p>
   </section>
@@ -131,7 +131,7 @@ const tests = [
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 for (const blocks of [1000, 10000, 100000, 1500000]) {
   const button = document.createElement('button');
-  button.textContent = blocks === 1500000 ? 'Refill mountain' : `+${blocks.toLocaleString()} blocks`;
+  button.textContent = blocks === 1500000 ? 'Grow to limit' : `+${blocks.toLocaleString()} blocks`;
   button.style.background = '#24734b';
   button.onclick = async () => {
     button.disabled = true;
