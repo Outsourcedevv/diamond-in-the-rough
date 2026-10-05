@@ -114,10 +114,10 @@ end
 -- rand(): a number in [0, 1); rand(a, b): a whole number from a to b.
 function Grid.new(target: number, seed: number, rand: (number?, number?) -> number): Grid
 	target = math.max(1, math.floor(target))
-	-- A cone of volume ~pi r^2 h / 3 with h = 0.9 r, a little oversized so it
-	-- can be trimmed down to the exact number of cells.
+	-- Allocate the rock budget across tapered columns. Removing excess rocks
+	-- from the highest layers would cut the summit into a broad flat stump.
 	local radius = math.clamp(math.ceil((target * 1.06 / 0.94) ^ (1 / 3)), 3, OFFSET - 4)
-	local height = math.max(2, math.floor(radius * 0.9 + 0.5))
+	local height = math.max(2, math.floor(radius * 1.05 + 0.5))
 	local self = setmetatable({
 		radius = radius,
 		height = height,
@@ -136,61 +136,43 @@ function Grid.new(target: number, seed: number, rand: (number?, number?) -> numb
 		growthQueued = nil,
 	}, Grid)
 	local scale = 15 / radius
+	local columns = {}
+	local weightTotal = 0
 	for z = -radius, radius do
 		for x = -radius, radius do
 			local distance = math.sqrt(x * x + z * z) / radius
 			if distance <= 1 then
 				local bumps = math.noise(x * 0.16 * scale, z * 0.16 * scale, seed) * 2.6 + math.noise(x * 0.4 * scale, z * 0.4 * scale, seed + 7.3) * 0.9
-				local top = height * (1 - distance) ^ 0.85 + bumps * (1 - distance * 0.6) / math.sqrt(scale)
-				local columnHeight = math.clamp(math.floor(top + 0.5), if distance < 0.85 then 1 else 0, height * 2)
-				for y = 0, columnHeight - 1 do
-					local key = Grid.key(x, y, z)
-					self.solid[key] = true
-					table.insert(self.order, key)
-				end
+				-- Slopes continue almost to the centre, leaving a small summit.
+				local profile = math.min(1, (1 - distance) / 0.94) ^ 1.05
+				local weight = math.max(0, height * profile + bumps * (1 - distance * 0.6) / math.sqrt(scale))
+				table.insert(columns, { x = x, z = z, weight = weight, height = 0, fraction = 0 })
+				weightTotal += weight
 			end
 		end
 	end
-	-- Shave the highest rocks first until exactly `target` cells remain, so the
-	-- surface stays smooth. Column tops are bucketed by height.
-	local count = #self.order
-	if count > target then
-		local buckets: { [number]: { number } } = {}
-		local highest = 0
-		for _, key in self.order do
-			local x, y, z = Grid.coords(key)
-			if not self.solid[Grid.key(x, y + 1, z)] then
-				buckets[y] = buckets[y] or {}
-				table.insert(buckets[y], key)
-				highest = math.max(highest, y)
-			end
+	local count = 0
+	for _, column in columns do
+		local exact = target * column.weight / weightTotal
+		column.height = math.floor(exact)
+		column.fraction = exact - column.height
+		count += column.height
+	end
+	-- Spread rounding remainders across columns instead of shaving the summit.
+	table.sort(columns, function(a, b)
+		if a.fraction ~= b.fraction then return a.fraction > b.fraction end
+		if a.z ~= b.z then return a.z < b.z end
+		return a.x < b.x
+	end)
+	for i = 1, target - count do columns[i].height += 1 end
+	self.height = 0
+	for _, column in columns do
+		self.height = math.max(self.height, column.height)
+		for y = 0, column.height - 1 do
+			local key = Grid.key(column.x, y, column.z)
+			self.solid[key] = true
+			table.insert(self.order, key)
 		end
-		local level = highest
-		while count > target and level >= 0 do
-			local bucket = buckets[level]
-			if bucket == nil or #bucket == 0 then
-				level -= 1
-				continue
-			end
-			local index = rand(1, #bucket)
-			local key = bucket[index]
-			bucket[index] = bucket[#bucket]
-			bucket[#bucket] = nil
-			self.solid[key] = nil
-			count -= 1
-			local x, y, z = Grid.coords(key)
-			if y > 0 then
-				buckets[y - 1] = buckets[y - 1] or {}
-				table.insert(buckets[y - 1], Grid.key(x, y - 1, z))
-			end
-		end
-		local kept: { number } = {}
-		for _, key in self.order do
-			if self.solid[key] then
-				table.insert(kept, key)
-			end
-		end
-		self.order = kept
 	end
 	self.total = #self.order
 	for _, key in self.order do
