@@ -12,7 +12,10 @@ local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
-require(script:WaitForChild("FirstPerson")).start()
+local FirstPerson = require(script:WaitForChild("FirstPerson"))
+-- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
+FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
+FirstPerson.start()
 require(script:WaitForChild("SceneryView")).start()
 local State = ReplicatedStorage:WaitForChild("DiamondRushState") :: Configuration
 local Remotes = ReplicatedStorage:WaitForChild("DiamondRushRemotes")
@@ -97,6 +100,14 @@ local gui = make("ScreenGui", {
 	IgnoreGuiInset = false,
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, player:WaitForChild("PlayerGui"))
+
+-- The games menu: the game's display, first-person view and hands only show
+-- while playing, not in the lobby.
+local LobbyView = require(script:WaitForChild("LobbyView"))
+LobbyView.start(Request, State, function(inGame: boolean)
+	gui.Enabled = inGame
+	FirstPerson.setEnabled(inGame)
+end)
 
 -- Stone left (top centre) -------------------------------------------------------
 local stoneBox = make("Frame", {
@@ -865,6 +876,7 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local phase = attr("Phase", "Digging")
 	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
+		and player:GetAttribute("InGame") == true and not LobbyView.isOpen()
 		and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	aimDot.Visible = active

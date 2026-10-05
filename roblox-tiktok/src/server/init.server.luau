@@ -129,7 +129,10 @@ spawn.Size = Vector3.new(14, 1, 14)
 spawn.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, spawnDistance), Vector3.new(0, 0.5, 0))
 spawn.Material = Enum.Material.WoodPlanks
 spawn.Color = Color3.fromRGB(129, 105, 79)
+-- Everyone arrives in the royal lobby; joining the game brings them here.
+spawn.Enabled = false
 spawn.Parent = workspace
+local lobby = require(script.Lobby).build(workspace)
 
 -- Leaderboards stand behind the mountain; the scenery keeps their ground clear.
 local Leaderboards = require(script.Leaderboards)
@@ -386,6 +389,8 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 end
 
 local function teleportHome(player: Player)
+	-- Players in the lobby stay there.
+	if player:GetAttribute("InGame") ~= true then return end
 	local character = player.Character
 	if character ~= nil then
 		character:PivotTo(spawn.CFrame + Vector3.new(0, 4, 0))
@@ -597,6 +602,7 @@ interruptRebuildHold = function(restored: number, interrupted: Player?)
 	-- The former holder goes to the highest restored surface after a big rebuild.
 	local summit = if interrupted and restored >= 10000 then current:summit() else nil
 	for _, player in Players:GetPlayers() do
+		if player:GetAttribute("InGame") ~= true then continue end
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -1001,6 +1007,42 @@ local function removeNearestStatue(player: Player)
 	removeStatue(player, index)
 end
 
+-- The lobby and the game ------------------------------------------------------------
+-- Players arrive in the lobby and join Diamond in the Rough from the games
+-- menu; "Back to lobby" returns them. Respawns follow where they are.
+local lastMove: { [Player]: number } = {}
+local function placeFor(player: Player): SpawnLocation
+	return if player:GetAttribute("InGame") == true then spawn else lobby.spawn
+end
+local function setInGame(player: Player, joining: boolean)
+	if (player:GetAttribute("InGame") == true) == joining then return end
+	if not joining and holder == player then
+		notice(player, "You're holding the diamond! Win or lose it first, then go back to the lobby.")
+		return
+	end
+	local now = os.clock()
+	if now - (lastMove[player] or -math.huge) < 1 then return end
+	lastMove[player] = now
+	player:SetAttribute("InGame", joining)
+	local target = placeFor(player)
+	player.RespawnLocation = target
+	local character = player.Character
+	if character then
+		character:PivotTo(target.CFrame + Vector3.new(0, 4, 0))
+	end
+end
+-- A new character starts at the lobby or the camp, whichever the player is in.
+local function placeCharacter(player: Player, character: Model)
+	local root = character:WaitForChild("HumanoidRootPart", 10)
+	if root == nil or not root:IsA("BasePart") then return end
+	task.wait()
+	if character.Parent == nil then return end
+	local target = placeFor(player)
+	if (root.Position - target.Position).Magnitude > 30 then
+		character:PivotTo(target.CFrame + Vector3.new(0, 4, 0))
+	end
+end
+
 local function applySetting(player: Player, action: string, value: any)
 	if action == "setWins" and type(value) == "number" then
 		settings.wins = math.clamp(math.floor(value), 0, 999999)
@@ -1146,6 +1188,10 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		return
 	end
+	if action == "joinGame" or action == "leaveGame" then
+		setInGame(player, action == "joinGame")
+		return
+	end
 	if admins[player] then
 		applySetting(player, action, value)
 	end
@@ -1207,6 +1253,14 @@ if modernChat then
 end
 
 local function onPlayer(player: Player)
+	player:SetAttribute("InGame", false)
+	player.RespawnLocation = lobby.spawn
+	player.CharacterAdded:Connect(function(character)
+		placeCharacter(player, character)
+	end)
+	if player.Character then
+		task.spawn(placeCharacter, player, player.Character)
+	end
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
 	if not modernChat then
@@ -1222,11 +1276,12 @@ for _, player in Players:GetPlayers() do
 end
 Players.PlayerRemoving:Connect(function(player)
 	admins[player] = nil
+	lastMove[player] = nil
 	mineCooldown[player] = nil
 	synced[player] = nil
 	readyAt[player] = nil
 end)
 
 publishSettings()
-State:SetAttribute("TikTok", "Startingâ€¦")
+State:SetAttribute("TikTok", "Starting…")
 newRound()

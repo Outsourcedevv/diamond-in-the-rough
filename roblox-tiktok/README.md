@@ -2,6 +2,7 @@
 
 A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 rocks** (one rock is one stone) is shown counting down at the top of the screen. The rock slopes smoothly towards open air, with snow on the summit, grassy foothills over a dirt layer and layered stone inside: finding the one small diamond should feel like finding a needle in a haystack. Every gift, like, follow and share from your viewers blasts stone out of it. Once the diamond is exposed, find it, click it and **hold it for 15 seconds** to win.
 
+- **Royal lobby.** Everyone arrives in a white marble court floating in the sky, with gold trim, royal blue banners, a ring of columns and a giant turning diamond. A games menu on the left joins **Diamond in the Rough**; more games are marked *Coming soon*. See [The lobby and the games menu](#the-lobby-and-the-games-menu).
 - **Stone counter.** The top of the screen shows how much stone is left (250,000 to start), with a progress bar.
 - **Gifts blast the mountain.** Each TikTok coin removes 100 rocks, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. The counter always equals the rocks really left. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
 - **Gift animations.** Total coins (gift price × combo count) scale the effects: 1–9 sparks, 10–99 shockwaves, 100–499 Diamond Fracture (cyan cracks spread over the remaining rock, flash into a pulse, and release sparkling fragments), 500–999 orbital strikes, 1,000–9,999 galaxy collapses, and 10,000+ a cosmic burst with a light column and rising rings. Shockwaves use smooth expanding light rings; meteors accelerate along curved paths with tapered trails, flashes and arcing debris. A brief banner shows the sender, gift and coin value. Gift blasts only remove mountain stones: they never target the diamond. The gem settles above the actual visible stone or ground after each blast. Effects are cosmetic, do not block digging, and are capped at two simultaneous sequences and 80 live effect parts; expensive gifts take priority. The Y-panel has 12 test presets, including Hand Hearts, Money Gun, Lion and gift combos, with total test coins shown on each button. The bridge control page includes the same presets. Test gifts use these same effects.
@@ -54,7 +55,7 @@ Run `luau tests/gift-performance.luau` for a CPU checkpoint timing report and `p
    - On the first run it installs the TikTok connector, which takes about a minute.
    - A black window stays open (that is the bridge), and the **control page** opens in your browser at http://localhost:8787.
 3. Double-click **DiamondRushTikTok.rbxlx** to open the game in Roblox Studio.
-4. Press **Play** (F5) in Studio.
+4. Press **Play** (F5) in Studio. You arrive in the royal lobby: press **JOIN** on **Diamond in the Rough** in the games menu on the left.
    - The control page should now say **Roblox: connected**.
    - The bottom-right of the game says what the TikTok connection is doing.
 5. Try the **test gift buttons** on the control page. The mountain should blow up in the game.
@@ -67,8 +68,21 @@ If Studio says HTTP requests are off, use **Home → Game Settings → Security 
 2. Start the bridge (**Start Bridge.bat**).
 3. Type your TikTok username on the control page and press **Connect**.
    - It remembers your username, so next time it connects by itself.
-4. Open the game in Roblox Studio and press **Play**.
+4. Open the game in Roblox Studio, press **Play**, then **JOIN** Diamond in the Rough from the games menu.
 5. Capture the Studio window in TikTok LIVE Studio or OBS.
+
+## The lobby and the games menu
+
+Players start in the lobby, a white and gold royal court floating high in the sky away from the mountain. A royal blue carpet leads from the spawn to a marble dais with a giant turning diamond. Marble columns with gold capitals ring the court, hung with royal blue crown banners, and a crest on the far side says **WELCOME**. A balustrade runs round the edge, and nobody can fall off.
+
+The **👑 GAMES** menu on the left of the screen lists the games:
+
+- **Diamond in the Rough** shows what is happening right now (stone left, or that the diamond was found). Press **JOIN** to go to the mining camp.
+- The other cards say **Coming soon**, ready for future games.
+
+Press **◀** to hide the menu. The **👑 GAMES** tab on the left, or the **G** key, brings it back. The key matters in the game, where the mouse is locked to first person. While you play, the menu has **🏰 Back to lobby**. You can't go back while you are holding the diamond.
+
+The mountain keeps going while you are in the lobby: gifts still blast it, and the game's display shows again as soon as you join. If you gave **G** to a gift keybind (see [Gift catalogue and keybinds](#gift-catalogue-and-keybinds)), G keeps doing that. To reach the menu in the game then, press **Y** to free the mouse and click the **👑 GAMES** tab.
 
 ## Customise the win counter
 
@@ -196,8 +210,8 @@ To show the Blender mountains and trees in the published game, also turn on **En
 The source is a [Rojo](https://rojo.space) project:
 
 - `src/shared`: config, the rock grid, rock shapes and looks, the network codec, the diamond shape, the hold countdown curve, formatting, and the Blender scenery meshes with their unpacker.
-- `src/server`: rounds, the authoritative mountain grid, the diamond, scenery, the TikTok feed and saving.
-- `src/client`: the mountain renderer (`MountainView`), the scenery mesh builder (`SceneryView`), first-person hands, effects, the on-screen display and the settings panel.
+- `src/server`: rounds, the authoritative mountain grid, the diamond, scenery, the royal lobby (`Lobby`), the TikTok feed and saving.
+- `src/client`: the mountain renderer (`MountainView`), the scenery mesh builder (`SceneryView`), the games menu (`LobbyView`), first-person hands, effects, the on-screen display and the settings panel.
 
 Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o DiamondRushTikTok.rbxlx`), or use `rojo serve` with the Studio plugin while editing. `python3 tools/build_place.py --check` fails if the committed place is out of date; `--sourcemap` writes a `sourcemap.json` for luau-lsp.
 
@@ -206,6 +220,7 @@ Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o Diamond
 - Scenery: `python3 tests/scenery.py [path/to/luau]`.
 - Scenery meshes and their unpacker: `python3 tests/scene-pack.py [path/to/luau]`.
 - Leaderboards and statues: `python3 tests/showcase.py [path/to/luau]`.
+- The lobby and the games menu's status line: `python3 tests/lobby.py [path/to/luau]`.
 
 The Blender scenery pack is generated by `art/scenery_assets.py` (no hand-made files): every mesh is closed, vertex-coloured, under Roblox's 20,000-triangle limit, and modelled at real size. Rebuild it with `pip install bpy` (Python 3.11), then `python art/scenery_assets.py`, or with `blender --background --python art/scenery_assets.py`. This writes `src/shared/ScenePackData.luau`, the `.fbx`, `art/manifest.json` and the preview renders. `ScenePackData` holds each mesh as quantised, delta-coded geometry with a colour palette, compressed with DEFLATE and stored as base64: about 290 KB for 72,000 triangles. `python3 tests/scenery.py --dump` writes the game's layout so the build also renders `art/previews/game_view.png`.
 
