@@ -258,7 +258,7 @@ local function workCheckpoint(onYield: (() -> ())?): () -> ()
 	return function()
 		if os.clock() - frameStart >= 0.003 then
 			if os.clock() - lastCountUpdate >= 0.1 then
-				refreshStone()
+				-- Publish the final count after geometry is reconciled, not ahead of it.
 				if onYield then onYield() end
 				lastCountUpdate = os.clock()
 			end

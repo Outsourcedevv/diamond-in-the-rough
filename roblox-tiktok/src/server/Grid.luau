@@ -269,7 +269,7 @@ function Grid.remove(self: Grid, key: number): boolean
 end
 
 -- Refill recently excavated cells in reverse order, never the sealed diamond cell.
-function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?, z: number, radius: number? }?, checkpoint: (() -> ())?): { number }
+function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?, z: number, radius: number? }?, checkpoint: (() -> ())?, onAdded: ((number) -> ())?): { number }
 	-- Bucket integer squared distances so large refills avoid sorting every
 	-- missing rock. Pop nearest buckets first, leaving the gem cell reserved.
 	if focus and focus.y ~= nil then
@@ -323,6 +323,7 @@ function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?,
 			self.solid[key] = true
 			self.removed -= 1
 			table.insert(restored, key)
+			if onAdded then onAdded(key) end
 			if checkpoint and #restored % 256 == 0 then checkpoint() end
 			affected[key] = true
 			for _, neighbour in self:solidNeighbours(key) do affected[neighbour] = true end
@@ -390,7 +391,7 @@ end
 -- Blasts up to `count` cells as one crater around a random exposed cell (or
 -- `centre`): the nearest cells to the centre go first, and the crater only
 -- grows through cells it has opened up. Returns the removed keys and the centre.
-function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?): ({ number }, number?)
+function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?, onRemoved: ((number) -> ())?): ({ number }, number?)
 	local removed: { number } = {}
 	local start = if centre ~= nil and self.solid[centre] and self.exposedIndex[centre] then centre else self:randomExposed()
 	if start == nil then
@@ -425,6 +426,7 @@ function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() 
 		local key = item[2]
 		if self:remove(key) then
 			table.insert(removed, key)
+			if onRemoved then onRemoved(key) end
 			if checkpoint and #removed % 256 == 0 then checkpoint() end
 			local x, y, z = Grid.coords(key)
 			for _, step in NEIGHBOURS do
@@ -441,7 +443,7 @@ end
 -- Expand the rock's surface without generating a replacement mountain.
 -- Existing tunnels are restored first by Mountain.restore; the sealed diamond
 -- cell is never filled. The cached frontier keeps consecutive growth gifts cheap.
-function Grid.grow(self: Grid, count: number, capacity: number, checkpoint: (() -> ())?): { number }
+function Grid.grow(self: Grid, count: number, capacity: number, checkpoint: (() -> ())?, onAdded: ((number) -> ())?): { number }
 	count = math.min(math.max(0, math.floor(count)), math.max(0, capacity - self.total))
 	local added = {}
 	if count == 0 then return added end
@@ -517,6 +519,7 @@ function Grid.grow(self: Grid, count: number, capacity: number, checkpoint: (() 
 				enqueue(nx, ny, nz)
 			end
 		end
+		if onAdded then onAdded(key) end
 		if checkpoint and #added % 256 == 0 then checkpoint() end
 	end
 	return added

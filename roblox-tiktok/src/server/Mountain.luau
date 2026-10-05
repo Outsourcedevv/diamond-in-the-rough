@@ -189,13 +189,26 @@ function Mountain._drawShell(self: Mountain, key: number)
 	end
 end
 
--- Change the data first, then reconcile only the final visible shell.
+-- Show a bounded first group during calculation, then draw the final shell.
 function Mountain.restore(self: Mountain, count: number, _near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
 	local dx, dy, dz = Grid.coords(self.diamondKey)
 	local focus = { x = dx, y = dy, z = dz }
-	local restored = self.grid:restore(count, focus, checkpoint)
+	local previewed = 0
+	local function startPlacement(key: number)
+		-- Only the first 32 cells get an immediate shell. Never render every
+		-- intermediate layer of a 100k refill again.
+		if previewed >= 32 then return end
+		previewed += 1
+		local neighbours = self.grid:solidNeighbours(key)
+		table.insert(neighbours, key)
+		for _, cell in neighbours do
+			if self.grid:isExposed(cell) then self.grid:_expose(cell) else self.grid:_unexpose(cell) end
+		end
+		self:_drawShell(key)
+	end
+	local restored = self.grid:restore(count, focus, checkpoint, startPlacement)
 	if capacity and #restored < count then
-		local grown = self.grid:grow(count - #restored, capacity, checkpoint)
+		local grown = self.grid:grow(count - #restored, capacity, checkpoint, startPlacement)
 		for index, key in grown do
 			if checkpoint and index % 256 == 0 then checkpoint() end
 			table.insert(restored, key)
@@ -325,7 +338,16 @@ function Mountain.blast(self: Mountain, count: number, checkpoint: (() -> ())?, 
 	if count <= 0 then
 		return nil
 	end
-	local keys, actualCentre = self.grid:blast(count, centreKey, checkpoint)
+	local keys, actualCentre = self.grid:blast(count, centreKey, checkpoint, function(key)
+		-- Remove rendered rocks before the calculation yields, so the crater
+		-- starts opening immediately instead of waiting for all cell accounting.
+		local part = self.parts[key]
+		if part then
+			self.keys[part] = nil
+			self.parts[key] = nil
+			part:Destroy()
+		end
+	end)
 	if actualCentre == nil then
 		return nil
 	end
