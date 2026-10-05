@@ -109,7 +109,21 @@ mountain:blast(1000)
 verify()
 local x,y,z=Grid.coords(mountain.diamondKey)
 assert(y>=1 and y<=mountain.grid.height*0.35 and x*x+z*z <= (mountain.grid.radius*0.3)^2)
-print("PASS: rendered restoration, growth, exposed collision, reserved lower central diamond and checkpoints")
+local exposureEvents={}
+local exposure=Mountain.new({},25000,1,function(open) table.insert(exposureEvents,open) end,false)
+local neighbours=exposure.grid:solidNeighbours(exposure.diamondKey)
+local hole=neighbours[1]
+assert(exposure.grid:remove(hole))
+exposure:_settle({hole},nil)
+assert(exposure.revealed and #exposureEvents==1 and exposureEvents[1]==true,"digging announces uncovered")
+assert(exposure:restore(1,nil,25000)==1)
+assert(not exposure.revealed and #exposureEvents==2 and exposureEvents[2]==false,"rebuilding clears uncovered state")
+assert(exposure.grid:remove(hole))
+exposure:_settle({hole},nil)
+assert(exposure.revealed and #exposureEvents==3 and exposureEvents[3]==true,"digging can announce uncovered again")
+exposure:_settle({},nil)
+assert(#exposureEvents==3,"unchanged exposure must not repeat announcements")
+print("PASS: rendered restoration, growth, exposure/reburial/re-exposure and checkpoints")
 '''
 generated=root/'tests/rebuild-rendering.generated.luau'
 try:
