@@ -52,6 +52,18 @@ function DiamondShape.attach(root: BasePart)
 		triangle(Vector3.new(0, 0.34, 0), topB, topA, 0.9)
 	end
 end
+-- Facets are independent welded parts; resizing only the invisible root does
+-- not resize the visible gem. Rebuild them only when its size actually changes.
+function DiamondShape.resize(root: BasePart, size: Vector3)
+	if root.Size == size then return end
+	local visible = root:GetAttribute("GemVisible") == true
+	local facets = root:FindFirstChild("Facets")
+	if facets then facets:Destroy() end
+	root.Size = size
+	DiamondShape.attach(root)
+	root:SetAttribute("GemVisible", nil)
+	DiamondShape.visible(root, visible)
+end
 function DiamondShape.visible(root: BasePart, visible: boolean)
 	if root:GetAttribute("GemVisible") == visible then return end
 	root:SetAttribute("GemVisible", visible)

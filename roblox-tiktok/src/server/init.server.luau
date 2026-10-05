@@ -161,8 +161,11 @@ local _ = StarterPack
 local DiamondShape = require(Shared:WaitForChild("DiamondShape"))
 local diamond = Instance.new("Part")
 diamond.Name = "Diamond"
--- The diamond is the same size as a rock.
-diamond.Size = Vector3.new(blockSize, blockSize, blockSize) * 0.85
+-- Sizes are relative to the original gem, with a larger held silhouette.
+local DIAMOND_BASE_SIZE = Vector3.new(blockSize, blockSize, blockSize) * 0.85
+local DIAMOND_WORLD_SIZE = DIAMOND_BASE_SIZE * 2
+local DIAMOND_HELD_SIZE = DIAMOND_BASE_SIZE * 4
+diamond.Size = DIAMOND_WORLD_SIZE
 diamond.Material = Enum.Material.Glass
 diamond.Color = Color3.fromRGB(175, 240, 255)
 diamond.Reflectance = 0.35
@@ -228,6 +231,7 @@ local function refreshStone()
 end
 
 local function showDiamond(visible: boolean)
+	DiamondShape.resize(diamond, if phase == "Holding" then DIAMOND_HELD_SIZE else DIAMOND_WORLD_SIZE)
 	DiamondShape.visible(diamond, visible)
 	diamond.CanQuery = visible and phase == "Revealed"
 	-- No through-rock outline, beacon or floating location label while searching.
@@ -462,7 +466,7 @@ local function grab(player: Player)
 	diamond.CanCollide = false
 	local hand = (character :: Model):FindFirstChild("RightHand") or (character :: Model):FindFirstChild("Right Arm")
 	local grip: BasePart = if hand and hand:IsA("BasePart") then hand else head
-	local offset = if grip == head then CFrame.new(0.8, 1.4, -0.6) else CFrame.new(0, -grip.Size.Y / 2 - blockSize * 0.25, -0.08)
+	local offset = if grip == head then CFrame.new(0.8, 1.4 + diamond.Size.Y / 2, -0.6) else CFrame.new(0, -grip.Size.Y / 2 - diamond.Size.Y * 0.45, -0.08)
 	diamond.CFrame = grip.CFrame * offset * DIAMOND_TILT
 	local weld = Instance.new("WeldConstraint")
 	weld.Part0 = grip
@@ -897,5 +901,5 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 publishSettings()
-State:SetAttribute("TikTok", "Starting…")
+State:SetAttribute("TikTok", "Startingâ€¦")
 newRound()
