@@ -190,8 +190,9 @@ function Mountain._drawShell(self: Mountain, key: number)
 end
 
 -- Change the data first, then reconcile only the final visible shell.
-function Mountain.restore(self: Mountain, count: number, near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
-	local focus = if near then { x = near.X / self.blockSize, z = near.Z / self.blockSize, radius = 4 / self.blockSize } else nil
+function Mountain.restore(self: Mountain, count: number, _near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
+	local dx, dy, dz = Grid.coords(self.diamondKey)
+	local focus = { x = dx, y = dy, z = dz }
 	local restored = self.grid:restore(count, focus, checkpoint)
 	if capacity and #restored < count then
 		local grown = self.grid:grow(count - #restored, capacity, checkpoint)
@@ -212,8 +213,18 @@ function Mountain.restore(self: Mountain, count: number, near: Vector3?, capacit
 		for _, neighbour in self.grid:solidNeighbours(key) do needed[neighbour] = true end
 		if checkpoint and index % 128 == 0 then checkpoint() end
 	end
-	local processed = 0
+	-- Replicate the final shell from the diamond outward too; never draw
+	-- intermediate interior layers that will immediately be buried again.
+	local ordered, distances = {}, {}
 	for key in needed do
+		local x, y, z = Grid.coords(key)
+		distances[key] = (x - dx)^2 + (y - dy)^2 + (z - dz)^2
+		table.insert(ordered, key)
+		if checkpoint and #ordered % 256 == 0 then checkpoint() end
+	end
+	table.sort(ordered, function(a, b) return distances[a] < distances[b] end)
+	local processed = 0
+	for _, key in ordered do
 		self:_draw(key)
 		processed += 1
 		if checkpoint and processed % 32 == 0 then checkpoint() end
