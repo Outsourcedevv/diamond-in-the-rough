@@ -8,8 +8,10 @@ standing on its base at the origin.
     blender --background --python art/scenery_assets.py          (Blender 4.2+)
     python art/scenery_assets.py                                   (with `pip install bpy`)
 
-Writes art/DiamondRushScenery.fbx, art/manifest.json and preview renders in art/previews/.
-Pass --no-render to skip the previews.
+Writes src/shared/ScenePackData.luau (the meshes as data the game builds itself),
+art/DiamondRushScenery.fbx (the same pack for an optional Studio import),
+art/manifest.json and preview renders in art/previews/. Pass --no-render to skip
+the previews.
 """
 import math
 import random
@@ -186,7 +188,7 @@ def mountain(name, seed, width, depth, peaks, grid=94):
     n = len(border)
     for k in range(n):
         bm.faces.new((border[(k + 1) % n], border[k], low[k], low[(k + 1) % n]))
-    bm.faces.new(low)
+    bm.faces.new(list(reversed(low)))  # the base faces down
 
     def concavity(i, j):
         if 0 < i < cols and 0 < j < rows:
@@ -593,6 +595,119 @@ def manifest(report, path):
     path.write_text(json.dumps(sizes, indent=1) + "\n", encoding="utf-8")
 
 
+# The pack as game data --------------------------------------------------------------
+POSITION_BITS = 12  # positions snap to 1/4095 of the mesh's longest side
+
+
+def to_srgb_byte(v):
+    v = clamp(v)
+    return round(255 * (v * 12.92 if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055))
+
+
+def pack_mesh(mesh):
+    """One mesh as bytes the game unpacks with src/shared/MeshPack.luau:
+
+        u16 vertices, u16 triangles, u16 colours, u8 flags (1: colour per vertex,
+        else per triangle), f32 step, u16 x3 extent (in steps, Roblox axes)
+        vertex positions   3 zigzag varints each, delta from the previous vertex
+        triangle corners   3 zigzag varints each, delta from the previous corner
+        palette            3 bytes (sRGB) per colour
+        colour indices     one varint per vertex or per triangle
+        smooth flags       one bit per triangle
+
+    Roblox is Y up: Blender (x, y, z) becomes (x, z, -y), a rotation, so the
+    counter-clockwise front faces stay the same. Positions are centred on the
+    bounding box, which is where a MeshPart puts its origin."""
+    import struct
+    points = [(v.co.x, v.co.z, -v.co.y) for v in mesh.vertices]
+    low = [min(p[i] for p in points) for i in range(3)]
+    high = [max(p[i] for p in points) for i in range(3)]
+    step = struct.unpack("<f", struct.pack("<f", max(high[i] - low[i] for i in range(3)) / (2 ** POSITION_BITS - 1)))[0]
+    snapped = [tuple(round((p[i] - low[i]) / step) for i in range(3)) for p in points]
+    extent = [max(s[i] for s in snapped) for i in range(3)]
+
+    out = bytearray()
+
+    def varint(n):
+        n = n * 2 if n >= 0 else -n * 2 - 1
+        while n >= 0x80:
+            out.append((n & 0x7F) | 0x80)
+            n >>= 7
+        out.append(n)
+
+    corners = []
+    for poly in mesh.polygons:
+        if len(poly.vertices) != 3:
+            raise SystemExit(f"{mesh.name} has a face with {len(poly.vertices)} corners")
+        layer = mesh.color_attributes["Color"].data
+        corners.append([tuple(to_srgb_byte(c) for c in layer[li].color[:3]) for li in poly.loop_indices])
+    palette = sorted({c for tri in corners for c in tri})
+    index = {c: i for i, c in enumerate(palette)}
+    by_vertex = {}
+    per_vertex = True
+    for poly, tri in zip(mesh.polygons, corners):
+        for vi, c in zip(poly.vertices, tri):
+            per_vertex = per_vertex and by_vertex.setdefault(vi, c) == c
+    if not per_vertex and any(len(set(tri)) > 1 for tri in corners):
+        raise SystemExit(f"{mesh.name} mixes colours within a triangle and a vertex")
+
+    out += struct.pack("<HHHBf3H", len(points), len(corners), len(palette), 1 if per_vertex else 0, step, *extent)
+    previous = (0, 0, 0)
+    for s in snapped:
+        for i in range(3):
+            varint(s[i] - previous[i])
+        previous = s
+    last = 0
+    for poly in mesh.polygons:
+        for vi in poly.vertices:
+            varint(vi - last)
+            last = vi
+    for c in palette:
+        out += bytes(c)
+    if per_vertex:
+        for vi in range(len(points)):
+            varint(index[by_vertex.get(vi, palette[0])])
+    else:
+        for tri in corners:
+            varint(index[tri[0]])
+    smooth = bytearray((len(corners) + 7) // 8)
+    for i, poly in enumerate(mesh.polygons):
+        if poly.use_smooth:
+            smooth[i // 8] |= 1 << (i % 8)
+    out += smooth
+    size = tuple(round(extent[i] * step, 3) for i in range(3))
+    return bytes(out), size, len(corners)
+
+
+def game_data(path):
+    """Writes the pack as a Luau module, so the game can build the meshes
+    itself (EditableMesh) and nothing has to be imported into Studio."""
+    import base64
+    import zlib
+    entries = []
+    for obj in bpy.context.scene.objects:
+        if obj.type != "MESH":
+            continue
+        raw, size, triangles = pack_mesh(obj.data)
+        packer = zlib.compressobj(9, zlib.DEFLATED, -15, 9)
+        packed = packer.compress(raw) + packer.flush()
+        text = base64.b64encode(packed).decode("ascii")
+        lines = "\n".join(text[i:i + 120] for i in range(0, len(text), 120))
+        entries.append(
+            f"\t{obj.name} = {{ size = {{ {size[0]:g}, {size[1]:g}, {size[2]:g} }}, triangles = {triangles}, bytes = {len(raw)}, data = [[\n{lines}]] }},\n"
+        )
+    path.write_text(
+        "--!strict\n"
+        "-- Generated by art/scenery_assets.py: the Blender scenery pack as mesh data\n"
+        "-- the game builds itself with EditableMesh (see src/shared/MeshPack.luau).\n"
+        "-- size: authored size in studs (Y up); bytes: unpacked length; data: raw\n"
+        "-- deflate in base64. Do not edit by hand: rebuild it from the script.\n"
+        "return {\n" + "".join(entries) + "}\n",
+        encoding="utf-8",
+    )
+    return sum(len(e) for e in entries)
+
+
 if __name__ == "__main__":
     report = build()
     for name, triangles, dims in report:
@@ -600,6 +715,8 @@ if __name__ == "__main__":
     export(ART / "DiamondRushScenery.fbx")
     manifest(report, ART / "manifest.json")
     print("Wrote", ART / "DiamondRushScenery.fbx")
+    data = ART.parent / "src/shared/ScenePackData.luau"
+    print("Wrote", data, f"({game_data(data) // 1024} KB)")
     if "--no-render" not in sys.argv:
         from preview import render_game_view, render_previews
         render_previews(PREVIEWS)

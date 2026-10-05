@@ -9,7 +9,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 - **Hold the diamond.** The gem flies from where it lay into your right hand, your hand lifts it high and your view eases upward, framing a large, sparkling diamond against the sky. The eight-sided gem has a pale crown, a bright table and a deeper blue pointed base, so it reads clearly as a diamond on stream. A visible palm, thumb and curled fingers grip it. **You cannot move while holding it:** you stay frozen in place until you win or a rebuild gift cancels the hold. The countdown occupies the top-centre HUD while holding, leaving the hand and gem clear below it. Other players see a big sparkling diamond in your avatar's raised hand.
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
   - If you fall or leave, the diamond drops.
-- **Scenery.** An alpine valley in smooth terrain, with grassy meadows and animated grass, a lake with a dock, and a log-cabin mining camp with a porch, warm windows, a campfire, lanterns and a trail sign. With the [Blender scenery pack](#blender-scenery-pack-one-time-import) imported, the valley is ringed by huge snow-capped mountains and filled with about 200 pines (snow-dusted higher up), birches, oaks, mossy boulders, rock outcrops, bushes, wildflower patches, fallen logs and stumps. Without it, built-in low-poly trees, terrain boulders and terrain peaks are used instead. The place uses Future lighting and Roblox's 2022 material pack, with atmosphere haze, sun rays, bloom and a gentle colour grade.
+- **Scenery.** An alpine valley in smooth terrain, with grassy meadows and animated grass, a lake with a dock, and a log-cabin mining camp with a porch, warm windows, a campfire, lanterns and a trail sign. The valley is ringed by huge snow-capped mountains made in Blender and filled with about 200 pines (snow-dusted higher up), birches, oaks, mossy boulders, rock outcrops, bushes, wildflower patches, fallen logs and stumps. The game builds these meshes itself when it starts, so there is nothing to import (see [Blender scenery](#blender-scenery)). Where Roblox does not allow that (a published game without Mesh / Image APIs turned on), built-in low-poly trees, terrain boulders and terrain peaks are used instead. The place uses Future lighting and Roblox's 2022 material pack, with atmosphere haze, sun rays, bloom and a gentle colour grade.
 - **Leaderboards.** Two giant 3D wooden boards stand behind the mountain, either side of the summit, angled towards the camp: **TOP GIFTERS** (blue border, a gift box on the roof) ranks viewers by coins sent, and **TOP LIKERS** (red border, a heart on the roof) by likes. Each shows the top 10 on a shingle-roofed board with log posts. Totals are saved between streams, viewer names are text-filtered, and test gifts and likes never count.
 - **Gold statues.** Honour a big gifter with a gold statue holding a diamond aloft on a marble pedestal. An engraved brass plaque shows their name and coins. Statues are placed from the settings panel and saved in your game.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
@@ -92,23 +92,27 @@ In the **Y** panel:
 
 Everything is saved with your other settings.
 
-## Blender scenery pack (one-time import)
+## Blender scenery
 
-The surroundings look best with the scenery pack made in Blender: real 3D meshes instead of Roblox parts. Roblox does not let a game load models from a file by itself, so you import the pack into your place once:
+The mountains, trees, rocks and undergrowth around the arena are real 3D meshes made in Blender, not Roblox parts. They are already inside the place file, so **there is nothing to import**: press **Play** and the game builds them itself. It takes a few seconds, smallest meshes first, spread out so the game keeps running smoothly. The Output window says *Scenery: building the Blender pack in game*, then *built 25 of 25 Blender meshes*.
 
 ![The valley as the game lays it out, rendered in Blender from the camp](art/previews/game_view.png)
 
 ![The trees, bushes, rocks and logs in the pack](art/previews/assets.png)
 
+The preview pictures are Blender renders. Roblox's own lighting, haze and terrain textures will look a little different.
+
+This uses Roblox's EditableMesh, which always works in Studio. A [published game](#playing-the-published-game-instead-of-studio-optional) may only use it once you are 13+ age-verified and ID-verified, and have turned on **Enable Mesh / Image APIs** for the experience in the [Creator Dashboard](https://create.roblox.com/dashboard/creations). Until then the published game uses its built-in scenery, and the Output window says so.
+
+If you can't turn that on, import the pack as normal meshes instead. This works in any published game:
+
 1. Open **DiamondRushTikTok.rbxlx** in Roblox Studio (you need to be logged in).
 2. Click **File → Import**, and choose **art/DiamondRushScenery.fbx** from this folder.
 3. In the import window keep the default settings. Leave **Merge Meshes** off and the name as **DiamondRushScenery**. Ticking **Anchored** is a good idea. Click **Import**.
 4. A row of mountains, trees and rocks appears in the Workspace. Leave it there: when the game runs, it moves the pack out of sight and builds the valley from it. You can also drag **DiamondRushScenery** into **ServerStorage**.
-5. Save the place (**Ctrl+S**) and press **Play**. The Output window says *Using the imported scenery pack*.
+5. Save the place (**Ctrl+S**) and publish it. The Output window says *Scenery: using the imported Blender pack*.
 
-Without the pack the game still works, with its built-in scenery. If you download a new version of the place file later, import the pack again (or keep using your saved place).
-
-The preview pictures are Blender renders. Roblox's own lighting, haze and terrain textures will look a little different.
+An imported pack is used instead of building the meshes in game.
 
 ## Leaderboards and gold statues
 
@@ -166,6 +170,8 @@ A published Roblox server cannot reach the bridge on your PC, so the bridge send
 
 The game listens on the topic `DiamondRushTikTok`. Studio keeps working at the same time.
 
+To show the Blender mountains and trees in the published game, also turn on **Enable Mesh / Image APIs** (see [Blender scenery](#blender-scenery)).
+
 ## Troubleshooting
 
 - **"Bridge app not running"** in the game: start **Start Bridge.bat** and keep its window open.
@@ -174,24 +180,28 @@ The game listens on the topic `DiamondRushTikTok`. Studio keeps working at the s
 - **Nothing happens on gifts but test gifts work**: make sure the control page says *connected to @yourname*.
 - **The page says "waiting for Roblox Studio"**: press Play in Studio. HTTP requests must be allowed (see above).
 - **No mountain in Studio's Server view**: that is expected. Each player's client draws the rock; switch back to the Client view. Use **Play** (F5), not **Run** (F8), which has no client.
+- **No Blender mountains or trees in the published game**: Roblox only lets a published game build meshes once Mesh / Image APIs are turned on. See [Blender scenery](#blender-scenery) for that, or for importing the pack instead.
 - **The world looks flat or old-fashioned**: open the place file from this folder. It sets Future lighting and the 2022 material pack, which scripts cannot change. In an older copy, set **Lighting → LightingStyle** to Realistic and **MaterialService → Use2022Materials** on.
 
 ## For developers
 
 The source is a [Rojo](https://rojo.space) project:
 
-- `src/shared`: config, the rock grid, rock shapes and looks, the network codec, the diamond shape, the hold countdown curve and formatting.
+- `src/shared`: config, the rock grid, rock shapes and looks, the network codec, the diamond shape, the hold countdown curve, formatting, and the Blender scenery meshes with their unpacker.
 - `src/server`: rounds, the authoritative mountain grid, the diamond, scenery, the TikTok feed and saving.
-- `src/client`: the mountain renderer (`MountainView`), first-person hands, effects, the on-screen display and the settings panel.
+- `src/client`: the mountain renderer (`MountainView`), the scenery mesh builder (`SceneryView`), first-person hands, effects, the on-screen display and the settings panel.
 
 Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o DiamondRushTikTok.rbxlx`), or use `rojo serve` with the Studio plugin while editing. `python3 tools/build_place.py --check` fails if the committed place is out of date; `--sourcemap` writes a `sourcemap.json` for luau-lsp.
 
 - Logic tests: `luau tests/run.luau`, `luau tests/mountain-shape.luau`, `luau tests/diamond-rebuild.luau` (Luau CLI).
 - Server/client sync and watertight rock: `python3 tests/mountain-sync.py [path/to/luau]`.
 - Scenery: `python3 tests/scenery.py [path/to/luau]`.
+- Scenery meshes and their unpacker: `python3 tests/scene-pack.py [path/to/luau]`.
 - Leaderboards and statues: `python3 tests/showcase.py [path/to/luau]`.
 
-The Blender scenery pack is generated by `art/scenery_assets.py` (no hand-made files): every mesh is closed, vertex-coloured, under Roblox's 20,000-triangle limit, and modelled at real size. Rebuild it with `pip install bpy` (Python 3.11), then `python art/scenery_assets.py`, or with `blender --background --python art/scenery_assets.py`. This writes the `.fbx`, `art/manifest.json` and the preview renders. `python3 tests/scenery.py --dump` writes the game's layout so the build also renders `art/previews/game_view.png`. In the game, `src/server/ScenePack.luau` finds the imported pack and sizes each copy from a reference tree, so it works whatever units or up-axis the importer used. `tests/scenery.py` checks both with and without the pack.
+The Blender scenery pack is generated by `art/scenery_assets.py` (no hand-made files): every mesh is closed, vertex-coloured, under Roblox's 20,000-triangle limit, and modelled at real size. Rebuild it with `pip install bpy` (Python 3.11), then `python art/scenery_assets.py`, or with `blender --background --python art/scenery_assets.py`. This writes `src/shared/ScenePackData.luau`, the `.fbx`, `art/manifest.json` and the preview renders. `ScenePackData` holds each mesh as quantised, delta-coded geometry with a colour palette, compressed with DEFLATE and stored as base64: about 290 KB for 72,000 triangles. `python3 tests/scenery.py --dump` writes the game's layout so the build also renders `art/previews/game_view.png`.
+
+In the game, the server's `ScenePack.luau` lays the pack out and sends the placements to each player. Each player's `SceneryView.luau` then unpacks the meshes (`Inflate.luau`, `MeshPack.luau`) and builds them with EditableMesh, one per mesh, shared by all its copies. An imported `.fbx` takes priority: `ScenePack` finds it and sizes each copy from a reference tree, so it works whatever units or up-axis the importer used. `tests/scene-pack.py` checks the unpacker against Python's zlib, and checks every mesh: closed, facing outward, and with the right sizes and colours. `tests/scenery.py` checks the valley when the meshes are built in game, when they are imported, and without them.
 - Bridge tests: `npm test` inside `bridge/`.
 
 TikTok events come from the community [tiktok-live-connector](https://github.com/zerodytrash/TikTok-Live-Connector) package, which is not an official TikTok API.
