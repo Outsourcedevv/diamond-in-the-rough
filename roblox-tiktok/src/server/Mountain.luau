@@ -68,12 +68,12 @@ export type Mountain = typeof(setmetatable(
 		random: Random,
 		diamondKey: number,
 		revealed: boolean,
-		onDiamondCell: () -> (),
+		onDiamondCell: (boolean) -> (),
 	},
 	Mountain
 ))
 
-function Mountain.new(parent: Instance, stones: number, blockSize: number, onDiamondCell: () -> (), building: boolean?): Mountain
+function Mountain.new(parent: Instance, stones: number, blockSize: number, onDiamondCell: (boolean) -> (), building: boolean?): Mountain
 	local random = Random.new()
 	local function rand(a: number?, b: number?): number
 		if a ~= nil and b ~= nil then
@@ -189,6 +189,16 @@ function Mountain._drawShell(self: Mountain, key: number)
 	end
 end
 
+-- Exposure can change in both directions: rebuilding can bury a previously
+-- uncovered diamond, and digging must be able to announce it again afterward.
+function Mountain._syncDiamond(self: Mountain)
+	local open = self.grid:isOpenAround(self.diamondKey)
+	if open ~= self.revealed then
+		self.revealed = open
+		self.onDiamondCell(open)
+	end
+end
+
 -- Show a bounded first group during calculation, then draw the final shell.
 function Mountain.restore(self: Mountain, count: number, _near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
 	local dx, dy, dz = Grid.coords(self.diamondKey)
@@ -205,6 +215,7 @@ function Mountain.restore(self: Mountain, count: number, _near: Vector3?, capaci
 			if self.grid:isExposed(cell) then self.grid:_expose(cell) else self.grid:_unexpose(cell) end
 		end
 		self:_drawShell(key)
+		self:_syncDiamond()
 	end
 	local restored = self.grid:restore(count, focus, checkpoint, startPlacement)
 	if capacity and #restored < count then
@@ -255,6 +266,7 @@ function Mountain.restore(self: Mountain, count: number, _near: Vector3?, capaci
 		if checkpoint and processed % 128 == 0 then checkpoint() end
 	end
 	self.grid:takeFresh()
+	self:_syncDiamond()
 	local samples = {}
 	for index, key in restored do
 		if checkpoint and index % 128 == 0 then checkpoint() end
@@ -327,10 +339,7 @@ function Mountain._settle(self: Mountain, removed: { number }, centre: Vector3?,
 		drawn += 1
 		if checkpoint and drawn % 32 == 0 then checkpoint() end
 	end
-	if not self.revealed and self.grid:isOpenAround(self.diamondKey) then
-		self.revealed = true
-		self.onDiamondCell()
-	end
+	self:_syncDiamond()
 end
 
 -- Blasts `count` rocks as one crater; returns the crater centre.

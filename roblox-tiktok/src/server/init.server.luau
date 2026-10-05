@@ -237,7 +237,14 @@ local function settleDiamond()
 	diamond.CFrame = CFrame.new(mountain:keyPosition(mountain.diamondKey)) * DIAMOND_TILT
 end
 
-local function reveal()
+local function reveal(open: boolean)
+	if not open then
+		if phase == "Revealed" then
+			setPhase("Digging")
+			showDiamond(false)
+		end
+		return
+	end
 	if phase ~= "Digging" then
 		return
 	end
