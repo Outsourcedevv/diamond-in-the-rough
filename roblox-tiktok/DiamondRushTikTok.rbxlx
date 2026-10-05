@@ -1399,6 +1399,9 @@ local settings = {
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
+	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
+	leaderboards = { gifts = {}, likes = {} } :: { gifts: { any }, likes: { any } },
+	statues = {} :: { any },
 }
 local saved = Store.load()
 if saved then
@@ -1414,6 +1417,17 @@ if saved then
 		end
 	end
 	settings.giftRules = rules
+	if type(settings.leaderboards.gifts) ~= "table" or type(settings.leaderboards.likes) ~= "table" then
+		settings.leaderboards = { gifts = {}, likes = {} }
+	end
+	local statues = {}
+	for _, statue in settings.statues do
+		if type(statue) == "table" and type(statue.n) == "string" and type(statue.c) == "number"
+			and type(statue.x) == "number" and type(statue.y) == "number" and type(statue.z) == "number" and type(statue.r) == "number" then
+			table.insert(statues, statue)
+		end
+	end
+	settings.statues = statues
 end
 
 local function publishSettings()
@@ -1431,6 +1445,9 @@ local function publishSettings()
 	State:SetAttribute("PerShare", settings.perShare)
 	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
+	local statueList = {}
+	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
+	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
 end
 
 local function saveSettings()
@@ -1459,8 +1476,16 @@ spawn.Material = Enum.Material.WoodPlanks
 spawn.Color = Color3.fromRGB(129, 105, 79)
 spawn.Parent = workspace
 
+-- Leaderboards stand behind the mountain; the scenery keeps their ground clear.
+local Leaderboards = require(script.Leaderboards)
+local mountainRadius = spawnDistance - 30
+local arenaRadius = math.max(mountainRadius + 14, 55)
+local boardSpots = Leaderboards.spots(arenaRadius, mountainRadius, spawn.Position)
+local reserved = {}
+for _, spot in boardSpots do table.insert(reserved, { at = spot.at, radius = 30 }) end
+
 -- Hills, distant peaks, a lake, a pine forest, boulders and a campfire.
-require(script.Scenery).build(spawnDistance - 30, spawn.Position)
+require(script.Scenery).build(mountainRadius, spawn.Position, reserved)
 
 -- Every player carries a pickaxe to chip at the rock themselves.
 local function makePickaxe(): Tool
@@ -1985,6 +2010,123 @@ RunService.Heartbeat:Connect(function()
 	end
 end)
 
+-- Leaderboards --------------------------------------------------------------------
+local showcase = Instance.new("Folder")
+showcase.Name = "Leaderboards"
+showcase.Parent = workspace
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Include
+groundParams.FilterDescendantsInstances = { workspace.Terrain }
+local function groundAt(position: Vector3): number
+	local hit = workspace:Raycast(Vector3.new(position.X, 400, position.Z), Vector3.new(0, -520, 0), groundParams)
+	return if hit then hit.Position.Y else 0
+end
+-- Raised so both boards show over the summit as seen from the camp.
+local boardLift = math.max(14, mountainRadius * 0.55)
+local giftBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1].facing, boardLift, {
+	title = "🎁 TOP GIFTERS",
+	unit = "coins",
+	trim = Color3.fromRGB(36, 92, 204),
+	valueColour = Color3.fromRGB(255, 214, 120),
+	emblem = "gift",
+	empty = "Send a gift to get on the board!",
+}, groundAt)
+local likeBoard = Leaderboards.build(showcase, boardSpots[2].at, boardSpots[2].facing, boardLift, {
+	title = "❤️ TOP LIKERS",
+	unit = "likes",
+	trim = Color3.fromRGB(196, 36, 44),
+	valueColour = Color3.fromRGB(255, 178, 188),
+	emblem = "heart",
+	empty = "Tap the screen to like the live!",
+}, groundAt)
+local giftTally = Leaderboards.tally(settings.leaderboards.gifts)
+local likeTally = Leaderboards.tally(settings.leaderboards.likes)
+local SAMPLE_GIFTS: { { any } } = { { "DiamondDave", 34999 }, { "LunaStreams", 12500 }, { "rocky_road", 5000 }, { "GemHunter99", 2999 }, { "Pixel Pam", 1000 },
+	{ "tiktok_tom", 520 }, { "MinerMia", 300 }, { "Sir Digs-a-Lot", 150 }, { "glitterbug", 99 }, { "rose_rain", 30 } }
+local SAMPLE_LIKES: { { any } } = { { "TapQueen", 48210 }, { "likeitlikeit", 23005 }, { "Pebble", 15400 }, { "Mo", 9870 }, { "skyler.digs", 6120 },
+	{ "heart_spammer", 4400 }, { "Ava", 2950 }, { "quarry_kid", 1200 }, { "bubbles", 640 }, { "newviewer22", 75 } }
+
+-- Viewer names come from TikTok, so they are filtered like any other text
+-- shown to players. Results are cached; a name that cannot be checked shows as "Viewer".
+local shownNames: { [string]: string } = {}
+local shownNameCount = 0
+local function boardName(raw: string): string?
+	local cached = shownNames[raw]
+	if cached then return cached end
+	local author: Player? = nil
+	for player, isAdmin in admins do
+		if isAdmin then author = player; break end
+	end
+	author = author or Players:GetPlayers()[1]
+	if author == nil then return nil end
+	local authorId = (author :: Player).UserId
+	local ok, result = pcall(function()
+		return TextService:FilterStringAsync(raw, authorId, Enum.TextFilterContext.PublicChat):GetNonChatStringForBroadcastAsync()
+	end)
+	local clean = if ok and type(result) == "string" and result ~= "" then result else "Viewer"
+	if shownNameCount > 3000 then
+		table.clear(shownNames)
+		shownNameCount = 0
+	end
+	shownNames[raw] = clean
+	shownNameCount += 1
+	return clean
+end
+
+local boardsScheduled = false
+local boardsDirty = false
+local lastBoardSave = 0
+local previewUntil = 0
+local function refreshBoards()
+	boardsScheduled = false
+	local previewing = os.clock() < previewUntil
+	local function draw(board: Leaderboards.Board, tally: Leaderboards.Tally, samples: { { any } })
+		local entries: { Leaderboards.Entry } = {}
+		if previewing then
+			for _, sample in samples do table.insert(entries, { key = sample[1], name = sample[1], value = sample[2] }) end
+		else
+			for _, entry in tally.top(Leaderboards.ROWS) do
+				local name = boardName(entry.name)
+				table.insert(entries, { key = entry.key, name = name or "…", value = entry.value })
+			end
+		end
+		board.show(entries)
+	end
+	draw(giftBoard, giftTally, SAMPLE_GIFTS)
+	draw(likeBoard, likeTally, SAMPLE_LIKES)
+	settings.leaderboards = { gifts = giftTally.serialize(100), likes = likeTally.serialize(100) }
+	if boardsDirty and os.clock() - lastBoardSave >= 20 then
+		boardsDirty = false
+		lastBoardSave = os.clock()
+		saveSettings()
+	end
+end
+-- Coalesces bursts of likes and gifts into one refresh a second.
+local function scheduleBoards()
+	if boardsScheduled then return end
+	boardsScheduled = true
+	task.delay(1, refreshBoards)
+end
+local function recordViewer(event: TikTokFeed.Event, kind: string, amount: number)
+	-- Test gifts and likes (from the settings panel or the bridge page) never count.
+	if event.user == "tester" or string.sub(event.id, 1, 5) == "test-" then return end
+	local key = string.lower(event.user or event.name or "")
+	local name = event.name or event.user or "Viewer"
+	if kind == "gift" then giftTally.add(key, name, amount) else likeTally.add(key, name, amount) end
+	boardsDirty = true
+	scheduleBoards()
+end
+Players.PlayerAdded:Connect(scheduleBoards)
+-- Unsaved totals are written every 20 seconds while they change.
+task.spawn(function()
+	while true do
+		task.wait(20)
+		if boardsDirty then scheduleBoards() end
+	end
+end)
+-- Name filtering can yield, so the first draw runs on its own.
+task.spawn(refreshBoards)
+
 -- TikTok ------------------------------------------------------------------------
 local function processTikTok(event: TikTokFeed.Event)
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
@@ -2008,10 +2150,12 @@ local function processTikTok(event: TikTokFeed.Event)
 		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
 		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
+		recordViewer(event, "gift", coins * count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
 		amount = likes * settings.perLike
 		text = string.format("%s liked x%d", who, likes)
+		recordViewer(event, "like", likes)
 	elseif event.type == "follow" then
 		amount = settings.perFollow
 		text = who .. " followed"
@@ -2119,6 +2263,65 @@ local function testGift(coins: number, count: number, name: string, rocks: numbe
 	})
 end
 
+-- Gold statues ---------------------------------------------------------------------
+local Statue = require(script.Statue)
+local MAX_STATUES = 12
+local statueFolder = Instance.new("Folder")
+statueFolder.Name = "Statues"
+statueFolder.Parent = workspace
+local function notice(player: Player, text: string)
+	Notify:FireClient(player, "notice", text)
+end
+local function buildStatues()
+	statueFolder:ClearAllChildren()
+	for _, statue in settings.statues do
+		Statue.build(statueFolder, { name = statue.n, coins = statue.c, position = Vector3.new(statue.x, statue.y, statue.z), yaw = statue.r })
+	end
+end
+buildStatues()
+
+-- Places a statue 9 studs in front of the streamer, facing them.
+local function placeStatue(player: Player, value: any)
+	local name = if type(value.name) == "string" then string.gsub(string.sub(value.name, 1, 30), "^%s*(.-)%s*$", "%1") else ""
+	if name == "" then
+		notice(player, "Type the gifter's name for the plaque first.")
+		return
+	end
+	if #settings.statues >= MAX_STATUES then
+		notice(player, "You already have " .. MAX_STATUES .. " statues. Remove one first.")
+		return
+	end
+	local coins = if type(value.coins) == "number" and value.coins == value.coins then math.clamp(math.floor(value.coins), 0, 999999999) else 0
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if character == nil or root == nil or not root:IsA("BasePart") then return end
+	local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+	local forward = if look.Magnitude > 0.1 then look.Unit else Vector3.new(0, 0, -1)
+	local spot = root.Position + forward * 9
+	if Vector3.new(spot.X, 0, spot.Z).Magnitude < arenaRadius then
+		notice(player, "Too close to the mountain: walk back towards the camp and try again.")
+		return
+	end
+	local clean = filtered(player, name)
+	if clean == nil then
+		notice(player, "Could not check that name. Try again in a moment.")
+		return
+	end
+	local exclude = { statueFolder, diamond } :: { Instance }
+	for _, other in Players:GetPlayers() do
+		if other.Character then table.insert(exclude, other.Character) end
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = exclude
+	local hit = workspace:Raycast(spot + Vector3.new(0, 40, 0), Vector3.new(0, -140, 0), params)
+	local y = if hit then hit.Position.Y else 0
+	table.insert(settings.statues, { n = clean, c = coins, x = spot.X, y = y, z = spot.Z, r = math.atan2(forward.X, forward.Z) })
+	buildStatues()
+	saveSettings()
+	notice(player, "Gold statue placed for " .. clean .. "!")
+end
+
 local function applySetting(player: Player, action: string, value: any)
 	if action == "setWins" and type(value) == "number" then
 		settings.wins = math.clamp(math.floor(value), 0, 999999)
@@ -2161,6 +2364,26 @@ local function applySetting(player: Player, action: string, value: any)
 		end
 	elseif action == "resetBest" then
 		settings.best = 0
+	elseif action == "placeStatue" and type(value) == "table" then
+		placeStatue(player, value)
+		return
+	elseif action == "removeStatue" and type(value) == "number" then
+		local index = math.floor(value)
+		if settings.statues[index] == nil then return end
+		table.remove(settings.statues, index)
+		buildStatues()
+	elseif action == "resetBoard" and (value == "gifts" or value == "likes") then
+		if value == "gifts" then giftTally.reset() else likeTally.reset() end
+		boardsDirty = true
+		lastBoardSave = 0
+		scheduleBoards()
+		return
+	elseif action == "previewBoards" then
+		-- Sample names for 20 seconds, so the boards can be checked before going live.
+		previewUntil = os.clock() + 20
+		scheduleBoards()
+		task.delay(20.5, scheduleBoards)
+		return
 	elseif action == "newRound" then
 		if phase ~= "Won" then
 			newRound()
@@ -2320,6 +2543,314 @@ newRound()
 ]]></string>
       </Properties>
       <Item class="ModuleScript" referent="16">
+        <Properties>
+          <string name="Name">Leaderboards</string>
+          <string name="Source"><![CDATA[--!strict
+-- Two giant wooden leaderboards behind the mountain: top gifters (blue trim,
+-- gift box on the roof) and top likers (red trim, heart on the roof). Totals
+-- are tallied per TikTok viewer and saved with the streamer's settings.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local Format = require(Shared:WaitForChild("Format"))
+local PartShapes = require(Shared:WaitForChild("PartShapes"))
+
+local Leaderboards = {}
+
+Leaderboards.ROWS = 10
+local KEEP = 1000 -- viewers remembered per board after pruning
+local PRUNE_AT = 5000
+
+-- Tally ------------------------------------------------------------------------
+export type Entry = { key: string, name: string, value: number }
+export type Tally = {
+	add: (key: string, name: string, amount: number) -> (),
+	top: (count: number) -> { Entry },
+	serialize: (count: number) -> { { u: string, n: string, v: number } },
+	reset: () -> (),
+	size: () -> number,
+}
+
+-- Running totals per viewer. `saved` is a list from serialize().
+function Leaderboards.tally(saved: any): Tally
+	local entries: { [string]: Entry } = {}
+	local count = 0
+	local function top(limit: number): { Entry }
+		local list = {}
+		for _, entry in entries do table.insert(list, entry) end
+		table.sort(list, function(a, b)
+			if a.value ~= b.value then return a.value > b.value end
+			return a.key < b.key
+		end)
+		for i = #list, limit + 1, -1 do list[i] = nil end
+		return list
+	end
+	local self: Tally
+	self = {
+		add = function(key: string, name: string, amount: number)
+			if amount <= 0 or key == "" then return end
+			local entry = entries[key]
+			if entry == nil then
+				entry = { key = key, name = name, value = 0 }
+				entries[key] = entry
+				count += 1
+			end
+			entry.value += amount
+			if name ~= "" then entry.name = name end
+			if count > PRUNE_AT then
+				-- Keep memory bounded over a long stream: drop the smallest totals.
+				local kept = top(KEEP)
+				table.clear(entries)
+				for _, survivor in kept do entries[survivor.key] = survivor end
+				count = #kept
+			end
+		end,
+		top = top,
+		serialize = function(limit: number)
+			local out = {}
+			for _, entry in top(limit) do table.insert(out, { u = entry.key, n = entry.name, v = entry.value }) end
+			return out
+		end,
+		reset = function()
+			table.clear(entries)
+			count = 0
+		end,
+		size = function() return count end,
+	}
+	if type(saved) == "table" then
+		for _, row in saved do
+			if type(row) == "table" and type(row.u) == "string" and type(row.n) == "string" and type(row.v) == "number" and row.v > 0 then
+				self.add(string.sub(row.u, 1, 40), string.sub(row.n, 1, 40), math.floor(row.v))
+			end
+		end
+	end
+	return self
+end
+
+-- The 3D boards ----------------------------------------------------------------
+export type Style = {
+	title: string,
+	unit: string,
+	trim: Color3,
+	valueColour: Color3,
+	emblem: string, -- "gift" or "heart"
+	empty: string,
+}
+export type Board = { model: Model, show: (entries: { Entry }) -> () }
+
+local WIDTH, HEIGHT = 36, 28
+local WOOD_DARK = Color3.fromRGB(86, 62, 42)
+local WOOD = Color3.fromRGB(122, 90, 60)
+local WOOD_FACE = Color3.fromRGB(158, 120, 82)
+local GOLD = Color3.fromRGB(232, 184, 56)
+local MEDALS = { Color3.fromRGB(255, 202, 64), Color3.fromRGB(206, 212, 222), Color3.fromRGB(205, 128, 56) }
+
+local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
+	local p = Instance.new(kind or "Part") :: BasePart
+	p.Name = name
+	p.Size = size
+	p.CFrame = frame
+	p.Color = colour
+	p.Material = material
+	p.Anchored = true
+	p.CanCollide = true
+	p.CanQuery = false
+	p.CanTouch = false
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+local function log(parent: Instance, name: string, a: Vector3, b: Vector3, width: number, colour: Color3): BasePart
+	local delta = b - a
+	local p = piece(parent, name, Vector3.new(delta.Magnitude, width, width), CFrame.lookAt((a + b) / 2, b) * CFrame.Angles(0, math.pi / 2, 0), colour, Enum.Material.Wood)
+	local cylinder = p :: Part
+	cylinder.Shape = Enum.PartType.Cylinder
+	return p
+end
+
+local function surfaceGui(part: BasePart, pixelsPerStud: number): SurfaceGui
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = pixelsPerStud
+	gui.LightInfluence = 0.2
+	gui.Brightness = 1.4
+	gui.MaxDistance = 2000
+	gui.Parent = part
+	return gui
+end
+
+local function label(parent: Instance, props: { [string]: any }): TextLabel
+	local text = Instance.new("TextLabel")
+	text.BackgroundTransparency = 1
+	text.Font = Enum.Font.FredokaOne
+	text.TextScaled = true
+	text.TextColor3 = Color3.fromRGB(255, 244, 222)
+	text.TextStrokeColor3 = Color3.fromRGB(40, 24, 12)
+	text.TextStrokeTransparency = 0.2
+	for key, value in props do (text :: any)[key] = value end
+	text.Parent = parent
+	return text
+end
+
+-- A gift box with a gold ribbon and bow, or a chunky wooden heart.
+local function emblem(parent: Instance, kind: string, at: CFrame, colour: Color3)
+	if kind == "gift" then
+		piece(parent, "GiftBox", Vector3.new(4.6, 4.6, 4.6), at, colour, Enum.Material.Wood)
+		piece(parent, "Ribbon", Vector3.new(4.8, 4.8, 0.9), at, GOLD, Enum.Material.Metal)
+		piece(parent, "Ribbon", Vector3.new(0.9, 4.8, 4.8), at, GOLD, Enum.Material.Metal)
+		for _, side in { -1, 1 } do
+			piece(parent, "Bow", Vector3.new(1.8, 0.9, 1.1), at * CFrame.new(side * 0.8, 2.75, 0) * CFrame.Angles(0, 0, side * math.rad(35)), GOLD, Enum.Material.Metal)
+		end
+	else
+		local size = 3.6
+		piece(parent, "Heart", Vector3.new(size, size, 1.6), at * CFrame.Angles(0, 0, math.rad(45)), colour, Enum.Material.Wood)
+		local offset = size / (2 * math.sqrt(2))
+		for _, side in { -1, 1 } do
+			local lobe = piece(parent, "HeartLobe", Vector3.new(1.6, size, size), at * CFrame.new(side * offset, offset, 0) * CFrame.Angles(0, math.pi / 2, 0), colour, Enum.Material.Wood)
+			local cylinder = lobe :: Part
+			cylinder.Shape = Enum.PartType.Cylinder
+		end
+	end
+end
+
+-- Builds one board standing on the ground at `base`, facing `facing`, with its
+-- list panel raised `lift` studs. `ground(position)` gives the terrain height.
+function Leaderboards.build(parent: Instance, base: Vector3, facing: Vector3, lift: number, style: Style, ground: (Vector3) -> number): Board
+	local model = Instance.new("Model")
+	model.Name = style.title
+	model.Parent = parent
+	local look = Vector3.new(facing.X, 0, facing.Z).Unit
+	local right = look:Cross(Vector3.new(0, 1, 0)).Unit
+	local postOffsets = { -(WIDTH / 2 - 4), WIDTH / 2 - 4 }
+	local floor = -math.huge
+	for _, offset in postOffsets do
+		floor = math.max(floor, ground(base + right * offset))
+	end
+	local centre = Vector3.new(base.X, floor + lift + HEIGHT / 2, base.Z)
+	local frame = CFrame.lookAt(centre, centre + look)
+
+	-- The panel: dark backing, light planks for the list, painted trim.
+	piece(model, "Backing", Vector3.new(WIDTH + 1, HEIGHT + 1, 1.2), frame * CFrame.new(0, 0, 0.6), WOOD_DARK, Enum.Material.WoodPlanks)
+	local face = piece(model, "Face", Vector3.new(WIDTH - 2.4, HEIGHT - 2.4, 0.3), frame * CFrame.new(0, 0, -0.15), WOOD_FACE, Enum.Material.WoodPlanks)
+	local trimWidth = 1.7
+	local outerW, outerH = WIDTH + 1, HEIGHT + 1
+	for _, side in { -1, 1 } do
+		piece(model, "Trim", Vector3.new(outerW, trimWidth, 1), frame * CFrame.new(0, side * (outerH / 2 - trimWidth / 2), -0.5), style.trim, Enum.Material.Wood)
+		piece(model, "Trim", Vector3.new(trimWidth, outerH - trimWidth * 2, 1), frame * CFrame.new(side * (outerW / 2 - trimWidth / 2), 0, -0.5), style.trim, Enum.Material.Wood)
+		for _, vertical in { -1, 1 } do
+			piece(model, "TrimCorner", Vector3.new(2.3, 2.3, 1.3), frame * CFrame.new(side * (outerW / 2 - 1), vertical * (outerH / 2 - 1), -0.6), style.trim:Lerp(Color3.new(0, 0, 0), 0.3), Enum.Material.Wood)
+		end
+	end
+
+	-- A title plank on top, edged in the trim colour, under a shingle roof.
+	local headerY = HEIGHT / 2 + 0.5 + 3.4
+	piece(model, "TitleEdge", Vector3.new(WIDTH * 0.74 + 1.4, 6.6, 0.8), frame * CFrame.new(0, headerY, 0.3), style.trim, Enum.Material.Wood)
+	local title = piece(model, "Title", Vector3.new(WIDTH * 0.74, 5.4, 1.2), frame * CFrame.new(0, headerY, -0.3), WOOD, Enum.Material.WoodPlanks)
+	local roofY = headerY + 3.3 + 1.3
+	for _, side in { -1, 1 } do
+		local slope = look * -side
+		piece(model, "Roof", Vector3.new(WIDTH + 4, 2.6, 2.6), CFrame.new((frame * CFrame.new(0, roofY, side * 1.3)).Position) * PartShapes.wedgeToward(slope),
+			Color3.fromRGB(70, 60, 56), Enum.Material.RoofShingles, "WedgePart")
+	end
+	piece(model, "RoofRidge", Vector3.new(WIDTH + 4.4, 0.6, 0.6), frame * CFrame.new(0, roofY + 1.3, 0), WOOD_DARK, Enum.Material.Wood)
+	emblem(model, style.emblem, frame * CFrame.new(0, roofY + 1.6 + 2.5, 0), style.trim)
+
+	-- Log posts behind the panel, X-braced underneath, on stone footings.
+	local top = (frame * CFrame.new(0, headerY + 3, 0)).Position.Y
+	local postFeet = {}
+	for _, offset in postOffsets do
+		local spot = base + right * offset + look * -1.9
+		local foot = ground(spot)
+		table.insert(postFeet, Vector3.new(spot.X, foot, spot.Z))
+		log(model, "Post", Vector3.new(spot.X, foot - 2, spot.Z), Vector3.new(spot.X, top, spot.Z), 1.9, WOOD)
+		piece(model, "Footing", Vector3.new(3.4, 1.6, 3.4), CFrame.lookAt(Vector3.new(spot.X, foot + 0.4, spot.Z), Vector3.new(spot.X, foot + 0.4, spot.Z) + look), Color3.fromRGB(118, 114, 106), Enum.Material.Cobblestone)
+	end
+	local panelBottom = centre.Y - HEIGHT / 2 - 1
+	local a, b = postFeet[1], postFeet[2]
+	log(model, "Brace", Vector3.new(a.X, a.Y + 2, a.Z), Vector3.new(b.X, panelBottom, b.Z), 0.9, WOOD_DARK)
+	log(model, "Brace", Vector3.new(b.X, b.Y + 2, b.Z), Vector3.new(a.X, panelBottom, a.Z), 0.9, WOOD_DARK)
+	log(model, "Rail", Vector3.new(a.X, panelBottom, a.Z), Vector3.new(b.X, panelBottom, b.Z), 1.1, WOOD)
+
+	-- Title and rows.
+	local titleGui = surfaceGui(title, 24)
+	label(titleGui, { Size = UDim2.fromScale(0.94, 0.86), Position = UDim2.fromScale(0.03, 0.07), Text = style.title })
+	local gui = surfaceGui(face, 20)
+	local list = Instance.new("Frame")
+	list.BackgroundTransparency = 1
+	list.Size = UDim2.fromScale(0.94, 0.94)
+	list.Position = UDim2.fromScale(0.03, 0.03)
+	list.Parent = gui
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0.008, 0)
+	layout.Parent = list
+	local rows = {}
+	for rank = 1, Leaderboards.ROWS do
+		local row = Instance.new("Frame")
+		row.LayoutOrder = rank
+		row.Size = UDim2.fromScale(1, 1 / Leaderboards.ROWS - 0.008)
+		row.BackgroundColor3 = Color3.fromRGB(46, 30, 18)
+		row.BackgroundTransparency = if rank % 2 == 1 then 0.3 else 0.42
+		row.BorderSizePixel = 0
+		row.Parent = list
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.25, 0)
+		corner.Parent = row
+		local badge = Instance.new("Frame")
+		badge.Size = UDim2.fromScale(0.08, 0.84)
+		badge.Position = UDim2.fromScale(0.012, 0.08)
+		badge.BackgroundColor3 = MEDALS[rank] or Color3.fromRGB(96, 70, 46)
+		badge.BorderSizePixel = 0
+		badge.Parent = row
+		local round = Instance.new("UICorner")
+		round.CornerRadius = UDim.new(1, 0)
+		round.Parent = badge
+		local ratio = Instance.new("UIAspectRatioConstraint")
+		ratio.Parent = badge
+		label(badge, { Size = UDim2.fromScale(0.8, 0.8), Position = UDim2.fromScale(0.1, 0.1), Text = tostring(rank),
+			TextColor3 = if rank <= 3 then Color3.fromRGB(60, 36, 12) else Color3.fromRGB(255, 244, 222), TextStrokeTransparency = if rank <= 3 then 1 else 0.2 })
+		local name = label(row, { Size = UDim2.fromScale(0.56, 0.74), Position = UDim2.fromScale(0.12, 0.13), TextXAlignment = Enum.TextXAlignment.Left, Text = "" })
+		local value = label(row, { Size = UDim2.fromScale(0.3, 0.7), Position = UDim2.fromScale(0.685, 0.15), TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = style.valueColour, Text = "" })
+		table.insert(rows, { row = row, name = name, value = value })
+	end
+	local empty = label(gui, { Size = UDim2.fromScale(0.8, 0.22), Position = UDim2.fromScale(0.1, 0.39), Text = style.empty })
+
+	local function show(entries: { Entry })
+		for rank, row in rows do
+			local entry = entries[rank]
+			row.row.Visible = entry ~= nil
+			if entry then
+				row.name.Text = entry.name
+				row.value.Text = Format.commas(entry.value) .. " " .. style.unit
+			end
+		end
+		empty.Visible = #entries == 0
+	end
+	show({})
+	return { model = model, show = show }
+end
+
+-- Where the boards stand: behind the mountain as seen from the camp, either
+-- side of the summit, angled towards the camp.
+function Leaderboards.spots(arenaRadius: number, mountainRadius: number, camp: Vector3): { { at: Vector3, facing: Vector3 } }
+	local z = -(arenaRadius + 26)
+	local x = mountainRadius * 0.4 + 20
+	local spots = {}
+	for _, side in { -1, 1 } do
+		local at = Vector3.new(side * x, 0, z)
+		table.insert(spots, { at = at, facing = Vector3.new(camp.X - at.X, 0, camp.Z - at.Z).Unit })
+	end
+	return spots
+end
+
+return Leaderboards
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="17">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
@@ -2597,7 +3128,7 @@ return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -2829,7 +3360,8 @@ local function landscape(terrain: Terrain, site: Site)
 	end
 end
 
-function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
+-- `reserved` keeps trees and boulders out of circles (the leaderboards stand there).
+function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved: { { at: Vector3, radius: number } }?)
 	-- Animated grass is enabled in the place/project: Decoration and GrassLength
 	-- are editor-only properties. LeafyGrass keeps the central arena blade-free.
 	local terrain = workspace.Terrain
@@ -2840,6 +3372,7 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
 	local camp = Vector3.new(spawnPosition.X, 0, spawnPosition.Z)
 	local lake = Vector3.new(clearRadius + 72, 0, camp.Z + 15)
 	local site: Site = { radius = clearRadius, camp = camp, lake = lake }
+	local keepClear: { { at: Vector3, radius: number } } = reserved or {}
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
 	params.FilterDescendantsInstances = { terrain }
@@ -2853,6 +3386,12 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
 			or (flat - camp).Magnitude < 25 + margin
 			or (flat - lake).Magnitude < 40 + margin
 			or onPath(at.X, at.Z, site)
+			or (function()
+				for _, spot in keepClear do
+					if (flat - Vector3.new(spot.at.X, 0, spot.at.Z)).Magnitude < spot.radius + margin then return true end
+				end
+				return false
+			end)()
 	end
 	local function steepness(x: number, z: number): number
 		return math.abs(terrainHeight(x + 3, z, site) - terrainHeight(x - 3, z, site)) / 6
@@ -3154,7 +3693,127 @@ return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="18">
+      <Item class="ModuleScript" referent="19">
+        <Properties>
+          <string name="Name">Statue</string>
+          <string name="Source"><![CDATA[--!strict
+-- A gold statue honouring a gifter: a Roblox figure raising a diamond high on
+-- a marble pedestal, with an engraved brass plaque showing their name and
+-- coins. Statues are placed from the streamer's settings panel and saved.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local DiamondShape = require(Shared:WaitForChild("DiamondShape"))
+local Format = require(Shared:WaitForChild("Format"))
+
+local Statue = {}
+
+export type Spec = { name: string, coins: number, position: Vector3, yaw: number }
+
+local GOLD = Color3.fromRGB(236, 186, 58)
+local MARBLE = Color3.fromRGB(228, 224, 216)
+local PEDESTAL_HEIGHT = 6.6
+
+local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, shape: Enum.PartType?): Part
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Size = size
+	p.CFrame = frame
+	p.Color = colour
+	p.Material = material
+	p.Anchored = true
+	p.CanTouch = false
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	if shape then p.Shape = shape end
+	if material == Enum.Material.Metal then p.Reflectance = 0.18 end
+	p.Parent = parent
+	return p
+end
+
+-- Builds the statue standing on the ground at spec.position, facing along yaw.
+function Statue.build(parent: Instance, spec: Spec): Model
+	local model = Instance.new("Model")
+	model.Name = "GoldStatue"
+	model.Parent = parent
+	local base = CFrame.new(spec.position) * CFrame.Angles(0, spec.yaw, 0)
+
+	-- Stepped marble pedestal with gold bands, on a foundation sunk into slopes.
+	piece(model, "Foundation", Vector3.new(7.6, 3, 7.6), base * CFrame.new(0, -1.2, 0), MARBLE:Lerp(Color3.new(0, 0, 0), 0.18), Enum.Material.Marble)
+	piece(model, "Plinth", Vector3.new(7.2, 1, 7.2), base * CFrame.new(0, 0.5, 0), MARBLE:Lerp(Color3.new(0, 0, 0), 0.08), Enum.Material.Marble)
+	piece(model, "Step", Vector3.new(6.2, 0.8, 6.2), base * CFrame.new(0, 1.4, 0), MARBLE, Enum.Material.Marble)
+	piece(model, "Column", Vector3.new(5, 4, 5), base * CFrame.new(0, 3.8, 0), MARBLE, Enum.Material.Marble)
+	piece(model, "Cap", Vector3.new(6.2, 0.8, 6.2), base * CFrame.new(0, 6.2, 0), MARBLE, Enum.Material.Marble)
+	for _, y in { 2.05, 5.55 } do
+		piece(model, "GoldBand", Vector3.new(5.2, 0.25, 5.2), base * CFrame.new(0, y, 0), GOLD, Enum.Material.Metal)
+	end
+
+	-- The figure: blocky Roblox proportions at 1.6x scale, right arm raised.
+	local figure = base * CFrame.new(0, PEDESTAL_HEIGHT, 0)
+	for _, side in { -1, 1 } do
+		piece(model, "Leg", Vector3.new(1.55, 3.2, 1.55), figure * CFrame.new(side * 0.8, 1.6, 0), GOLD, Enum.Material.Metal)
+	end
+	piece(model, "Torso", Vector3.new(3.2, 3.2, 1.6), figure * CFrame.new(0, 4.8, 0), GOLD, Enum.Material.Metal)
+	piece(model, "Head", Vector3.new(2.3, 2.3, 2.3), figure * CFrame.new(0, 7.55, 0), GOLD, Enum.Material.Metal, Enum.PartType.Ball)
+	-- Cylinders run along X: stand the neck upright.
+	piece(model, "Neck", Vector3.new(0.5, 1.1, 1.1), figure * CFrame.new(0, 6.5, 0) * CFrame.Angles(0, 0, math.pi / 2), GOLD, Enum.Material.Metal, Enum.PartType.Cylinder)
+	piece(model, "Arm", Vector3.new(1.55, 3.2, 1.55), figure * CFrame.new(-2.4, 4.8, 0) * CFrame.Angles(0, 0, math.rad(-6)), GOLD, Enum.Material.Metal)
+	-- The raised arm pivots at the shoulder and leans slightly outward.
+	local tilt = math.rad(-14)
+	local shoulder = figure * CFrame.new(2.4, 5.6, 0)
+	local up = shoulder * CFrame.Angles(0, 0, tilt)
+	piece(model, "RaisedArm", Vector3.new(1.55, 3.2, 1.55), up * CFrame.new(0, 1.6, 0), GOLD, Enum.Material.Metal)
+
+	-- A real diamond held aloft, with a gentle sparkle.
+	local gem = DiamondShape.build(1.9, "HeldDiamond")
+	gem.model.Parent = model
+	-- Upright in the world despite the leaning arm, resting point-down in the hand.
+	DiamondShape.place(gem, up * CFrame.new(0, 4.25, 0) * CFrame.Angles(0, 0, -tilt) * CFrame.Angles(0, math.rad(22.5), 0))
+	local sparkleAt = Instance.new("Attachment")
+	sparkleAt.Position = Vector3.new(0, 2.6, 0)
+	sparkleAt.Parent = model:FindFirstChild("RaisedArm")
+	local sparkles = Instance.new("ParticleEmitter")
+	sparkles.Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(160, 235, 255))
+	sparkles.LightEmission = 1
+	sparkles.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 0) })
+	sparkles.Transparency = NumberSequence.new(0.1, 1)
+	sparkles.Lifetime = NumberRange.new(0.5, 1)
+	sparkles.Rate = 4
+	sparkles.Speed = NumberRange.new(0.4, 1.2)
+	sparkles.SpreadAngle = Vector2.new(180, 180)
+	sparkles.Parent = sparkleAt
+
+	-- The plaque: a brass plate in a dark frame on the front of the column.
+	piece(model, "PlaqueFrame", Vector3.new(4.4, 2.9, 0.2), base * CFrame.new(0, 3.8, -2.55), Color3.fromRGB(70, 48, 28), Enum.Material.Wood)
+	local plate = piece(model, "Plaque", Vector3.new(4, 2.5, 0.2), base * CFrame.new(0, 3.8, -2.7), Color3.fromRGB(214, 170, 76), Enum.Material.Metal)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 60
+	gui.LightInfluence = 0.6
+	gui.Parent = plate
+	local function engrave(text: string, y: number, height: number, font: Enum.Font)
+		local line = Instance.new("TextLabel")
+		line.BackgroundTransparency = 1
+		line.Size = UDim2.fromScale(0.9, height)
+		line.Position = UDim2.fromScale(0.05, y)
+		line.Font = font
+		line.TextScaled = true
+		line.TextColor3 = Color3.fromRGB(58, 38, 18)
+		line.Text = text
+		line.Parent = gui
+	end
+	engrave("★  IN HONOUR OF  ★", 0.06, 0.16, Enum.Font.GothamBold)
+	engrave(spec.name, 0.25, 0.42, Enum.Font.FredokaOne)
+	engrave(Format.commas(spec.coins) .. " COINS", 0.7, 0.22, Enum.Font.GothamBold)
+	return model
+end
+
+return Statue
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="20">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -3230,7 +3889,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="19">
+      <Item class="ModuleScript" referent="21">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -3374,15 +4033,15 @@ return TikTokFeed
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="20">
+  <Item class="StarterPlayer" referent="22">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="21">
+    <Item class="StarterPlayerScripts" referent="23">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="22">
+      <Item class="LocalScript" referent="24">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -3971,6 +4630,108 @@ panelButtons({
 	{ "Grow to limit", function() send("testRebuildGift", 1500000) end },
 })
 
+-- A destructive button only acts on a second click within three seconds.
+local function confirmed(button: TextButton, label: string, action: () -> ())
+	local armed = false
+	button.Activated:Connect(function()
+		if armed then
+			armed = false
+			button.Text = label
+			action()
+			return
+		end
+		armed = true
+		button.Text = "Click again to confirm"
+		task.delay(3, function()
+			if armed then
+				armed = false
+				button.Text = label
+			end
+		end)
+	end)
+end
+local function panelButton(text: string): TextButton
+	panelOrder += 1
+	local button = make("TextButton", {
+		LayoutOrder = panelOrder,
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundColor3 = Color3.fromRGB(90, 70, 150),
+		Font = FONT,
+		TextSize = 16,
+		TextColor3 = WHITE,
+		Text = text,
+		ZIndex = 12,
+	}, panel)
+	rounded(button, 8)
+	return button
+end
+
+panelLabel("LEADERBOARDS (behind the mountain)")
+panelLabel("Test gifts and likes never count.")
+panelButtons({
+	{ "Preview with sample names", function() send("previewBoards") end },
+})
+confirmed(panelButton("Reset top gifters"), "Reset top gifters", function() send("resetBoard", "gifts") end)
+confirmed(panelButton("Reset top likers"), "Reset top likers", function() send("resetBoard", "likes") end)
+
+panelLabel("GOLD STATUES (saved in your game)")
+local statueName = panelBox("", function() end)
+statueName.PlaceholderText = "Gifter's name for the plaque"
+local statueCoins = panelBox("", function() end)
+statueCoins.PlaceholderText = "Coins they sent, e.g. 5000"
+panelButtons({
+	{ "Place statue in front of me", function()
+		send("placeStatue", { name = statueName.Text, coins = tonumber((string.gsub(statueCoins.Text, "[^%d]", ""))) or 0 })
+	end },
+})
+panelOrder += 1
+local statueList = make("Frame", {
+	LayoutOrder = panelOrder,
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	ZIndex = 11,
+}, panel)
+make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) }, statueList)
+local function refreshStatues()
+	for _, child in statueList:GetChildren() do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	local ok, statues = pcall(function()
+		return game:GetService("HttpService"):JSONDecode(attr("Statues", "[]"))
+	end)
+	if not ok or type(statues) ~= "table" then return end
+	for index, statue in statues do
+		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, statueList)
+		make("TextLabel", {
+			Size = UDim2.new(1, -40, 1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 15,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextColor3 = GOLD,
+			Text = string.format("🏆 %s · %s coins", tostring(statue.name), Format.commas(tonumber(statue.coins) or 0)),
+			ZIndex = 12,
+		}, row)
+		local remove = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.fromOffset(34, 30),
+			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
+			Font = FONT,
+			TextSize = 16,
+			TextColor3 = WHITE,
+			Text = "✕",
+			ZIndex = 12,
+		}, row)
+		rounded(remove, 8)
+		confirmed(remove, "✕", function() send("removeStatue", index) end)
+	end
+end
+State:GetAttributeChangedSignal("Statues"):Connect(refreshStatues)
+refreshStatues()
+
 local function refreshPanelFields()
 	titleBox.Text = attr("WinTitle", "WINS")
 	winsInput.Text = tostring(attr("Wins", 0))
@@ -4087,6 +4848,8 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
 	elseif kind == "win" and type(data) == "table" then
 		showWin(data)
+	elseif kind == "notice" and type(data) == "string" then
+		addFeed(data, 0, "notice")
 	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then
 		addFeed(tostring(data.name) .. (if data.reason == "rebuild" then " — rebuild cancelled the countdown! Pick up the diamond again." else " dropped the diamond!"), 0, "drop")
 	end
@@ -4207,7 +4970,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -4537,7 +5300,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -4879,7 +5642,7 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -5347,7 +6110,7 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -5475,12 +6238,12 @@ return RebuildEffects
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="27">
+  <Item class="Workspace" referent="29">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="28">
+    <Item class="Terrain" referent="30">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>

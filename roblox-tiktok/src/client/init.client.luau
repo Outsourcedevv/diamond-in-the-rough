@@ -584,6 +584,108 @@ panelButtons({
 	{ "Grow to limit", function() send("testRebuildGift", 1500000) end },
 })
 
+-- A destructive button only acts on a second click within three seconds.
+local function confirmed(button: TextButton, label: string, action: () -> ())
+	local armed = false
+	button.Activated:Connect(function()
+		if armed then
+			armed = false
+			button.Text = label
+			action()
+			return
+		end
+		armed = true
+		button.Text = "Click again to confirm"
+		task.delay(3, function()
+			if armed then
+				armed = false
+				button.Text = label
+			end
+		end)
+	end)
+end
+local function panelButton(text: string): TextButton
+	panelOrder += 1
+	local button = make("TextButton", {
+		LayoutOrder = panelOrder,
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundColor3 = Color3.fromRGB(90, 70, 150),
+		Font = FONT,
+		TextSize = 16,
+		TextColor3 = WHITE,
+		Text = text,
+		ZIndex = 12,
+	}, panel)
+	rounded(button, 8)
+	return button
+end
+
+panelLabel("LEADERBOARDS (behind the mountain)")
+panelLabel("Test gifts and likes never count.")
+panelButtons({
+	{ "Preview with sample names", function() send("previewBoards") end },
+})
+confirmed(panelButton("Reset top gifters"), "Reset top gifters", function() send("resetBoard", "gifts") end)
+confirmed(panelButton("Reset top likers"), "Reset top likers", function() send("resetBoard", "likes") end)
+
+panelLabel("GOLD STATUES (saved in your game)")
+local statueName = panelBox("", function() end)
+statueName.PlaceholderText = "Gifter's name for the plaque"
+local statueCoins = panelBox("", function() end)
+statueCoins.PlaceholderText = "Coins they sent, e.g. 5000"
+panelButtons({
+	{ "Place statue in front of me", function()
+		send("placeStatue", { name = statueName.Text, coins = tonumber((string.gsub(statueCoins.Text, "[^%d]", ""))) or 0 })
+	end },
+})
+panelOrder += 1
+local statueList = make("Frame", {
+	LayoutOrder = panelOrder,
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	ZIndex = 11,
+}, panel)
+make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) }, statueList)
+local function refreshStatues()
+	for _, child in statueList:GetChildren() do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	local ok, statues = pcall(function()
+		return game:GetService("HttpService"):JSONDecode(attr("Statues", "[]"))
+	end)
+	if not ok or type(statues) ~= "table" then return end
+	for index, statue in statues do
+		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, statueList)
+		make("TextLabel", {
+			Size = UDim2.new(1, -40, 1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 15,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextColor3 = GOLD,
+			Text = string.format("🏆 %s · %s coins", tostring(statue.name), Format.commas(tonumber(statue.coins) or 0)),
+			ZIndex = 12,
+		}, row)
+		local remove = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.fromOffset(34, 30),
+			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
+			Font = FONT,
+			TextSize = 16,
+			TextColor3 = WHITE,
+			Text = "✕",
+			ZIndex = 12,
+		}, row)
+		rounded(remove, 8)
+		confirmed(remove, "✕", function() send("removeStatue", index) end)
+	end
+end
+State:GetAttributeChangedSignal("Statues"):Connect(refreshStatues)
+refreshStatues()
+
 local function refreshPanelFields()
 	titleBox.Text = attr("WinTitle", "WINS")
 	winsInput.Text = tostring(attr("Wins", 0))
@@ -700,6 +802,8 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
 	elseif kind == "win" and type(data) == "table" then
 		showWin(data)
+	elseif kind == "notice" and type(data) == "string" then
+		addFeed(data, 0, "notice")
 	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then
 		addFeed(tostring(data.name) .. (if data.reason == "rebuild" then " — rebuild cancelled the countdown! Pick up the diamond again." else " dropped the diamond!"), 0, "drop")
 	end

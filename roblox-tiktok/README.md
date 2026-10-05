@@ -10,6 +10,8 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
   - If you fall or leave, the diamond drops.
 - **Scenery.** An alpine valley in smooth terrain: grassy meadows with animated grass, forested hills, a lake with a dock, terrain boulders and a ring of rocky, snow-capped peaks. Low-poly pines (snow-dusted higher up) and birches, and a log-cabin mining camp with a porch, warm windows, a campfire, lanterns and a trail sign. The place uses Future lighting and Roblox's 2022 material pack, with atmosphere haze, sun rays, bloom and a gentle colour grade.
+- **Leaderboards.** Two giant 3D wooden boards stand behind the mountain, either side of the summit, angled towards the camp: **TOP GIFTERS** (blue border, a gift box on the roof) ranks viewers by coins sent, and **TOP LIKERS** (red border, a heart on the roof) by likes. Each shows the top 10 on a shingle-roofed board with log posts. Totals are saved between streams, viewer names are text-filtered, and test gifts and likes never count.
+- **Gold statues.** Honour a big gifter with a gold statue holding a diamond aloft on a marble pedestal. An engraved brass plaque shows their name and coins. Statues are placed from the settings panel and saved in your game.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and ⭐ NEW BEST! when you beat it). Then the mountain rebuilds from base to peak in 16 waves, with flying stones snapping into place and a final glint at the summit. Gifts arriving during the rebuild are saved and applied when digging resumes.
 - **Aim at stone.** A small dot marks the centre of the screen. The surface rock directly under it gets a white outline; the outline follows the same target used for digging and disappears when aiming away or opening settings.
@@ -90,6 +92,15 @@ In the **Y** panel:
 
 Everything is saved with your other settings.
 
+## Leaderboards and gold statues
+
+The two leaderboards fill up by themselves as viewers send gifts and likes. In the **Y** panel:
+
+- **Preview with sample names** fills both boards with made-up viewers for 20 seconds, so you can check them before going live.
+- **Reset top gifters** / **Reset top likers** clear a board (click twice to confirm), for example at the start of a new stream.
+
+To place a **gold statue**, stand where you want it (outside the mountain area), face that spot and open the **Y** panel. Under **GOLD STATUES**, type the gifter's name and how many coins they sent, then press **Place statue in front of me**. The statue appears a few steps ahead, facing you. Up to 12 statues are kept, and the ✕ next to each one removes it (click twice to confirm). Like wins and best times, statues and leaderboard totals are remembered between sessions once the game is published to Roblox and **Enable Studio Access to API Services** is on (Game Settings → Security).
+
 You can also type these in the Roblox chat:
 
 | Command | What it does |
@@ -160,6 +171,7 @@ Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o Diamond
 - Logic tests: `luau tests/run.luau`, `luau tests/mountain-shape.luau`, `luau tests/diamond-rebuild.luau` (Luau CLI).
 - Server/client sync and watertight rock: `python3 tests/mountain-sync.py [path/to/luau]`.
 - Scenery: `python3 tests/scenery.py [path/to/luau]`.
+- Leaderboards and statues: `python3 tests/showcase.py [path/to/luau]`.
 - Bridge tests: `npm test` inside `bridge/`.
 
 TikTok events come from the community [tiktok-live-connector](https://github.com/zerodytrash/TikTok-Live-Connector) package, which is not an official TikTok API.

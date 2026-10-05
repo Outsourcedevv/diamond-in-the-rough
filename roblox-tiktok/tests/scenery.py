@@ -60,11 +60,26 @@ workspace.Raycast = function(_, at) return { Position = Vector3.new(at.X, 0, at.
 '''
 
 checks = r'''
-Scenery.build(26.4, Vector3.new(0, 0.5, 56.4))
+-- The leaderboards' ground (as placed by the server) must stay clear.
+local reserved = { { at = Vector3.new(-30.6, 0, -81), radius = 30 }, { at = Vector3.new(30.6, 0, -81), radius = 30 } }
+local function inReserved(at): boolean
+	for _, spot in reserved do
+		if (Vector3.new(at.X, 0, at.Z) - spot.at).Magnitude < spot.radius then return true end
+	end
+	return false
+end
+terrain.FillBall = function(_, centre, radius, material)
+	balls += 1
+	assert(Vector3.new(centre.X, 0, centre.Z).Magnitude > 55 + radius - 8, "boulders stay out of the arena")
+	assert(not inReserved(centre), "boulders stay off the leaderboard sites")
+	assert(material == "Material.Rock")
+end
+Scenery.build(26.4, Vector3.new(0, 0.5, 56.4), reserved)
 local parts, lights, conifers, birches, outward = 0, 0, 0, 0, 0
 for _, p in instances do
 	if p.Name == "Conifer" then conifers += 1 end
 	if p.Name == "Birch" then birches += 1 end
+	if p.Name == "Trunk" then assert(not inReserved(p.CFrame.Position), "trees stay off the leaderboard sites") end
 	if p.ClassName == "Part" or p.ClassName == "WedgePart" or p.ClassName == "CornerWedgePart" then
 		if p.Parent ~= nil then
 			parts += 1

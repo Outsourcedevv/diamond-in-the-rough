@@ -227,7 +227,8 @@ local function landscape(terrain: Terrain, site: Site)
 	end
 end
 
-function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
+-- `reserved` keeps trees and boulders out of circles (the leaderboards stand there).
+function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved: { { at: Vector3, radius: number } }?)
 	-- Animated grass is enabled in the place/project: Decoration and GrassLength
 	-- are editor-only properties. LeafyGrass keeps the central arena blade-free.
 	local terrain = workspace.Terrain
@@ -238,6 +239,7 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
 	local camp = Vector3.new(spawnPosition.X, 0, spawnPosition.Z)
 	local lake = Vector3.new(clearRadius + 72, 0, camp.Z + 15)
 	local site: Site = { radius = clearRadius, camp = camp, lake = lake }
+	local keepClear: { { at: Vector3, radius: number } } = reserved or {}
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
 	params.FilterDescendantsInstances = { terrain }
@@ -251,6 +253,12 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
 			or (flat - camp).Magnitude < 25 + margin
 			or (flat - lake).Magnitude < 40 + margin
 			or onPath(at.X, at.Z, site)
+			or (function()
+				for _, spot in keepClear do
+					if (flat - Vector3.new(spot.at.X, 0, spot.at.Z)).Magnitude < spot.radius + margin then return true end
+				end
+				return false
+			end)()
 	end
 	local function steepness(x: number, z: number): number
 		return math.abs(terrainHeight(x + 3, z, site) - terrainHeight(x - 3, z, site)) / 6

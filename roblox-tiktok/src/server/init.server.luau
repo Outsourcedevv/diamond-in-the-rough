@@ -54,6 +54,9 @@ local settings = {
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
+	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
+	leaderboards = { gifts = {}, likes = {} } :: { gifts: { any }, likes: { any } },
+	statues = {} :: { any },
 }
 local saved = Store.load()
 if saved then
@@ -69,6 +72,17 @@ if saved then
 		end
 	end
 	settings.giftRules = rules
+	if type(settings.leaderboards.gifts) ~= "table" or type(settings.leaderboards.likes) ~= "table" then
+		settings.leaderboards = { gifts = {}, likes = {} }
+	end
+	local statues = {}
+	for _, statue in settings.statues do
+		if type(statue) == "table" and type(statue.n) == "string" and type(statue.c) == "number"
+			and type(statue.x) == "number" and type(statue.y) == "number" and type(statue.z) == "number" and type(statue.r) == "number" then
+			table.insert(statues, statue)
+		end
+	end
+	settings.statues = statues
 end
 
 local function publishSettings()
@@ -86,6 +100,9 @@ local function publishSettings()
 	State:SetAttribute("PerShare", settings.perShare)
 	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
+	local statueList = {}
+	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
+	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
 end
 
 local function saveSettings()
@@ -114,8 +131,16 @@ spawn.Material = Enum.Material.WoodPlanks
 spawn.Color = Color3.fromRGB(129, 105, 79)
 spawn.Parent = workspace
 
+-- Leaderboards stand behind the mountain; the scenery keeps their ground clear.
+local Leaderboards = require(script.Leaderboards)
+local mountainRadius = spawnDistance - 30
+local arenaRadius = math.max(mountainRadius + 14, 55)
+local boardSpots = Leaderboards.spots(arenaRadius, mountainRadius, spawn.Position)
+local reserved = {}
+for _, spot in boardSpots do table.insert(reserved, { at = spot.at, radius = 30 }) end
+
 -- Hills, distant peaks, a lake, a pine forest, boulders and a campfire.
-require(script.Scenery).build(spawnDistance - 30, spawn.Position)
+require(script.Scenery).build(mountainRadius, spawn.Position, reserved)
 
 -- Every player carries a pickaxe to chip at the rock themselves.
 local function makePickaxe(): Tool
@@ -640,6 +665,123 @@ RunService.Heartbeat:Connect(function()
 	end
 end)
 
+-- Leaderboards --------------------------------------------------------------------
+local showcase = Instance.new("Folder")
+showcase.Name = "Leaderboards"
+showcase.Parent = workspace
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Include
+groundParams.FilterDescendantsInstances = { workspace.Terrain }
+local function groundAt(position: Vector3): number
+	local hit = workspace:Raycast(Vector3.new(position.X, 400, position.Z), Vector3.new(0, -520, 0), groundParams)
+	return if hit then hit.Position.Y else 0
+end
+-- Raised so both boards show over the summit as seen from the camp.
+local boardLift = math.max(14, mountainRadius * 0.55)
+local giftBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1].facing, boardLift, {
+	title = "🎁 TOP GIFTERS",
+	unit = "coins",
+	trim = Color3.fromRGB(36, 92, 204),
+	valueColour = Color3.fromRGB(255, 214, 120),
+	emblem = "gift",
+	empty = "Send a gift to get on the board!",
+}, groundAt)
+local likeBoard = Leaderboards.build(showcase, boardSpots[2].at, boardSpots[2].facing, boardLift, {
+	title = "❤️ TOP LIKERS",
+	unit = "likes",
+	trim = Color3.fromRGB(196, 36, 44),
+	valueColour = Color3.fromRGB(255, 178, 188),
+	emblem = "heart",
+	empty = "Tap the screen to like the live!",
+}, groundAt)
+local giftTally = Leaderboards.tally(settings.leaderboards.gifts)
+local likeTally = Leaderboards.tally(settings.leaderboards.likes)
+local SAMPLE_GIFTS: { { any } } = { { "DiamondDave", 34999 }, { "LunaStreams", 12500 }, { "rocky_road", 5000 }, { "GemHunter99", 2999 }, { "Pixel Pam", 1000 },
+	{ "tiktok_tom", 520 }, { "MinerMia", 300 }, { "Sir Digs-a-Lot", 150 }, { "glitterbug", 99 }, { "rose_rain", 30 } }
+local SAMPLE_LIKES: { { any } } = { { "TapQueen", 48210 }, { "likeitlikeit", 23005 }, { "Pebble", 15400 }, { "Mo", 9870 }, { "skyler.digs", 6120 },
+	{ "heart_spammer", 4400 }, { "Ava", 2950 }, { "quarry_kid", 1200 }, { "bubbles", 640 }, { "newviewer22", 75 } }
+
+-- Viewer names come from TikTok, so they are filtered like any other text
+-- shown to players. Results are cached; a name that cannot be checked shows as "Viewer".
+local shownNames: { [string]: string } = {}
+local shownNameCount = 0
+local function boardName(raw: string): string?
+	local cached = shownNames[raw]
+	if cached then return cached end
+	local author: Player? = nil
+	for player, isAdmin in admins do
+		if isAdmin then author = player; break end
+	end
+	author = author or Players:GetPlayers()[1]
+	if author == nil then return nil end
+	local authorId = (author :: Player).UserId
+	local ok, result = pcall(function()
+		return TextService:FilterStringAsync(raw, authorId, Enum.TextFilterContext.PublicChat):GetNonChatStringForBroadcastAsync()
+	end)
+	local clean = if ok and type(result) == "string" and result ~= "" then result else "Viewer"
+	if shownNameCount > 3000 then
+		table.clear(shownNames)
+		shownNameCount = 0
+	end
+	shownNames[raw] = clean
+	shownNameCount += 1
+	return clean
+end
+
+local boardsScheduled = false
+local boardsDirty = false
+local lastBoardSave = 0
+local previewUntil = 0
+local function refreshBoards()
+	boardsScheduled = false
+	local previewing = os.clock() < previewUntil
+	local function draw(board: Leaderboards.Board, tally: Leaderboards.Tally, samples: { { any } })
+		local entries: { Leaderboards.Entry } = {}
+		if previewing then
+			for _, sample in samples do table.insert(entries, { key = sample[1], name = sample[1], value = sample[2] }) end
+		else
+			for _, entry in tally.top(Leaderboards.ROWS) do
+				local name = boardName(entry.name)
+				table.insert(entries, { key = entry.key, name = name or "…", value = entry.value })
+			end
+		end
+		board.show(entries)
+	end
+	draw(giftBoard, giftTally, SAMPLE_GIFTS)
+	draw(likeBoard, likeTally, SAMPLE_LIKES)
+	settings.leaderboards = { gifts = giftTally.serialize(100), likes = likeTally.serialize(100) }
+	if boardsDirty and os.clock() - lastBoardSave >= 20 then
+		boardsDirty = false
+		lastBoardSave = os.clock()
+		saveSettings()
+	end
+end
+-- Coalesces bursts of likes and gifts into one refresh a second.
+local function scheduleBoards()
+	if boardsScheduled then return end
+	boardsScheduled = true
+	task.delay(1, refreshBoards)
+end
+local function recordViewer(event: TikTokFeed.Event, kind: string, amount: number)
+	-- Test gifts and likes (from the settings panel or the bridge page) never count.
+	if event.user == "tester" or string.sub(event.id, 1, 5) == "test-" then return end
+	local key = string.lower(event.user or event.name or "")
+	local name = event.name or event.user or "Viewer"
+	if kind == "gift" then giftTally.add(key, name, amount) else likeTally.add(key, name, amount) end
+	boardsDirty = true
+	scheduleBoards()
+end
+Players.PlayerAdded:Connect(scheduleBoards)
+-- Unsaved totals are written every 20 seconds while they change.
+task.spawn(function()
+	while true do
+		task.wait(20)
+		if boardsDirty then scheduleBoards() end
+	end
+end)
+-- Name filtering can yield, so the first draw runs on its own.
+task.spawn(refreshBoards)
+
 -- TikTok ------------------------------------------------------------------------
 local function processTikTok(event: TikTokFeed.Event)
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
@@ -663,10 +805,12 @@ local function processTikTok(event: TikTokFeed.Event)
 		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
 		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
+		recordViewer(event, "gift", coins * count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
 		amount = likes * settings.perLike
 		text = string.format("%s liked x%d", who, likes)
+		recordViewer(event, "like", likes)
 	elseif event.type == "follow" then
 		amount = settings.perFollow
 		text = who .. " followed"
@@ -774,6 +918,65 @@ local function testGift(coins: number, count: number, name: string, rocks: numbe
 	})
 end
 
+-- Gold statues ---------------------------------------------------------------------
+local Statue = require(script.Statue)
+local MAX_STATUES = 12
+local statueFolder = Instance.new("Folder")
+statueFolder.Name = "Statues"
+statueFolder.Parent = workspace
+local function notice(player: Player, text: string)
+	Notify:FireClient(player, "notice", text)
+end
+local function buildStatues()
+	statueFolder:ClearAllChildren()
+	for _, statue in settings.statues do
+		Statue.build(statueFolder, { name = statue.n, coins = statue.c, position = Vector3.new(statue.x, statue.y, statue.z), yaw = statue.r })
+	end
+end
+buildStatues()
+
+-- Places a statue 9 studs in front of the streamer, facing them.
+local function placeStatue(player: Player, value: any)
+	local name = if type(value.name) == "string" then string.gsub(string.sub(value.name, 1, 30), "^%s*(.-)%s*$", "%1") else ""
+	if name == "" then
+		notice(player, "Type the gifter's name for the plaque first.")
+		return
+	end
+	if #settings.statues >= MAX_STATUES then
+		notice(player, "You already have " .. MAX_STATUES .. " statues. Remove one first.")
+		return
+	end
+	local coins = if type(value.coins) == "number" and value.coins == value.coins then math.clamp(math.floor(value.coins), 0, 999999999) else 0
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if character == nil or root == nil or not root:IsA("BasePart") then return end
+	local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+	local forward = if look.Magnitude > 0.1 then look.Unit else Vector3.new(0, 0, -1)
+	local spot = root.Position + forward * 9
+	if Vector3.new(spot.X, 0, spot.Z).Magnitude < arenaRadius then
+		notice(player, "Too close to the mountain: walk back towards the camp and try again.")
+		return
+	end
+	local clean = filtered(player, name)
+	if clean == nil then
+		notice(player, "Could not check that name. Try again in a moment.")
+		return
+	end
+	local exclude = { statueFolder, diamond } :: { Instance }
+	for _, other in Players:GetPlayers() do
+		if other.Character then table.insert(exclude, other.Character) end
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = exclude
+	local hit = workspace:Raycast(spot + Vector3.new(0, 40, 0), Vector3.new(0, -140, 0), params)
+	local y = if hit then hit.Position.Y else 0
+	table.insert(settings.statues, { n = clean, c = coins, x = spot.X, y = y, z = spot.Z, r = math.atan2(forward.X, forward.Z) })
+	buildStatues()
+	saveSettings()
+	notice(player, "Gold statue placed for " .. clean .. "!")
+end
+
 local function applySetting(player: Player, action: string, value: any)
 	if action == "setWins" and type(value) == "number" then
 		settings.wins = math.clamp(math.floor(value), 0, 999999)
@@ -816,6 +1019,26 @@ local function applySetting(player: Player, action: string, value: any)
 		end
 	elseif action == "resetBest" then
 		settings.best = 0
+	elseif action == "placeStatue" and type(value) == "table" then
+		placeStatue(player, value)
+		return
+	elseif action == "removeStatue" and type(value) == "number" then
+		local index = math.floor(value)
+		if settings.statues[index] == nil then return end
+		table.remove(settings.statues, index)
+		buildStatues()
+	elseif action == "resetBoard" and (value == "gifts" or value == "likes") then
+		if value == "gifts" then giftTally.reset() else likeTally.reset() end
+		boardsDirty = true
+		lastBoardSave = 0
+		scheduleBoards()
+		return
+	elseif action == "previewBoards" then
+		-- Sample names for 20 seconds, so the boards can be checked before going live.
+		previewUntil = os.clock() + 20
+		scheduleBoards()
+		task.delay(20.5, scheduleBoards)
+		return
 	elseif action == "newRound" then
 		if phase ~= "Won" then
 			newRound()

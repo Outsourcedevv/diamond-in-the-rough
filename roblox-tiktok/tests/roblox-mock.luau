@@ -79,6 +79,10 @@ local CFrame = {
 			t * u.X * u.Z - s * u.Y, t * u.Y * u.Z + s * u.X, t * u.Z * u.Z + c,
 		})
 	end,
+	fromMatrix = function(position: any, x: any, y: any, z: any)
+		z = z or x:Cross(y)
+		return CF(position, { x.X, y.X, z.X, x.Y, y.Y, z.Y, x.Z, y.Z, z.Z })
+	end,
 	lookAt = function(at: any, target: any)
 		local look = (target - at).Unit
 		local back = -look
@@ -90,10 +94,22 @@ local CFrame = {
 	end,
 }
 
-local Color3 = {
-	new = function(r: number, g: number, b: number) return { R = r, G = g, B = b } end,
-	fromRGB = function(r: number, g: number, b: number) return { R = r / 255, G = g / 255, B = b / 255 } end,
+local colour = {}
+colour.__index = {
+	Lerp = function(a, b, t) return setmetatable({ R = a.R + (b.R - a.R) * t, G = a.G + (b.G - a.G) * t, B = a.B + (b.B - a.B) * t }, colour) end,
 }
+colour.__eq = function(a, b) return a.R == b.R and a.G == b.G and a.B == b.B end
+local Color3 = {
+	new = function(r: number, g: number, b: number) return setmetatable({ R = r, G = g, B = b }, colour) end,
+	fromRGB = function(r: number, g: number, b: number) return setmetatable({ R = r / 255, G = g / 255, B = b / 255 }, colour) end,
+}
+local function sequence(...) return { ... } end
+local ColorSequence = { new = sequence }
+local NumberSequence = { new = sequence }
+local NumberSequenceKeypoint = { new = sequence }
+local NumberRange = { new = sequence }
+local Vector2 = { new = function(x: number, y: number) return { X = x, Y = y } end }
+local UDim = { new = function(scale: number, offset: number) return { Scale = scale, Offset = offset } end }
 local Enum = setmetatable({}, { __index = function(_, group)
 	return setmetatable({}, { __index = function(_, item) return group .. "." .. item end })
 end })
@@ -124,6 +140,18 @@ newInstance = function(className: string): any
 			if other.Parent == self and other.ClassName == className then return other end
 		end
 		return nil
+	end
+	object.GetChildren = function(self)
+		local children = {}
+		for _, other in instances do
+			if other.Parent == self then table.insert(children, other) end
+		end
+		return children
+	end
+	object.ClearAllChildren = function(self)
+		for _, other in instances do
+			if other.Parent == self then other:Destroy() end
+		end
 	end
 	object.GetAttribute = function(_, key) return attributes[key] end
 	object.SetAttribute = function(_, key, value) attributes[key] = value end
