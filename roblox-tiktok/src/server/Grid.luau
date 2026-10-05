@@ -269,15 +269,38 @@ function Grid.remove(self: Grid, key: number): boolean
 end
 
 -- Refill recently excavated cells in reverse order, never the sealed diamond cell.
-function Grid.restore(self: Grid, count: number, focus: { x: number, z: number, radius: number }?, checkpoint: (() -> ())?): { number }
-	-- A rebuild during a hold fills the holder's column first, base upwards.
-	if focus then
+function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?, z: number, radius: number? }?, checkpoint: (() -> ())?): { number }
+	-- Bucket integer squared distances so large refills avoid sorting every
+	-- missing rock. Pop nearest buckets first, leaving the gem cell reserved.
+	if focus and focus.y ~= nil then
+		local buckets = {}
+		local distances = {}
+		for index, key in self.removedOrder do
+			local x, y, z = Grid.coords(key)
+			local distance = (x - focus.x)^2 + (y - focus.y)^2 + (z - focus.z)^2
+			if buckets[distance] == nil then
+				buckets[distance] = {}
+				table.insert(distances, distance)
+			end
+			table.insert(buckets[distance], key)
+			if checkpoint and index % 256 == 0 then checkpoint() end
+		end
+		table.sort(distances, function(a, b) return a > b end)
+		local ordered = {}
+		for _, distance in distances do
+			for _, key in buckets[distance] do
+				table.insert(ordered, key)
+				if checkpoint and #ordered % 256 == 0 then checkpoint() end
+			end
+		end
+		self.removedOrder = ordered
+	elseif focus then
 		local distant, nearby = {}, {}
 		for index, key in self.removedOrder do
 			if checkpoint and index % 256 == 0 then checkpoint() end
 			local x, y, z = Grid.coords(key)
 			local distance = (x - focus.x) ^ 2 + (z - focus.z) ^ 2
-			if distance <= focus.radius ^ 2 then
+			if distance <= (focus.radius or 0) ^ 2 then
 				table.insert(nearby, { key = key, y = y, distance = distance })
 			else
 				table.insert(distant, key)
