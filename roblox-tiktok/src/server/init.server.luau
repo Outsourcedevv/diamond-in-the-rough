@@ -106,22 +106,11 @@ spawn.Duration = 0
 spawn.Size = Vector3.new(14, 1, 14)
 spawn.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, spawnDistance), Vector3.new(0, 0.5, 0))
 spawn.Material = Enum.Material.WoodPlanks
-spawn.Color = Color3.fromRGB(150, 110, 70)
+spawn.Color = Color3.fromRGB(129, 105, 79)
 spawn.Parent = workspace
 
 -- Hills, distant peaks, a lake, a pine forest, boulders and a campfire.
 require(script.Scenery).build(spawnDistance - 30, spawn.Position)
-
-Lighting.ClockTime = 14.5
-Lighting.Brightness = 2.2
-Lighting.OutdoorAmbient = Color3.fromRGB(140, 140, 150)
-if Lighting:FindFirstChildOfClass("Atmosphere") == nil then
-	local atmosphere = Instance.new("Atmosphere")
-	atmosphere.Density = 0.25
-	atmosphere.Haze = 1.2
-	atmosphere.Color = Color3.fromRGB(200, 215, 230)
-	atmosphere.Parent = Lighting
-end
 
 -- Every player carries a pickaxe to chip at the rock themselves.
 local function makePickaxe(): Tool
