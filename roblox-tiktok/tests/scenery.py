@@ -13,7 +13,7 @@ local cf={}
 cf.__mul=function(a,b) return setmetatable({Position=a.Position+b.Position},cf) end
 local CFrame={new=function(x,y,z) return setmetatable({Position=if type(x)=="table" then x else vec(x,y,z)},cf) end,Angles=function() return setmetatable({Position=vec()},cf) end}
 local Color3={fromRGB=function(r,g,b) return {R=r/255,G=g/255,B=b/255} end}
-local Enum={Material=setmetatable({},{__index=function(_,k) return k end}),RaycastFilterType={Include=1}}
+local Enum={Material=setmetatable({},{__index=function(_,k) return k end}),PartType={Ball=1,Cylinder=2},RaycastFilterType={Include=1}}
 local instances={}
 local function object(kind)
  local p={ClassName=kind,FindFirstChildOfClass=function() return nil end}
@@ -23,12 +23,32 @@ local Instance={new=object}
 local Lighting=object("Lighting")
 local game={GetService=function() return Lighting end}
 local Random={new=function() return {NextNumber=function(_,a,b) return if a then (a+b)/2 else 0.5 end,NextInteger=function(_,a,b) return math.floor((a+b)/2) end} end}
+local task={wait=function() end}
+local Region3={new=function(a,b) return {minimum=a,maximum=b} end}
 local RaycastParams={new=function() return {} end}
 local terrain=object("Terrain")
 terrain.SetMaterialColor=function() end
 local terrainCalls=0
 for _,method in {"FillBlock","FillBall","FillWedge"} do
  terrain[method]=function() terrainCalls+=1 end
+end
+local chunks=0
+terrain.WriteVoxels=function(_,region,resolution,materials,occupancies)
+ chunks+=1
+ assert(resolution==4)
+ for x=1,16 do
+  for y=1,40 do
+   for z=1,16 do
+    local value=occupancies[x][y][z]
+    assert(value>=0 and value<=1 and value==value)
+    local wx,wz=region.minimum.X+(x-0.5)*4,region.minimum.Z+(z-0.5)*4
+    local wy=-24+(y-0.5)*4
+    if wx*wx+wz*wz<55*55 then
+     assert(value==(if wy<0 then 1 else 0),"keep mountain growth area flat and clear")
+    end
+   end
+  end
+ end
 end
 local workspace={Terrain=terrain,Raycast=function(_,at) return {Position=vec(at.X,0,at.Z)} end}
 local Scenery=(function()
@@ -45,9 +65,9 @@ for _,p in instances do
  elseif p.ClassName=="PointLight" then lights+=1;assert(not p.Shadows) end
 end
 assert(parts<1600,"decoration count must remain bounded")
-assert(lights==4 and terrainCalls>50)
-assert(Lighting.ClockTime==16.4)
-print(string.format("PASS: scenery builds, %d static parts, %d local lights, mining queries disabled",parts,lights))
+assert(lights==5 and terrainCalls==1 and chunks==100)
+assert(Lighting.ClockTime==17.1)
+print(string.format("PASS: smooth terrain and clearance verified, %d static parts, %d local lights, mining queries disabled",parts,lights))
 '''
 generated=root/'tests/scenery.generated.luau'
 try:
