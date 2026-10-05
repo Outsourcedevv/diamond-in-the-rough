@@ -77,7 +77,7 @@ local function landscape(terrain: Terrain, lake: Vector3, camp: Vector3, radius:
      if distance<radius then height=0 end
      local pathX=math.sin(math.clamp((camp.Z-z)/(camp.Z-26),0,1)*math.pi)*4
      local path=z>=26 and z<=camp.Z+5 and math.abs(x-pathX)<3.3+math.noise(z/7,0,3)*0.8
-     local surface=if shore<1.2 then Enum.Material.Ground elseif path or campDistance<10 then Enum.Material.Ground elseif height>65 then Enum.Material.Rock else Enum.Material.Grass
+     local surface=if distance<radius then Enum.Material.LeafyGrass elseif shore<1.2 then Enum.Material.Ground elseif path or campDistance<10 then Enum.Material.Ground elseif height>65 then Enum.Material.Rock else Enum.Material.Grass
      for iy=1,40 do
       local y=-24+(iy-0.5)*4
       local occupancy=math.clamp((height-y)/4+0.5,0,1)
@@ -97,6 +97,8 @@ local function landscape(terrain: Terrain, lake: Vector3, camp: Vector3, radius:
  end
 end
 function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
+ -- Animated grass is enabled in the place/project: Decoration and GrassLength
+ -- are editor-only properties. LeafyGrass keeps the central arena blade-free.
  local terrain=workspace.Terrain
  local folder=Instance.new("Folder"); folder.Name="Scenery"; folder.Parent=workspace
  local clearRadius=math.max(mountainRadius+14,55)
