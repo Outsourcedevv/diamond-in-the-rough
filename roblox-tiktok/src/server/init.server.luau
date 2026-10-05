@@ -977,6 +977,30 @@ local function placeStatue(player: Player, value: any)
 	notice(player, "Gold statue placed for " .. clean .. "!")
 end
 
+local function removeStatue(player: Player, index: number)
+	local statue = settings.statues[index]
+	if statue == nil then return end
+	table.remove(settings.statues, index)
+	buildStatues()
+	saveSettings()
+	notice(player, "Removed the statue for " .. statue.n .. ".")
+end
+
+-- Removes the statue the streamer is standing next to.
+local STATUE_REACH = 30
+local function removeNearestStatue(player: Player)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if root == nil or not root:IsA("BasePart") then return end
+	local index = Statue.nearest(settings.statues, root.Position, STATUE_REACH)
+	if index == nil then
+		notice(player, if #settings.statues == 0 then "There are no statues to remove."
+			else "Walk up to the statue you want to remove, then press the button again.")
+		return
+	end
+	removeStatue(player, index)
+end
+
 local function applySetting(player: Player, action: string, value: any)
 	if action == "setWins" and type(value) == "number" then
 		settings.wins = math.clamp(math.floor(value), 0, 999999)
@@ -1023,10 +1047,21 @@ local function applySetting(player: Player, action: string, value: any)
 		placeStatue(player, value)
 		return
 	elseif action == "removeStatue" and type(value) == "number" then
-		local index = math.floor(value)
-		if settings.statues[index] == nil then return end
-		table.remove(settings.statues, index)
+		removeStatue(player, math.floor(value))
+		return
+	elseif action == "removeNearestStatue" then
+		removeNearestStatue(player)
+		return
+	elseif action == "removeAllStatues" then
+		if #settings.statues == 0 then
+			notice(player, "There are no statues to remove.")
+			return
+		end
+		table.clear(settings.statues)
 		buildStatues()
+		saveSettings()
+		notice(player, "All statues removed.")
+		return
 	elseif action == "resetBoard" and (value == "gifts" or value == "likes") then
 		if value == "gifts" then giftTally.reset() else likeTally.reset() end
 		boardsDirty = true

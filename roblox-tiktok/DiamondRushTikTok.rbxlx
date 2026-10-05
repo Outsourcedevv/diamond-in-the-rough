@@ -5267,6 +5267,30 @@ local function placeStatue(player: Player, value: any)
 	notice(player, "Gold statue placed for " .. clean .. "!")
 end
 
+local function removeStatue(player: Player, index: number)
+	local statue = settings.statues[index]
+	if statue == nil then return end
+	table.remove(settings.statues, index)
+	buildStatues()
+	saveSettings()
+	notice(player, "Removed the statue for " .. statue.n .. ".")
+end
+
+-- Removes the statue the streamer is standing next to.
+local STATUE_REACH = 30
+local function removeNearestStatue(player: Player)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if root == nil or not root:IsA("BasePart") then return end
+	local index = Statue.nearest(settings.statues, root.Position, STATUE_REACH)
+	if index == nil then
+		notice(player, if #settings.statues == 0 then "There are no statues to remove."
+			else "Walk up to the statue you want to remove, then press the button again.")
+		return
+	end
+	removeStatue(player, index)
+end
+
 local function applySetting(player: Player, action: string, value: any)
 	if action == "setWins" and type(value) == "number" then
 		settings.wins = math.clamp(math.floor(value), 0, 999999)
@@ -5313,10 +5337,21 @@ local function applySetting(player: Player, action: string, value: any)
 		placeStatue(player, value)
 		return
 	elseif action == "removeStatue" and type(value) == "number" then
-		local index = math.floor(value)
-		if settings.statues[index] == nil then return end
-		table.remove(settings.statues, index)
+		removeStatue(player, math.floor(value))
+		return
+	elseif action == "removeNearestStatue" then
+		removeNearestStatue(player)
+		return
+	elseif action == "removeAllStatues" then
+		if #settings.statues == 0 then
+			notice(player, "There are no statues to remove.")
+			return
+		end
+		table.clear(settings.statues)
 		buildStatues()
+		saveSettings()
+		notice(player, "All statues removed.")
+		return
 	elseif action == "resetBoard" and (value == "gifts" or value == "likes") then
 		if value == "gifts" then giftTally.reset() else likeTally.reset() end
 		boardsDirty = true
@@ -7033,6 +7068,19 @@ function Statue.build(parent: Instance, spec: Spec): Model
 	return model
 end
 
+-- Which saved statue ({ x, z } on the ground) stands nearest to `position`,
+-- within `reach` studs across the ground; nil if none is that close.
+function Statue.nearest(statues: { { x: number, z: number } }, position: Vector3, reach: number): number?
+	local best, bestDistance = nil, reach
+	for index, statue in statues do
+		local distance = math.sqrt((statue.x - position.X) ^ 2 + (statue.z - position.Z) ^ 2)
+		if distance <= bestDistance then
+			best, bestDistance = index, distance
+		end
+	end
+	return best
+end
+
 return Statue
 ]]></string>
         </Properties>
@@ -7856,7 +7904,7 @@ panelButtons({
 })
 
 -- A destructive button only acts on a second click within three seconds.
-local function confirmed(button: TextButton, label: string, action: () -> ())
+local function confirmed(button: TextButton, label: string, action: () -> (), prompt: string?)
 	local armed = false
 	button.Activated:Connect(function()
 		if armed then
@@ -7866,7 +7914,7 @@ local function confirmed(button: TextButton, label: string, action: () -> ())
 			return
 		end
 		armed = true
-		button.Text = "Click again to confirm"
+		button.Text = prompt or "Click again to confirm"
 		task.delay(3, function()
 			if armed then
 				armed = false
@@ -7909,6 +7957,9 @@ panelButtons({
 		send("placeStatue", { name = statueName.Text, coins = tonumber((string.gsub(statueCoins.Text, "[^%d]", ""))) or 0 })
 	end },
 })
+confirmed(panelButton("Remove the statue nearest me"), "Remove the statue nearest me", function() send("removeNearestStatue") end)
+confirmed(panelButton("Remove all statues"), "Remove all statues", function() send("removeAllStatues") end)
+panelLabel("Your statues (press Remove twice):")
 panelOrder += 1
 local statueList = make("Frame", {
 	LayoutOrder = panelOrder,
@@ -7926,10 +7977,24 @@ local function refreshStatues()
 		return game:GetService("HttpService"):JSONDecode(attr("Statues", "[]"))
 	end)
 	if not ok or type(statues) ~= "table" then return end
+	if #statues == 0 then
+		local row = make("Frame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, ZIndex = 11 }, statueList)
+		make("TextLabel", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextColor3 = Color3.fromRGB(190, 180, 210),
+			Text = "No statues yet.",
+			ZIndex = 12,
+		}, row)
+		return
+	end
 	for index, statue in statues do
 		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, statueList)
 		make("TextLabel", {
-			Size = UDim2.new(1, -40, 1, 0),
+			Size = UDim2.new(1, -96, 1, 0),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamMedium,
 			TextSize = 15,
@@ -7942,16 +8007,16 @@ local function refreshStatues()
 		local remove = make("TextButton", {
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.fromScale(1, 0),
-			Size = UDim2.fromOffset(34, 30),
+			Size = UDim2.fromOffset(88, 30),
 			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
 			Font = FONT,
-			TextSize = 16,
+			TextSize = 15,
 			TextColor3 = WHITE,
-			Text = "✕",
+			Text = "Remove",
 			ZIndex = 12,
 		}, row)
 		rounded(remove, 8)
-		confirmed(remove, "✕", function() send("removeStatue", index) end)
+		confirmed(remove, "Remove", function() send("removeStatue", index) end, "Sure?")
 	end
 end
 State:GetAttributeChangedSignal("Statues"):Connect(refreshStatues)

@@ -586,7 +586,7 @@ panelButtons({
 })
 
 -- A destructive button only acts on a second click within three seconds.
-local function confirmed(button: TextButton, label: string, action: () -> ())
+local function confirmed(button: TextButton, label: string, action: () -> (), prompt: string?)
 	local armed = false
 	button.Activated:Connect(function()
 		if armed then
@@ -596,7 +596,7 @@ local function confirmed(button: TextButton, label: string, action: () -> ())
 			return
 		end
 		armed = true
-		button.Text = "Click again to confirm"
+		button.Text = prompt or "Click again to confirm"
 		task.delay(3, function()
 			if armed then
 				armed = false
@@ -639,6 +639,9 @@ panelButtons({
 		send("placeStatue", { name = statueName.Text, coins = tonumber((string.gsub(statueCoins.Text, "[^%d]", ""))) or 0 })
 	end },
 })
+confirmed(panelButton("Remove the statue nearest me"), "Remove the statue nearest me", function() send("removeNearestStatue") end)
+confirmed(panelButton("Remove all statues"), "Remove all statues", function() send("removeAllStatues") end)
+panelLabel("Your statues (press Remove twice):")
 panelOrder += 1
 local statueList = make("Frame", {
 	LayoutOrder = panelOrder,
@@ -656,10 +659,24 @@ local function refreshStatues()
 		return game:GetService("HttpService"):JSONDecode(attr("Statues", "[]"))
 	end)
 	if not ok or type(statues) ~= "table" then return end
+	if #statues == 0 then
+		local row = make("Frame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, ZIndex = 11 }, statueList)
+		make("TextLabel", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextColor3 = Color3.fromRGB(190, 180, 210),
+			Text = "No statues yet.",
+			ZIndex = 12,
+		}, row)
+		return
+	end
 	for index, statue in statues do
 		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, statueList)
 		make("TextLabel", {
-			Size = UDim2.new(1, -40, 1, 0),
+			Size = UDim2.new(1, -96, 1, 0),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamMedium,
 			TextSize = 15,
@@ -672,16 +689,16 @@ local function refreshStatues()
 		local remove = make("TextButton", {
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.fromScale(1, 0),
-			Size = UDim2.fromOffset(34, 30),
+			Size = UDim2.fromOffset(88, 30),
 			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
 			Font = FONT,
-			TextSize = 16,
+			TextSize = 15,
 			TextColor3 = WHITE,
-			Text = "✕",
+			Text = "Remove",
 			ZIndex = 12,
 		}, row)
 		rounded(remove, 8)
-		confirmed(remove, "✕", function() send("removeStatue", index) end)
+		confirmed(remove, "Remove", function() send("removeStatue", index) end, "Sure?")
 	end
 end
 State:GetAttributeChangedSignal("Statues"):Connect(refreshStatues)

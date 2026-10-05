@@ -11,7 +11,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
   - If you fall or leave, the diamond drops.
 - **Scenery.** An alpine valley in smooth terrain, with grassy meadows and animated grass, a lake with a dock, and a log-cabin mining camp with a porch, warm windows, a campfire, lanterns and a trail sign. The valley is ringed by huge snow-capped mountains made in Blender and filled with about 200 pines (snow-dusted higher up), birches, oaks, mossy boulders, rock outcrops, bushes, wildflower patches, fallen logs and stumps. The game builds these meshes itself when it starts, so there is nothing to import (see [Blender scenery](#blender-scenery)). Where Roblox does not allow that (a published game without Mesh / Image APIs turned on), built-in low-poly trees, terrain boulders and terrain peaks are used instead. The place uses Future lighting and Roblox's 2022 material pack, with atmosphere haze, sun rays, bloom and a gentle colour grade.
 - **Leaderboards.** Two giant 3D wooden boards stand behind the mountain, either side of the summit, angled towards the camp: **TOP GIFTERS** (blue border, a gift box on the roof) ranks viewers by coins sent, and **TOP LIKERS** (red border, a heart on the roof) by likes. Each shows the top 10 on a shingle-roofed board with log posts. Totals are saved between streams, viewer names are text-filtered, and test gifts and likes never count.
-- **Gold statues.** Honour a big gifter with a gold statue holding a diamond aloft on a marble pedestal. An engraved brass plaque shows their name and coins. Statues are placed from the settings panel and saved in your game.
+- **Gold statues.** Honour a big gifter with a gold statue holding a diamond aloft on a marble pedestal. An engraved brass plaque shows their name and coins. Statues are placed and removed from the settings panel and saved in your game.
 - **Win counter.** It sits at the top right and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and ⭐ NEW BEST! when you beat it). Then the mountain rebuilds from base to peak in 16 waves, with flying stones snapping into place and a final glint at the summit. Gifts arriving during the rebuild are saved and applied when digging resumes.
 - **Aim at stone.** A small dot marks the centre of the screen. The surface rock directly under it gets a white outline; the outline follows the same target used for digging and disappears when aiming away or opening settings.
@@ -121,7 +121,15 @@ The two leaderboards fill up by themselves as viewers send gifts and likes. In t
 - **Preview with sample names** fills both boards with made-up viewers for 20 seconds, so you can check them before going live.
 - **Reset top gifters** / **Reset top likers** clear a board (click twice to confirm), for example at the start of a new stream.
 
-To place a **gold statue**, stand where you want it (outside the mountain area), face that spot and open the **Y** panel. Under **GOLD STATUES**, type the gifter's name and how many coins they sent, then press **Place statue in front of me**. The statue appears a few steps ahead, facing you. Up to 12 statues are kept, and the ✕ next to each one removes it (click twice to confirm). Like wins and best times, statues and leaderboard totals are remembered between sessions once the game is published to Roblox and **Enable Studio Access to API Services** is on (Game Settings → Security).
+To place a **gold statue**, stand where you want it (outside the mountain area), face that spot and open the **Y** panel. Under **GOLD STATUES**, type the gifter's name and how many coins they sent, then press **Place statue in front of me**. The statue appears a few steps ahead, facing you. Up to 12 statues are kept.
+
+To **remove a statue**, use any of these in the same section. Each button needs a second click to confirm, so a stray click never removes anything:
+
+- **Remove the statue nearest me**: walk up to the statue, open the **Y** panel and press it.
+- **Remove** next to a name in the **Your statues** list.
+- **Remove all statues** clears every statue.
+
+Like wins and best times, statues and leaderboard totals are remembered between sessions once the game is published to Roblox and **Enable Studio Access to API Services** is on (Game Settings → Security).
 
 You can also type these in the Roblox chat:
 

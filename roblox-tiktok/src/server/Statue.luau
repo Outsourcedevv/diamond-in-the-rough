@@ -111,4 +111,17 @@ function Statue.build(parent: Instance, spec: Spec): Model
 	return model
 end
 
+-- Which saved statue ({ x, z } on the ground) stands nearest to `position`,
+-- within `reach` studs across the ground; nil if none is that close.
+function Statue.nearest(statues: { { x: number, z: number } }, position: Vector3, reach: number): number?
+	local best, bestDistance = nil, reach
+	for index, statue in statues do
+		local distance = math.sqrt((statue.x - position.X) ^ 2 + (statue.z - position.Z) ^ 2)
+		if distance <= bestDistance then
+			best, bestDistance = index, distance
+		end
+	end
+	return best
+end
+
 return Statue
