@@ -545,14 +545,14 @@ for index = 1, #testGifts, 2 do
 end
 
 panelLabel("REBUILD TEST GIFTS (adds blocks)")
-panelLabel("Dig first. Tests refill dug spaces up to a full mountain.")
+panelLabel("Tests refill dug spaces, then grow new mountain rock.")
 panelButtons({
 	{ "+1,000 blocks", function() send("testRebuildGift", 1000) end },
 	{ "+10,000 blocks", function() send("testRebuildGift", 10000) end },
 })
 panelButtons({
 	{ "+100,000 blocks", function() send("testRebuildGift", 100000) end },
-	{ "Refill mountain", function() send("testRebuildGift", 1500000) end },
+	{ "Grow to limit", function() send("testRebuildGift", 1500000) end },
 })
 
 local function refreshPanelFields()
@@ -619,7 +619,7 @@ local lastCount = -1
 RunService.RenderStepped:Connect(function(dt: number)
 	-- The stone number rolls towards its new value instead of jumping.
 	local stone = attr("Stone", 0)
-	local starting = math.max(1, attr("StartingStone", Config.StartingStone))
+	local starting = math.max(1, attr("MountainTotal", attr("StartingStone", Config.StartingStone)))
 	shownStone += (stone - shownStone) * math.min(1, dt * 10)
 	if math.abs(stone - shownStone) < 1 then
 		shownStone = stone
@@ -634,7 +634,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 	local now = workspace:GetServerTimeNow()
 	local roundStart = attr("RoundStart", now)
 	timerLabel.Text = "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart)
-	status.Text = "TikTok: " .. tostring(attr("TikTok", ""))
+	status.Text = "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else "")
 
 	if phase == "Holding" then
 		local elapsed = now - attr("HoldStart", now)

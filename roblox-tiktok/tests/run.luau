@@ -107,6 +107,38 @@ check(nearRestore[1] == column[1].key and nearRestore[2] == column[2].key, "rebu
 check(not focused:isSolid(distant :: number), "small rebuild leaves distant excavations unfilled")
 check(#focused:restore(100, { x = 10000, z = 10000, radius = 1 }) == 1, "focus outside mountain still restores available rocks")
 check(#focused:restore(100, { x = 0, z = 0, radius = 1 }) == 0, "full mountain rebuild is a no-op")
+local growth = Grid.new(5000, 2, rand)
+local gemCell = growth:carveHiddenCell()
+local original = growth.total
+local checkpoints = 0
+local function checkpoint() checkpoints += 1 end
+local added = growth:grow(2000, original + 3000, checkpoint)
+check(#added == 2000 and growth:remaining() == original + 2000, "growth exceeds the original mountain by the exact gifted amount")
+check(not growth:isSolid(gemCell), "new growth cannot fill the sealed diamond cell")
+check(checkpoints > 0, "growth provides checkpoints for frame pacing")
+local growthConsistent = true
+local growthSeen = {}
+for _, key in growth.order do
+	if growthSeen[key] then growthConsistent = false end
+	growthSeen[key] = true
+	if growth:isSolid(key) and (growth.exposedIndex[key] ~= nil) ~= growth:isExposed(key) then growthConsistent = false end
+end
+check(growthConsistent, "grown topology has unique cells and an accurate exposed surface")
+check(#growth:grow(10000, original + 3000, checkpoint) == 1000, "repeated growth respects the configured size limit")
+check(#growth:grow(1, original + 3000) == 0, "growth at the limit is a no-op")
+local beforeMiningGrowth = growth:remaining()
+local minedGrowth = growth:blast(1200, nil, checkpoint)
+check(#minedGrowth == 1200 and growth:remaining() == beforeMiningGrowth - 1200, "grown rocks remain mineable with exact accounting")
+check(growth.growthHeap == nil, "mining invalidates the cached growth frontier")
+check(#growth:restore(1200, nil, checkpoint) == 1200, "mined growth is restored before adding new cells")
+check(growth:remaining() == growth.total and not growth:isSolid(gemCell), "grow dig refill cycle preserves the diamond and stone count")
+local paced = Grid.new(1234, 1, function(a, _b) return a or 0.5 end)
+local plain = Grid.new(1234, 1, function(a, _b) return a or 0.5 end)
+paced:grow(2000, 5000, checkpoint)
+plain:grow(2000, 5000)
+local same = paced.total == plain.total
+for key in paced.solid do if not plain.solid[key] then same = false end end
+check(same, "frame pacing does not change growth results")
 local grid = Grid.new(250000, 3.7, rand)
 local hidden = grid:carveHiddenCell()
 print(string.format("mountain rocks %d, exposed %d, radius %d, built in %.2f s", grid.total, grid:exposedCount(), grid.radius, os.clock() - t0))

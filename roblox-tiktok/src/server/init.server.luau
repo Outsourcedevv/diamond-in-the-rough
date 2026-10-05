@@ -206,6 +206,8 @@ local holdWeld: WeldConstraint? = nil
 local mineCooldown: { [Player]: number } = {}
 local admins: { [Player]: boolean } = {}
 local settling: Tween? = nil
+local stoneBusy = false
+local requestedRound: boolean? = nil
 
 local function stopSettling()
 	if settling then
@@ -222,6 +224,7 @@ end
 local function refreshStone()
 	State:SetAttribute("Stone", if mountain then mountain:remaining() else 0)
 	State:SetAttribute("StartingStone", startingStone)
+	State:SetAttribute("MountainTotal", if mountain then mountain:total() else startingStone)
 end
 
 local function showDiamond(visible: boolean)
@@ -273,8 +276,27 @@ local function reveal()
 end
 
 -- One rock is one stone: blast exactly that many rocks.
-local interruptRebuildHold: (number) -> () = function(_restored: number) end
-local function applyStone(amount: number): (Vector3?, number?)
+local interruptRebuildHold: (number, Player?) -> () = function(_restored: number, _player: Player?) end
+local cancelHoldForRebuild: () -> Player? = function() return nil end
+local function growthCapacity(): number
+	return math.max(Config.GrowthMaxStone, startingStone * 2)
+end
+local function workCheckpoint(onYield: (() -> ())?): () -> ()
+	local frameStart = os.clock()
+	local lastCountUpdate = frameStart
+	return function()
+		if os.clock() - frameStart >= 0.003 then
+			if os.clock() - lastCountUpdate >= 0.1 then
+				refreshStone()
+				if onYield then onYield() end
+				lastCountUpdate = os.clock()
+			end
+			task.wait()
+			frameStart = os.clock()
+		end
+	end
+end
+local function applyStone(amount: number, centreKey: number?): (Vector3?, number?)
 	amount = math.floor(amount)
 	if amount == 0 then return nil, 0 end
 	local current = mountain
@@ -283,12 +305,16 @@ local function applyStone(amount: number): (Vector3?, number?)
 		table.insert(pendingChanges, amount)
 		return
 	end
+	local checkpoint = workCheckpoint()
 	if amount < 0 then
 		local character = holder and holder.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local focus = if phase == "Holding" and root and root:IsA("BasePart") then root.Position else nil
-		local restored, samples = current:restore(-amount, focus)
-		if restored > 0 then interruptRebuildHold(restored) end
+		local capacity = growthCapacity()
+		local interrupted = if current:remaining() < capacity then cancelHoldForRebuild() else nil
+		checkpoint = workCheckpoint(function() interruptRebuildHold(0, interrupted) end)
+		local restored, samples = current:restore(-amount, focus, capacity, checkpoint)
+		if restored > 0 then interruptRebuildHold(restored, interrupted) end
 		refreshStone()
 		if phase == "Revealed" then
 			stopSettling()
@@ -298,7 +324,7 @@ local function applyStone(amount: number): (Vector3?, number?)
 		return (if #samples > 0 then samples[1].frame.Position else nil), -restored
 	end
 	local count = math.min(amount, current:remaining())
-	local centre = current:blast(count)
+	local centre = current:blast(count, checkpoint, centreKey)
 	-- Gift spectacle is rendered by GiftEffects on each client. Never create a
 	-- physics Explosion: blasts may remove grid stones, never the diamond or rigs.
 	refreshStone()
@@ -350,6 +376,7 @@ end
 
 local rebuilding = false
 local function newRound(animated: boolean?)
+	if stoneBusy then requestedRound = animated == true; return end
 	if rebuilding then return end
 	rebuilding = true
 	setPhase("Rebuilding")
@@ -414,12 +441,14 @@ local function newRound(animated: boolean?)
 	State:SetAttribute("RoundStart", roundStart)
 	local carried = pendingChanges
 	pendingChanges = {}
+	stoneBusy = true
 	for _, change in carried do applyStone(change) end
+	stoneBusy = false
 end
 
 -- Holding the diamond -----------------------------------------------------------
 local function grab(player: Player)
-	if phase ~= "Revealed" then
+	if stoneBusy or phase ~= "Revealed" then
 		return
 	end
 	local character = player.Character
@@ -491,9 +520,12 @@ local function drop(reason: string)
 	Notify:FireAllClients("dropped", { name = if lost then lost.DisplayName else "", reason = reason })
 end
 
-interruptRebuildHold = function(restored: number)
+cancelHoldForRebuild = function()
 	local interrupted = if phase == "Holding" then holder else nil
 	if interrupted then drop("rebuild") end
+	return interrupted
+end
+interruptRebuildHold = function(restored: number, interrupted: Player?)
 	local current = mountain
 	if current == nil then return end
 	local params = RaycastParams.new()
@@ -583,7 +615,7 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- TikTok ------------------------------------------------------------------------
-local function onTikTok(event: TikTokFeed.Event)
+local function processTikTok(event: TikTokFeed.Event)
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
 		local name = string.lower(event.gift)
 		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
@@ -617,18 +649,64 @@ local function onTikTok(event: TikTokFeed.Event)
 		text = who .. " shared the live"
 	end
 	if amount <= 0 and event.type ~= "gift" then return end
-	local centre, applied = applyStone(amount)
+	local current = mountain
+	local centreKey = if current then current.grid:randomExposed() else nil
+	local preview = if current and centreKey then current:keyPosition(centreKey) else Vector3.new(0, 8, 0)
+	local available = if current then current:remaining() else 0
+	local blocks = if phase == "Won" or phase == "Rebuilding" then nil elseif amount < 0 then -math.min(-amount, math.max(0, growthCapacity() - available)) else math.min(amount, available)
+	-- Start the animation promptly while the queued rock work spans frames.
 	if event.type == "gift" then
 		Notify:FireAllClients("giftEffect", {
 			coins = math.max(1, event.coins or 1) * math.max(1, math.floor(event.count or 1)),
-			position = centre or Vector3.new(0, 8, 0),
+			position = preview,
 			name = who,
 			gift = event.gift or "Gift",
 			adding = amount < 0,
-			blocks = applied,
+			blocks = blocks,
 		})
 	end
+	local _centre, applied = applyStone(amount, centreKey)
 	Notify:FireAllClients("feed", { text = text .. (if applied == nil then " (queued)" elseif amount < 0 and applied == 0 then " (mountain full)" else ""), stone = applied or amount, kind = event.type })
+end
+
+-- One yielding worker owns all gift mutations; polling stays responsive and
+-- overlapping live/test events cannot corrupt the grid or overtake each other.
+local giftQueue: { TikTokFeed.Event } = {}
+local giftHead = 1
+local giftWorkerRunning = false
+local function onTikTok(event: TikTokFeed.Event)
+	table.insert(giftQueue, event)
+	State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
+	if giftWorkerRunning then return end
+	giftWorkerRunning = true
+	task.spawn(function()
+		local workerFrameStart = os.clock()
+		while giftHead <= #giftQueue do
+			while stoneBusy do task.wait() end
+			local nextEvent = giftQueue[giftHead]
+			giftHead += 1
+			State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
+			stoneBusy = true
+			State:SetAttribute("GiftProcessing", true)
+			local ok, problem = pcall(processTikTok, nextEvent)
+			stoneBusy = false
+			if not ok then warn("[DiamondRush] gift failed: " .. tostring(problem)) end
+			if requestedRound ~= nil then
+				local animated = requestedRound
+				requestedRound = nil
+				newRound(animated)
+			end
+			State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
+			if os.clock() - workerFrameStart >= 0.003 then
+				task.wait()
+				workerFrameStart = os.clock()
+			end
+		end
+		table.clear(giftQueue)
+		giftHead = 1
+		giftWorkerRunning = false
+		State:SetAttribute("GiftProcessing", false)
+	end)
 end
 
 TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, function(status: string)
@@ -741,7 +819,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
 		local current = mountain
-		if current == nil or phase == "Won" or phase == "Rebuilding" or holder == player or typeof(value) ~= "Instance" or value == diamond then
+		if stoneBusy or current == nil or phase == "Won" or phase == "Rebuilding" or holder == player or typeof(value) ~= "Instance" or value == diamond then
 			return
 		end
 		local now = os.clock()

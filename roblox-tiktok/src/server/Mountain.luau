@@ -17,6 +17,46 @@ local ROCK = {
 }
 local FLYING_LIMIT = 8
 
+-- Fixed-size pages keep numeric part lookups from resizing a large sparse map
+-- as gifts move the visible rock surface through tens of thousands of cells.
+local function newPartMap(): { [number]: BasePart }
+	local pages: { [number]: { BasePart } } = {}
+	return setmetatable({}, {
+		__index = function(_self, key: number)
+			local page = pages[key // 256]
+			return if page then page[key % 256 + 1] else nil
+		end,
+		__newindex = function(_self, key: number, value: BasePart?)
+			local index = key // 256
+			local page = pages[index]
+			if page == nil then
+				if value == nil then return end
+				page = table.create(256)
+				pages[index] = page
+			end
+			page[key % 256 + 1] = value
+		end,
+		__iter = function()
+			local pageIndex: number? = nil
+			local page: { BasePart }? = nil
+			local slot = 257
+			return function(): (number?, BasePart?)
+				while true do
+					if slot > 256 then
+						pageIndex, page = next(pages, pageIndex)
+						if pageIndex == nil then return nil end
+						slot = 1
+					end
+					local value = (page :: { BasePart })[slot]
+					local key = (pageIndex :: number) * 256 + slot - 1
+					slot += 1
+					if value then return key, value end
+				end
+			end
+		end,
+	}) :: any
+end
+
 export type Mountain = typeof(setmetatable(
 	{} :: {
 		grid: Grid.Grid,
@@ -49,7 +89,7 @@ function Mountain.new(parent: Instance, stones: number, blockSize: number, onDia
 	local self = setmetatable({
 		grid = grid,
 		folder = folder,
-		parts = {},
+		parts = newPartMap(),
 		keys = {},
 		tops = {},
 		blockSize = blockSize,
@@ -150,18 +190,32 @@ function Mountain._drawShell(self: Mountain, key: number)
 end
 
 -- Reconcile only the changed cells and the two surrounding rock layers.
-function Mountain.restore(self: Mountain, count: number, near: Vector3?): (number, { any })
+function Mountain.restore(self: Mountain, count: number, near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
 	local focus = if near then { x = near.X / self.blockSize, z = near.Z / self.blockSize, radius = 4 / self.blockSize } else nil
-	local restored = self.grid:restore(count, focus)
+	local restored = self.grid:restore(count, focus, checkpoint)
+	if capacity and #restored < count then
+		local grown = self.grid:grow(count - #restored, capacity, checkpoint)
+		for index, key in grown do
+			if checkpoint and index % 256 == 0 then checkpoint() end
+			table.insert(restored, key)
+			local x, y, z = Grid.coords(key)
+			local column = Grid.key(x, 0, z)
+			self.tops[column] = math.max(self.tops[column] or 0, y)
+		end
+	end
 	local affected = {}
-	for _, key in restored do
+	for index, key in restored do
+		if checkpoint and index % 128 == 0 then checkpoint() end
 		affected[key] = true
 		for _, neighbour in self.grid:solidNeighbours(key) do
 			affected[neighbour] = true
 			for _, second in self.grid:solidNeighbours(neighbour) do affected[second] = true end
 		end
 	end
+	local processed = 0
 	for key in affected do
+		processed += 1
+		if checkpoint and processed % 64 == 0 then checkpoint() end
 		local needed = self.grid.exposedIndex[key] ~= nil
 		if not needed then
 			for _, neighbour in self.grid:solidNeighbours(key) do
@@ -178,7 +232,8 @@ function Mountain.restore(self: Mountain, count: number, near: Vector3?): (numbe
 	end
 	self.grid:takeFresh()
 	local samples = {}
-	for _, key in restored do
+	for index, key in restored do
+		if checkpoint and index % 128 == 0 then checkpoint() end
 		local part = self.parts[key]
 		if part and not part:GetAttribute("BackingRock") then
 			table.insert(samples, { frame = part.CFrame, size = part.Size, colour = part.Color, part = part })
@@ -209,8 +264,9 @@ end
 
 -- After rocks are removed: drop their parts (a few fly off as rubble), draw the
 -- rocks that were uncovered, and check whether the diamond is now in the open.
-function Mountain._settle(self: Mountain, removed: { number }, centre: Vector3?)
+function Mountain._settle(self: Mountain, removed: { number }, centre: Vector3?, checkpoint: (() -> ())?)
 	for index, key in removed do
+		if checkpoint and index % 128 == 0 then checkpoint() end
 		local part: BasePart? = self.parts[key]
 		if part ~= nil then
 			self.parts[key] = nil
@@ -231,8 +287,21 @@ function Mountain._settle(self: Mountain, removed: { number }, centre: Vector3?)
 			end
 		end
 	end
-	for _, key in self.grid:takeFresh() do
-		self:_drawShell(key)
+	-- Reconcile each surviving surface/backing cell once instead of redrawing
+	-- the same neighbour up to six times after a large crater.
+	local needed = {}
+	for index, key in self.grid:takeFresh() do
+		if self.grid:isSolid(key) and self.grid.exposedIndex[key] then
+			needed[key] = true
+			for _, neighbour in self.grid:solidNeighbours(key) do needed[neighbour] = true end
+		end
+		if checkpoint and index % 128 == 0 then checkpoint() end
+	end
+	local drawn = 0
+	for key in needed do
+		self:_draw(key)
+		drawn += 1
+		if checkpoint and drawn % 32 == 0 then checkpoint() end
 	end
 	if not self.revealed and self.grid:isOpenAround(self.diamondKey) then
 		self.revealed = true
@@ -241,16 +310,16 @@ function Mountain._settle(self: Mountain, removed: { number }, centre: Vector3?)
 end
 
 -- Blasts `count` rocks as one crater; returns the crater centre.
-function Mountain.blast(self: Mountain, count: number): Vector3?
+function Mountain.blast(self: Mountain, count: number, checkpoint: (() -> ())?, centreKey: number?): Vector3?
 	if count <= 0 then
 		return nil
 	end
-	local keys, centreKey = self.grid:blast(count)
-	if centreKey == nil then
+	local keys, actualCentre = self.grid:blast(count, centreKey, checkpoint)
+	if actualCentre == nil then
 		return nil
 	end
-	local centre = self:keyPosition(centreKey)
-	self:_settle(keys, centre)
+	local centre = self:keyPosition(actualCentre)
+	self:_settle(keys, centre, checkpoint)
 	return centre
 end
 
@@ -287,7 +356,7 @@ end
 
 function Mountain.destroy(self: Mountain)
 	self.folder:Destroy()
-	table.clear(self.parts)
+	self.parts = {}
 	table.clear(self.keys)
 end
 

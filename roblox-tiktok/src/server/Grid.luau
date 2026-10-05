@@ -10,6 +10,75 @@ local OFFSET = 128
 local SPAN = 256
 local NEIGHBOURS = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
 
+-- Bit-packed pages avoid resizing a million-entry hash table during a gift.
+-- The dictionary interface keeps all callers using the same cell keys.
+local function newCellMap(): { [number]: boolean }
+	local pages: { [number]: buffer } = {}
+	local masks = { 1, 2, 4, 8, 16, 32, 64, 128 }
+	return setmetatable({}, {
+		__index = function(_self, key: number)
+			local page = pages[key // 4096]
+			if page == nil then return nil end
+			return if bit32.band(buffer.readu8(page, (key % 4096) // 8), masks[key % 8 + 1]) ~= 0 then true else nil
+		end,
+		__newindex = function(_self, key: number, value: boolean?)
+			local index = key // 4096
+			local page = pages[index]
+			if page == nil then
+				if not value then return end
+				page = buffer.create(512)
+				pages[index] = page
+			end
+			local offset, mask = (key % 4096) // 8, masks[key % 8 + 1]
+			local byte = buffer.readu8(page, offset)
+			buffer.writeu8(page, offset, if value then bit32.bor(byte, mask) else bit32.band(byte, bit32.bnot(mask)))
+		end,
+		__iter = function()
+			local pageIndex: number? = nil
+			local page: buffer? = nil
+			local slot = 4096
+			return function(): (number?, boolean?)
+				while true do
+					if slot >= 4096 then
+						pageIndex, page = next(pages, pageIndex)
+						if pageIndex == nil then return nil end
+						slot = 0
+					end
+					local bit = slot
+						slot += 1
+					if bit32.band(buffer.readu8(page :: buffer, bit // 8), masks[bit % 8 + 1]) ~= 0 then
+						return (pageIndex :: number) * 4096 + bit, true
+					end
+				end
+			end
+		end,
+	}) :: any
+end
+
+-- Surface indices change continuously as the frontier moves. Paging these
+-- numbers also avoids hash-table expansion pauses around large surface sizes.
+local function newIndexMap(): { [number]: number }
+	local pages: { [number]: buffer } = {}
+	return setmetatable({}, {
+		__index = function(_self, key: number)
+			local page = pages[key // 256]
+			if page == nil then return nil end
+			local value = buffer.readu32(page, key % 256 * 4)
+			return if value ~= 0 then value else nil
+		end,
+		__newindex = function(_self, key: number, value: number?)
+			local index = key // 256
+			local page = pages[index]
+			if page == nil then
+				if value == nil then return end
+				page = buffer.create(1024)
+				pages[index] = page
+			end
+			buffer.writeu32(page, key % 256 * 4, value or 0)
+		end,
+	}) :: any
+end
+
 export type Grid = typeof(setmetatable(
 	{} :: {
 		radius: number,
@@ -24,6 +93,9 @@ export type Grid = typeof(setmetatable(
 		rand: (number?, number?) -> number,
 		fresh: { number },
 		sealed: { [number]: boolean },
+		growthHeap: { number }?,
+		growthScores: { number }?,
+		growthQueued: { [number]: boolean }?,
 	},
 	Grid
 ))
@@ -49,16 +121,19 @@ function Grid.new(target: number, seed: number, rand: (number?, number?) -> numb
 	local self = setmetatable({
 		radius = radius,
 		height = height,
-		solid = {},
+		solid = newCellMap(),
 		order = {},
 		total = 0,
 		removed = 0,
 		removedOrder = {},
 		exposedList = {},
-		exposedIndex = {},
+		exposedIndex = newIndexMap(),
 		rand = rand,
 		fresh = {},
 		sealed = {},
+		growthHeap = nil,
+		growthScores = nil,
+		growthQueued = nil,
 	}, Grid)
 	local scale = 15 / radius
 	for z = -radius, radius do
@@ -192,6 +267,9 @@ function Grid.remove(self: Grid, key: number): boolean
 		return false
 	end
 	self.solid[key] = nil
+	self.growthHeap = nil
+	self.growthScores = nil
+	self.growthQueued = nil
 	self.removed += 1
 	table.insert(self.removedOrder, key)
 	self:_unexpose(key)
@@ -209,11 +287,12 @@ function Grid.remove(self: Grid, key: number): boolean
 end
 
 -- Refill recently excavated cells in reverse order, never the sealed diamond cell.
-function Grid.restore(self: Grid, count: number, focus: { x: number, z: number, radius: number }?): { number }
+function Grid.restore(self: Grid, count: number, focus: { x: number, z: number, radius: number }?, checkpoint: (() -> ())?): { number }
 	-- A rebuild during a hold fills the holder's column first, base upwards.
 	if focus then
 		local distant, nearby = {}, {}
-		for _, key in self.removedOrder do
+		for index, key in self.removedOrder do
+			if checkpoint and index % 256 == 0 then checkpoint() end
 			local x, y, z = Grid.coords(key)
 			local distance = (x - focus.x) ^ 2 + (z - focus.z) ^ 2
 			if distance <= focus.radius ^ 2 then
@@ -239,13 +318,18 @@ function Grid.restore(self: Grid, count: number, focus: { x: number, z: number, 
 			self.solid[key] = true
 			self.removed -= 1
 			table.insert(restored, key)
+			if checkpoint and #restored % 256 == 0 then checkpoint() end
 			affected[key] = true
 			for _, neighbour in self:solidNeighbours(key) do affected[neighbour] = true end
 		end
 	end
+	local processed = 0
 	for key in affected do
+		processed += 1
+		if checkpoint and processed % 256 == 0 then checkpoint() end
 		if self:isExposed(key) then self:_expose(key) else self:_unexpose(key) end
 	end
+	if #restored > 0 then self.growthHeap = nil; self.growthScores = nil; self.growthQueued = nil end
 	return restored
 end
 
@@ -301,7 +385,7 @@ end
 -- Blasts up to `count` cells as one crater around a random exposed cell (or
 -- `centre`): the nearest cells to the centre go first, and the crater only
 -- grows through cells it has opened up. Returns the removed keys and the centre.
-function Grid.blast(self: Grid, count: number, centre: number?): ({ number }, number?)
+function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?): ({ number }, number?)
 	local removed: { number } = {}
 	local start = if centre ~= nil and self.solid[centre] and self.exposedIndex[centre] then centre else self:randomExposed()
 	if start == nil then
@@ -336,6 +420,7 @@ function Grid.blast(self: Grid, count: number, centre: number?): ({ number }, nu
 		local key = item[2]
 		if self:remove(key) then
 			table.insert(removed, key)
+			if checkpoint and #removed % 256 == 0 then checkpoint() end
 			local x, y, z = Grid.coords(key)
 			for _, step in NEIGHBOURS do
 				local ny = y + step[2]
@@ -346,6 +431,90 @@ function Grid.blast(self: Grid, count: number, centre: number?): ({ number }, nu
 		end
 	end
 	return removed, start
+end
+
+-- Expand the rock's surface without generating a replacement mountain.
+-- Existing tunnels are restored first by Mountain.restore; the sealed diamond
+-- cell is never filled. The cached frontier keeps consecutive growth gifts cheap.
+function Grid.grow(self: Grid, count: number, capacity: number, checkpoint: (() -> ())?): { number }
+	count = math.min(math.max(0, math.floor(count)), math.max(0, capacity - self.total))
+	local added = {}
+	if count == 0 then return added end
+	local heap = self.growthHeap or {}
+	local scores = self.growthScores or {}
+	local queued = self.growthQueued or {}
+	-- Parallel numeric arrays avoid allocating a tiny table for every new cell.
+	local function pushCandidate(key: number, score: number)
+		local i = #heap + 1
+		while i > 1 do
+			local parent = i // 2
+			if scores[parent] <= score then break end
+			heap[i], scores[i] = heap[parent], scores[parent]
+			i = parent
+		end
+		heap[i], scores[i] = key, score
+	end
+	local function popCandidate(): number?
+		local count = #heap
+		if count == 0 then return nil end
+		local key = heap[1]
+		local last, lastScore = heap[count], scores[count]
+		heap[count], scores[count] = nil, nil
+		count -= 1
+		if count > 0 then
+			local i = 1
+			while i * 2 <= count do
+				local child = i * 2
+				if child + 1 <= count and scores[child + 1] < scores[child] then child += 1 end
+				if lastScore <= scores[child] then break end
+				heap[i], scores[i] = heap[child], scores[child]
+				i = child
+			end
+			heap[i], scores[i] = last, lastScore
+		end
+		queued[key] = nil
+		return key
+	end
+	local function enqueue(x: number, y: number, z: number)
+		if y < 0 or x * x + z * z > (OFFSET - 4) ^ 2 then return end
+		local key = Grid.key(x, y, z)
+		if self.solid[key] or self.sealed[key] or queued[key] then return end
+		queued[key] = true
+		pushCandidate(key, x * x + z * z + (y * 1.6) ^ 2)
+	end
+	if self.growthHeap == nil then
+		for index, key in self.exposedList do
+			local x, y, z = Grid.coords(key)
+			for _, step in NEIGHBOURS do enqueue(x + step[1], y + step[2], z + step[3]) end
+			if checkpoint and index % 256 == 0 then checkpoint() end
+		end
+		-- A cleared mountain can still be rebuilt (normally restore handles it).
+		if #heap == 0 then enqueue(0, 0, 0) end
+	end
+	self.growthHeap, self.growthScores, self.growthQueued = heap, scores, queued
+	while #added < count do
+		local key = popCandidate()
+		if key == nil then break end
+		if self.solid[key] or self.sealed[key] then continue end
+		self.solid[key] = true
+		self.total += 1
+		table.insert(self.order, key)
+		table.insert(added, key)
+		local x, y, z = Grid.coords(key)
+		self.radius = math.max(self.radius, math.ceil(math.sqrt(x * x + z * z)))
+		self.height = math.max(self.height, y + 1)
+		if self:isExposed(key) then self:_expose(key) end
+		for _, step in NEIGHBOURS do
+			local nx, ny, nz = x + step[1], y + step[2], z + step[3]
+			if ny >= 0 then
+				local neighbour = Grid.key(nx, ny, nz)
+				if self.solid[neighbour] and not self:isExposed(neighbour) then self:_unexpose(neighbour) end
+				enqueue(nx, ny, nz)
+			end
+		end
+		if checkpoint and #added % 256 == 0 then checkpoint() end
+	end
+	return added
 end
 
 -- Newly exposed cells since the last call (for drawing them).
