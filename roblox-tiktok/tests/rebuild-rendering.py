@@ -38,19 +38,39 @@ s=(Path(sys.argv[2]) if len(sys.argv)>2 else root/'src/server/Mountain.luau').re
 suffix=r'''
 end)()
 local mountain=Mountain.new({},250000,1,function() end,false)
-mountain:blast(100000)
+local openingBeforeFinish=false
+local beforeBlast=mountain:remaining()
+local initialParts={}
+for _,part in mountain.parts do table.insert(initialParts,part) end
+mountain:blast(100000,nil)
+-- Repeat with checkpoints to observe geometry while the grid is still working.
+mountain:restore(100000,nil,500000)
+beforeBlast=mountain:remaining()
+initialParts={}
+for _,part in mountain.parts do table.insert(initialParts,part) end
+mountain:blast(100000,function()
+ if mountain:remaining()>beforeBlast-100000 then
+  for _,part in initialParts do if part.destroyed then openingBeforeFinish=true;break end end
+ end
+end)
+assert(openingBeforeFinish,"blast must change geometry before full count calculation finishes")
 local start=mountain:remaining()
 local createdBefore=#instances
 local started=os.clock()
 local checks=0
-local restored=mountain:restore(100000,nil,500000,function() checks+=1 end)
+local placementBeforeFinish=false
+local restored=mountain:restore(100000,nil,500000,function()
+ checks+=1
+ if mountain:remaining()<start+100000 and #instances>createdBefore then placementBeforeFinish=true end
+end)
+assert(placementBeforeFinish,"refill must place real rocks before full count calculation finishes")
 print(string.format("100k refill: %.3f CPU seconds, %d new instances",os.clock()-started,#instances-createdBefore))
 assert(restored==100000 and mountain:remaining()==start+100000)
 local function noTemporaryShells(first)
  if BENCHMARK then return end
- for i=first+1,#instances do
-  assert(not instances[i].destroyed,"rebuild must not create then discard temporary shell rocks")
- end
+ local transient=0
+ for i=first+1,#instances do if instances[i].destroyed then transient+=1 end end
+ assert(transient<=448,"immediate preview must stay bounded, not rebuild every intermediate layer")
 end
 noTemporaryShells(createdBefore)
 local function verify()
@@ -64,7 +84,12 @@ end
 verify()
 createdBefore=#instances
 started=os.clock()
-local grown=mountain:restore(100000,nil,500000)
+local growthStart=mountain:remaining()
+local growthBeforeFinish=false
+local grown=mountain:restore(100000,nil,500000,function()
+ if mountain:remaining()<growthStart+100000 and #instances>createdBefore then growthBeforeFinish=true end
+end)
+assert(growthBeforeFinish,"growth must place rocks before full count calculation finishes")
 print(string.format("100k growth: %.3f CPU seconds, %d new instances",os.clock()-started,#instances-createdBefore))
 assert(grown==100000)
 noTemporaryShells(createdBefore)

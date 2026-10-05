@@ -516,7 +516,7 @@ local function workCheckpoint(onYield: (() -> ())?): () -> ()
 	return function()
 		if os.clock() - frameStart >= 0.003 then
 			if os.clock() - lastCountUpdate >= 0.1 then
-				refreshStone()
+				-- Publish the final count after geometry is reconciled, not ahead of it.
 				if onYield then onYield() end
 				lastCountUpdate = os.clock()
 			end
@@ -1426,7 +1426,7 @@ function Grid.remove(self: Grid, key: number): boolean
 end
 
 -- Refill recently excavated cells in reverse order, never the sealed diamond cell.
-function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?, z: number, radius: number? }?, checkpoint: (() -> ())?): { number }
+function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?, z: number, radius: number? }?, checkpoint: (() -> ())?, onAdded: ((number) -> ())?): { number }
 	-- Bucket integer squared distances so large refills avoid sorting every
 	-- missing rock. Pop nearest buckets first, leaving the gem cell reserved.
 	if focus and focus.y ~= nil then
@@ -1480,6 +1480,7 @@ function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?,
 			self.solid[key] = true
 			self.removed -= 1
 			table.insert(restored, key)
+			if onAdded then onAdded(key) end
 			if checkpoint and #restored % 256 == 0 then checkpoint() end
 			affected[key] = true
 			for _, neighbour in self:solidNeighbours(key) do affected[neighbour] = true end
@@ -1547,7 +1548,7 @@ end
 -- Blasts up to `count` cells as one crater around a random exposed cell (or
 -- `centre`): the nearest cells to the centre go first, and the crater only
 -- grows through cells it has opened up. Returns the removed keys and the centre.
-function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?): ({ number }, number?)
+function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?, onRemoved: ((number) -> ())?): ({ number }, number?)
 	local removed: { number } = {}
 	local start = if centre ~= nil and self.solid[centre] and self.exposedIndex[centre] then centre else self:randomExposed()
 	if start == nil then
@@ -1582,6 +1583,7 @@ function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() 
 		local key = item[2]
 		if self:remove(key) then
 			table.insert(removed, key)
+			if onRemoved then onRemoved(key) end
 			if checkpoint and #removed % 256 == 0 then checkpoint() end
 			local x, y, z = Grid.coords(key)
 			for _, step in NEIGHBOURS do
@@ -1598,7 +1600,7 @@ end
 -- Expand the rock's surface without generating a replacement mountain.
 -- Existing tunnels are restored first by Mountain.restore; the sealed diamond
 -- cell is never filled. The cached frontier keeps consecutive growth gifts cheap.
-function Grid.grow(self: Grid, count: number, capacity: number, checkpoint: (() -> ())?): { number }
+function Grid.grow(self: Grid, count: number, capacity: number, checkpoint: (() -> ())?, onAdded: ((number) -> ())?): { number }
 	count = math.min(math.max(0, math.floor(count)), math.max(0, capacity - self.total))
 	local added = {}
 	if count == 0 then return added end
@@ -1674,6 +1676,7 @@ function Grid.grow(self: Grid, count: number, capacity: number, checkpoint: (() 
 				enqueue(nx, ny, nz)
 			end
 		end
+		if onAdded then onAdded(key) end
 		if checkpoint and #added % 256 == 0 then checkpoint() end
 	end
 	return added
@@ -1939,13 +1942,26 @@ function Mountain._drawShell(self: Mountain, key: number)
 	end
 end
 
--- Change the data first, then reconcile only the final visible shell.
+-- Show a bounded first group during calculation, then draw the final shell.
 function Mountain.restore(self: Mountain, count: number, _near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
 	local dx, dy, dz = Grid.coords(self.diamondKey)
 	local focus = { x = dx, y = dy, z = dz }
-	local restored = self.grid:restore(count, focus, checkpoint)
+	local previewed = 0
+	local function startPlacement(key: number)
+		-- Only the first 32 cells get an immediate shell. Never render every
+		-- intermediate layer of a 100k refill again.
+		if previewed >= 32 then return end
+		previewed += 1
+		local neighbours = self.grid:solidNeighbours(key)
+		table.insert(neighbours, key)
+		for _, cell in neighbours do
+			if self.grid:isExposed(cell) then self.grid:_expose(cell) else self.grid:_unexpose(cell) end
+		end
+		self:_drawShell(key)
+	end
+	local restored = self.grid:restore(count, focus, checkpoint, startPlacement)
 	if capacity and #restored < count then
-		local grown = self.grid:grow(count - #restored, capacity, checkpoint)
+		local grown = self.grid:grow(count - #restored, capacity, checkpoint, startPlacement)
 		for index, key in grown do
 			if checkpoint and index % 256 == 0 then checkpoint() end
 			table.insert(restored, key)
@@ -2075,7 +2091,16 @@ function Mountain.blast(self: Mountain, count: number, checkpoint: (() -> ())?, 
 	if count <= 0 then
 		return nil
 	end
-	local keys, actualCentre = self.grid:blast(count, centreKey, checkpoint)
+	local keys, actualCentre = self.grid:blast(count, centreKey, checkpoint, function(key)
+		-- Remove rendered rocks before the calculation yields, so the crater
+		-- starts opening immediately instead of waiting for all cell accounting.
+		local part = self.parts[key]
+		if part then
+			self.keys[part] = nil
+			self.parts[key] = nil
+			part:Destroy()
+		end
+	end)
 	if actualCentre == nil then
 		return nil
 	end
