@@ -2433,7 +2433,7 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
  atmosphere.Density=0.3; atmosphere.Offset=0.15; atmosphere.Color=Color3.fromRGB(213,228,232)
  atmosphere.Decay=Color3.fromRGB(157,176,189); atmosphere.Haze=1.8; atmosphere.Glare=0.15; atmosphere.Parent=Lighting
  local grade=Instance.new("ColorCorrectionEffect"); grade.Name="AlpineColour"
- grade.Brightness=0.015; grade.Contrast=0.08; grade.Saturation=-0.1; grade.TintColor=Color3.fromRGB(255,248,237); grade.Parent=Lighting
+ grade.Brightness=0.015; grade.Contrast=0.08; grade.Saturation=0.3; grade.TintColor=Color3.fromRGB(255,248,237); grade.Parent=Lighting
  local bloom=Instance.new("BloomEffect"); bloom.Intensity=0.12; bloom.Size=18; bloom.Threshold=1.6; bloom.Parent=Lighting
  local clouds=terrain:FindFirstChildOfClass("Clouds") or Instance.new("Clouds")
  clouds.Cover=0.38; clouds.Density=0.45; clouds.Color=Color3.fromRGB(245,241,230); clouds.Parent=terrain
