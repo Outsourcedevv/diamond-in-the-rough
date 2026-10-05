@@ -552,8 +552,10 @@ end
 function Grid.pickHiddenCell(self: Grid): number
 	local buried: { number } = {}
 	for _, key in self.order do
-		local _, y, _ = Grid.coords(key)
-		if self.solid[key] and not self:isExposed(key) and y < self.height * 2 / 3 then
+		local x, y, z = Grid.coords(key)
+		if self.solid[key] and not self:isExposed(key)
+			and y >= math.max(1, math.floor(self.height * 0.15)) and y <= self.height * 0.35
+			and x * x + z * z <= (self.radius * 0.3) ^ 2 then
 			table.insert(buried, key)
 		end
 	end

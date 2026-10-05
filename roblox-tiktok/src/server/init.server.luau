@@ -236,34 +236,12 @@ local function showDiamond(visible: boolean)
 	click.MaxActivationDistance = if visible and phase == "Revealed" then PICKUP_DISTANCE else 0
 end
 
--- Use the actual stone/terrain surface, including the enlarged rock facets.
--- The grid's cell height can put a tilted diamond inside the visible stone.
-local function diamondLanding(where: Vector3): Vector3
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	local ignore: { Instance } = { diamond }
-	for _, player in Players:GetPlayers() do
-		if player.Character then table.insert(ignore, player.Character) end
-	end
-	params.FilterDescendantsInstances = ignore
-	local origin = Vector3.new(where.X, math.max(where.Y + blockSize * 2, 2), where.Z)
-	local hit = workspace:Raycast(origin, Vector3.new(0, -2000, 0), params)
-	-- Bounding sphere covers every corner of the rotated gem, plus a small gap.
-	local clearance = diamond.Size.Magnitude / 2 + 0.04
-	local surface = if hit then math.max(0, hit.Position.Y) else 0
-	return Vector3.new(where.X, surface + clearance, where.Z)
-end
-
+-- The find stays at its reserved lower, central cell even when support is dug
+-- away. Only carrying it unanchors it; releasing it returns it to that cell.
 local function settleDiamond()
 	if phase ~= "Revealed" or mountain == nil or not diamond.Anchored then return end
-	local landing = diamondLanding(diamond.Position)
-	if math.abs(landing.Y - diamond.Position.Y) > 0.02 then
-		stopSettling()
-		settling = TweenService:Create(diamond, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			CFrame = CFrame.new(landing) * DIAMOND_TILT,
-		})
-		settling:Play()
-	end
+	stopSettling()
+	diamond.CFrame = CFrame.new(mountain:keyPosition(mountain.diamondKey)) * DIAMOND_TILT
 end
 
 local function reveal()
@@ -318,7 +296,7 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 		refreshStone()
 		if phase == "Revealed" then
 			stopSettling()
-			diamond.CFrame = CFrame.new(diamondLanding(Vector3.new(diamond.Position.X, current.grid.height * blockSize * 2 + 8, diamond.Position.Z))) * DIAMOND_TILT
+			settleDiamond()
 		end
 		Notify:FireAllClients("restore", { stones = samples, count = restored })
 		return (if #samples > 0 then samples[1].frame.Position else nil), -restored
@@ -500,7 +478,6 @@ local function drop(reason: string)
 		return
 	end
 	stopSettling()
-	local where = diamond.Position
 	local lost = holder
 	holder = nil
 	holdStarted = 0
@@ -511,7 +488,7 @@ local function drop(reason: string)
 	end
 	diamond.Anchored = true
 	diamond.AssemblyLinearVelocity = Vector3.zero
-	diamond.CFrame = CFrame.new(diamondLanding(where)) * DIAMOND_TILT
+	if mountain then diamond.CFrame = CFrame.new(mountain:keyPosition(mountain.diamondKey)) * DIAMOND_TILT end
 	setPhase("Revealed")
 	showDiamond(true)
 	State:SetAttribute("Holder", "")
@@ -564,11 +541,7 @@ interruptRebuildHold = function(restored: number, interrupted: Player?)
 			root.AssemblyLinearVelocity = Vector3.zero
 			root.AssemblyAngularVelocity = Vector3.zero
 		end
-		if player == interrupted then
-			-- Leave the released diamond beside the player's safe landing point.
-			local where = root.Position + Vector3.new(1.2, 0, 0)
-			diamond.CFrame = CFrame.new(diamondLanding(Vector3.new(where.X, height, where.Z))) * DIAMOND_TILT
-		end
+
 	end
 end
 
@@ -662,7 +635,7 @@ local function processTikTok(event: TikTokFeed.Event)
 			name = who,
 			gift = event.gift or "Gift",
 			adding = amount < 0,
-			blocks = blocks,
+			blocks = if amount < 0 then nil else blocks,
 		})
 	end
 	local _centre, applied = applyStone(amount, centreKey)
