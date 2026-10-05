@@ -2253,21 +2253,49 @@ local function rounded(parent: Instance, name: string, size: Vector3, frame: CFr
  roundPart.Shape=Enum.PartType.Ball
  return p
 end
-local function woodlandTree(parent: Instance, at: Vector3, height: number)
+local function branch(parent: Instance, name: string, a: Vector3, b: Vector3, width: number, colour: Color3): BasePart
+ local delta=b-a
+ local p=piece(parent,name,Vector3.new(delta.Magnitude,width,width),CFrame.lookAt((a+b)/2,b)*CFrame.Angles(0,math.pi/2,0),colour,Enum.Material.Wood)
+ local cylinder=p :: Part
+ cylinder.Shape=Enum.PartType.Cylinder
+ return p
+end
+local function woodlandTree(parent: Instance, at: Vector3, height: number, detailed: boolean)
  local model=Instance.new("Model"); model.Name="WoodlandTree"; model.Parent=parent
- local trunk=piece(model,"Bark",Vector3.new(height*0.72,0.8,0.8),CFrame.new(at+Vector3.new(0,height*0.36,0))*CFrame.Angles(0,0,math.pi/2),Color3.fromRGB(86,77,62),Enum.Material.Wood)
- local trunkPart = trunk :: Part
- trunkPart.Shape=Enum.PartType.Cylinder
- -- Irregular overlapping leaf masses, with branching silhouettes and textured
- -- foliage rather than stacked geometric tiers. Variation stays deterministic.
- for i=1,13 do
-  local angle=i*2.39996+random:NextNumber(-0.3,0.3)
-  local spread=height*random:NextNumber(0.12,0.27)
-  local level=height*random:NextNumber(0.58,0.89)
-  local width=height*random:NextNumber(0.22,0.37)
-  local shade=random:NextInteger(-9,12)
-  rounded(model,"Foliage",Vector3.new(width,width*0.65,width*0.85),CFrame.new(at+Vector3.new(math.cos(angle)*spread,level,math.sin(angle)*spread))*CFrame.Angles(random:NextNumber(-0.3,0.3),angle,0),Color3.fromRGB(66+shade,88+shade,52+shade),Enum.Material.LeafyGrass)
+ local birch=random:NextNumber()<0.3
+ local bark=if birch then Color3.fromRGB(193,189,168) else Color3.fromRGB(85,72,55)
+ local yaw=random:NextNumber(0,math.pi*2)
+ local lean=Vector3.new(math.cos(yaw)*height*0.05,0,math.sin(yaw)*height*0.05)
+ local trunkTop=at+Vector3.new(0,height*0.7,0)+lean
+ local joints={at,at+Vector3.new(0,height*0.25,0)+lean*0.3,at+Vector3.new(0,height*0.48,0)+lean*0.65,trunkTop}
+ if detailed then
+  for i=1,3 do branch(model,"TaperedBark",joints[i],joints[i+1],height*(0.048-i*0.008),bark) end
+  for i=1,3 do
+   local angle=yaw+i*math.pi*2/3
+   branch(model,"RootFlare",at+Vector3.new(0,0.7,0),at+Vector3.new(math.cos(angle)*1.5,0.12,math.sin(angle)*1.5),0.45,bark)
+  end
+ else branch(model,"Bark",at,trunkTop,height*0.03,bark) end
+ local crownCount=if detailed then 6 else 5
+ for i=1,crownCount do
+  local angle=yaw+i*2.39996+random:NextNumber(-0.35,0.35)
+  local spread=height*random:NextNumber(0.13,if birch then 0.2 else 0.29)
+  local tip=at+lean+Vector3.new(math.cos(angle)*spread,height*random:NextNumber(0.63,0.85),math.sin(angle)*spread)
+  if detailed then
+   branch(model,"CrownBranch",joints[3],tip,height*0.012,bark)
+   if birch then
+    local band=piece(model,"BirchMark",Vector3.new(0.07,0.14,0.5),CFrame.new(at+lean*0.45+Vector3.new(0.34,height*(0.22+i*0.06),0))*CFrame.Angles(0,yaw,0),Color3.fromRGB(70,68,57),Enum.Material.Wood)
+    band.CastShadow=false
+   end
+  end
+  local width=height*random:NextNumber(0.23,0.34)
+  local shade=random:NextInteger(-7,13)
+  local green=if birch then Color3.fromRGB(95+shade,119+shade,59+shade) else Color3.fromRGB(67+shade,96+shade,51+shade)
+  rounded(model,"LeafCrown",Vector3.new(width,width*0.72,width*0.8),CFrame.new(tip)*CFrame.Angles(0,angle,random:NextNumber(-0.2,0.2)),green,Enum.Material.LeafyGrass)
+  if detailed then
+   rounded(model,"LeafTips",Vector3.new(width*0.65,width*0.5,width*0.7),CFrame.new(tip+Vector3.new(math.cos(angle)*width*0.22,width*0.35,math.sin(angle)*width*0.22)),green,Enum.Material.LeafyGrass)
+  end
  end
+ rounded(model,"UpperCrown",Vector3.new(height*0.3,height*0.24,height*0.3),CFrame.new(trunkTop+Vector3.new(0,height*0.16,0)),Color3.fromRGB(89,112,62),Enum.Material.LeafyGrass)
 end
 local function landscape(terrain: Terrain, lake: Vector3, camp: Vector3, radius: number)
  -- Smooth connected terrain, generated in small voxel chunks once on startup.
@@ -2352,12 +2380,22 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
  lantern(folder,dock+Vector3.new(0,0,-4.2))
  -- Ground sampling prevents trees and flowers floating over the rolling hills.
  local planted=0
- for _=1,600 do
-  if planted>=72 then break end
+ local treePositions = {}
+ for _=1,1600 do
+  if planted>=128 then break end
   local angle=random:NextNumber(0,math.pi*2)
   local distance=random:NextNumber(clearRadius+15,260)
   local at=ground(math.cos(angle)*distance,math.sin(angle)*distance)
-  if not clear(at) then woodlandTree(folder,at,random:NextNumber(17,29)); planted+=1 end
+  local spaced=true
+  for _,other in treePositions do
+   if (at-other).Magnitude<8 then spaced=false; break end
+  end
+  if spaced and not clear(at) then
+   woodlandTree(folder,at,random:NextNumber(17,33),distance<150)
+   table.insert(treePositions,at)
+   planted+=1
+   if planted%16==0 then task.wait() end
+  end
  end
  local flowerColours={Color3.fromRGB(198,167,215),Color3.fromRGB(248,215,135),Color3.fromRGB(235,231,208)}
  for _=1,95 do
@@ -2426,16 +2464,16 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
   piece(folder,"SeatPad",Vector3.new(2.8,0.12,1.1),seat*CFrame.new(0,1.24,0),Color3.fromRGB(121,100,78),Enum.Material.Fabric)
  end
  lantern(folder,camp+Vector3.new(-9,0,-8)); lantern(folder,camp+Vector3.new(9,0,-8))
- Lighting.ClockTime=17.1; Lighting.Brightness=2
- Lighting.GlobalShadows=true; Lighting.ShadowSoftness=0.45
- Lighting.Ambient=Color3.fromRGB(69,76,82); Lighting.OutdoorAmbient=Color3.fromRGB(111,119,119)
+ Lighting.ClockTime=16.2; Lighting.Brightness=3
+ Lighting.GlobalShadows=true; Lighting.ShadowSoftness=0.55
+ Lighting.Ambient=Color3.fromRGB(94,102,108); Lighting.OutdoorAmbient=Color3.fromRGB(143,150,144)
  Lighting.ColorShift_Top=Color3.fromRGB(25,15,6)
- Lighting.EnvironmentDiffuseScale=0.65; Lighting.EnvironmentSpecularScale=0.7
+ Lighting.EnvironmentDiffuseScale=0.8; Lighting.EnvironmentSpecularScale=0.7
  local atmosphere=Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
- atmosphere.Density=0.3; atmosphere.Offset=0.15; atmosphere.Color=Color3.fromRGB(213,228,232)
- atmosphere.Decay=Color3.fromRGB(157,176,189); atmosphere.Haze=1.8; atmosphere.Glare=0.15; atmosphere.Parent=Lighting
+ atmosphere.Density=0.25; atmosphere.Offset=0.15; atmosphere.Color=Color3.fromRGB(213,228,232)
+ atmosphere.Decay=Color3.fromRGB(157,176,189); atmosphere.Haze=1.2; atmosphere.Glare=0.15; atmosphere.Parent=Lighting
  local grade=Instance.new("ColorCorrectionEffect"); grade.Name="AlpineColour"
- grade.Brightness=0.015; grade.Contrast=0.08; grade.Saturation=0.3; grade.TintColor=Color3.fromRGB(255,248,237); grade.Parent=Lighting
+ grade.Brightness=0.025; grade.Contrast=0.06; grade.Saturation=0.3; grade.TintColor=Color3.fromRGB(255,248,237); grade.Parent=Lighting
  local bloom=Instance.new("BloomEffect"); bloom.Intensity=0.12; bloom.Size=18; bloom.Threshold=1.6; bloom.Parent=Lighting
  local clouds=terrain:FindFirstChildOfClass("Clouds") or Instance.new("Clouds")
  clouds.Cover=0.38; clouds.Density=0.45; clouds.Color=Color3.fromRGB(245,241,230); clouds.Parent=terrain
