@@ -189,8 +189,8 @@ function Mountain._drawShell(self: Mountain, key: number)
 	end
 end
 
--- Reconcile only the changed cells and the two surrounding rock layers.
-function Mountain._restoreBatch(self: Mountain, count: number, near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
+-- Change the data first, then reconcile only the final visible shell.
+function Mountain.restore(self: Mountain, count: number, near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
 	local focus = if near then { x = near.X / self.blockSize, z = near.Z / self.blockSize, radius = 4 / self.blockSize } else nil
 	local restored = self.grid:restore(count, focus, checkpoint)
 	if capacity and #restored < count then
@@ -203,39 +203,32 @@ function Mountain._restoreBatch(self: Mountain, count: number, near: Vector3?, c
 			self.tops[column] = math.max(self.tops[column] or 0, y)
 		end
 	end
-	-- Visit each changed cell's neighbourhood once, rather than expanding
-	-- all six neighbours again for every interior rock in a large refill.
-	local firstRing = {}
-	for index, key in restored do
-		firstRing[key] = true
-		for _, neighbour in self.grid:solidNeighbours(key) do firstRing[neighbour] = true end
+	if #restored == 0 then return 0, {} end
+	-- Interior cells need no instances and no per-cell rendering neighbourhood
+	-- scan. Draw the final surface plus one backing layer to close facet gaps.
+	local needed = {}
+	for index, key in self.grid.exposedList do
+		needed[key] = true
+		for _, neighbour in self.grid:solidNeighbours(key) do needed[neighbour] = true end
 		if checkpoint and index % 128 == 0 then checkpoint() end
 	end
-	local affected = {}
-	local expanded = 0
-	for key in firstRing do
-		affected[key] = true
-		for _, neighbour in self.grid:solidNeighbours(key) do affected[neighbour] = true end
-		expanded += 1
-		if checkpoint and expanded % 128 == 0 then checkpoint() end
-	end
 	local processed = 0
-	for key in affected do
+	for key in needed do
+		self:_draw(key)
 		processed += 1
-		if checkpoint and processed % 64 == 0 then checkpoint() end
-		local needed = self.grid.exposedIndex[key] ~= nil
-		if not needed then
-			for _, neighbour in self.grid:solidNeighbours(key) do
-				if self.grid.exposedIndex[neighbour] then needed = true; break end
-			end
-		end
-		if needed then self:_draw(key)
-		elseif self.parts[key] then
-			local part = self.parts[key]
+		if checkpoint and processed % 32 == 0 then checkpoint() end
+	end
+	-- Drop buried parts after drawing the replacement shell, avoiding holes
+	-- during replication. Digging will recreate them if they become exposed.
+	processed = 0
+	for key, part in self.parts do
+		if not needed[key] then
 			self.keys[part] = nil
 			self.parts[key] = nil
 			part:Destroy()
 		end
+		processed += 1
+		if checkpoint and processed % 128 == 0 then checkpoint() end
 	end
 	self.grid:takeFresh()
 	local samples = {}
@@ -248,24 +241,6 @@ function Mountain._restoreBatch(self: Mountain, count: number, near: Vector3?, c
 		end
 	end
 	return #restored, samples
-end
-
--- Commit visible geometry before starting the next batch. Previously the entire
--- gift (up to 1.5 million cells) was computed before the first rock appeared.
-function Mountain.restore(self: Mountain, count: number, near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
-	local total = 0
-	local samples = {}
-	while total < count do
-		local batch = math.min(2048, count - total)
-		local placed, stones = self:_restoreBatch(batch, if total == 0 then near else nil, capacity, checkpoint)
-		total += placed
-		for _, stone in stones do
-			if #samples < 24 then table.insert(samples, stone) end
-		end
-		if checkpoint then checkpoint() end
-		if placed < batch then break end
-	end
-	return total, samples
 end
 
 function Mountain.total(self: Mountain): number

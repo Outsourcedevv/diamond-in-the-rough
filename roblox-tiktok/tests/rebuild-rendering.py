@@ -34,25 +34,25 @@ local Debris={AddItem=function(_,p) p:Destroy() end}
 local task={wait=function() end}
 local Mountain=(function()
 '''
-s=(root/'src/server/Mountain.luau').read_text().replace('local Debris = game:GetService("Debris")','').replace('local Grid = require(script.Parent.Grid)','').replace('local RockStyle = require(script.Parent.RockStyle)','')
+s=(Path(sys.argv[2]) if len(sys.argv)>2 else root/'src/server/Mountain.luau').read_text(encoding='utf-8').replace('local Debris = game:GetService("Debris")','').replace('local Grid = require(script.Parent.Grid)','').replace('local RockStyle = require(script.Parent.RockStyle)','')
 suffix=r'''
 end)()
-local mountain=Mountain.new({},25000,1,function() end,false)
-mountain:blast(10000)
+local mountain=Mountain.new({},250000,1,function() end,false)
+mountain:blast(100000)
 local start=mountain:remaining()
-local removedKeys=table.clone(mountain.grid.removedOrder)
-local incremental=false
+local createdBefore=#instances
+local started=os.clock()
 local checks=0
-local restored=mountain:restore(10000,nil,50000,function()
- checks+=1
- if mountain:remaining() > start and mountain:remaining() < start+10000 then
-  for _,key in removedKeys do
-   local part=mountain.parts[key]
-   if part and not part.destroyed and part.Parent == mountain.folder and part.Transparency == 0 then incremental=true;break end
-  end
+local restored=mountain:restore(100000,nil,500000,function() checks+=1 end)
+print(string.format("100k refill: %.3f CPU seconds, %d new instances",os.clock()-started,#instances-createdBefore))
+assert(restored==100000 and mountain:remaining()==start+100000)
+local function noTemporaryShells(first)
+ if BENCHMARK then return end
+ for i=first+1,#instances do
+  assert(not instances[i].destroyed,"rebuild must not create then discard temporary shell rocks")
  end
-end)
-assert(restored==10000 and mountain:remaining()==start+10000)
+end
+noTemporaryShells(createdBefore)
 local function verify()
  for _,key in mountain.grid.exposedList do
   local p=mountain.parts[key]
@@ -62,17 +62,33 @@ local function verify()
  assert(not mountain.grid:isSolid(mountain.diamondKey),"diamond cell remains empty")
 end
 verify()
-local grown=mountain:restore(4096,nil,50000)
-assert(grown==4096)
+createdBefore=#instances
+started=os.clock()
+local grown=mountain:restore(100000,nil,500000)
+print(string.format("100k growth: %.3f CPU seconds, %d new instances",os.clock()-started,#instances-createdBefore))
+assert(grown==100000)
+noTemporaryShells(createdBefore)
 verify()
-assert(incremental and checks>0)
+assert(checks>0)
+local rendered=0
+for key in mountain.parts do
+ rendered+=1
+ local shell=mountain.grid.exposedIndex[key] ~= nil
+ for _,neighbour in mountain.grid:solidNeighbours(key) do
+  if mountain.grid.exposedIndex[neighbour] then shell=true end
+ end
+ assert(shell,"deep interior must have no rendered parts")
+end
+assert(rendered<mountain:remaining()/3,"only a small fraction of total rocks should exist as parts")
+mountain:blast(1000)
+verify()
 local x,y,z=Grid.coords(mountain.diamondKey)
 assert(y>=1 and y<=mountain.grid.height*0.35 and x*x+z*z <= (mountain.grid.radius*0.3)^2)
 print("PASS: rendered restoration, growth, exposed collision, reserved lower central diamond and checkpoints")
 '''
 generated=root/'tests/rebuild-rendering.generated.luau'
 try:
- generated.write_text(prefix+s+suffix, encoding='utf-8')
+ generated.write_text(("local BENCHMARK = " + ("true" if len(sys.argv)>2 else "false") + "\n")+prefix+s+suffix, encoding='utf-8')
  subprocess.run([sys.argv[1] if len(sys.argv)>1 else 'luau', str(generated)], check=True)
 finally:
  generated.unlink(missing_ok=True)
