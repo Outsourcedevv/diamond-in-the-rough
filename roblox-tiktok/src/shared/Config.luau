@@ -26,7 +26,7 @@ local Config = {
 	WinBackgroundColor = "#2B2140",
 
 	-- Rocks -----------------------------------------------------------------------
-	BlockSize = 0.4, -- diggable cell size in studs; irregular rock chips overlap its edges
+	BlockSize = 0.4, -- diggable cell size in studs; each visible rock fills one cell, sloped towards open air
 	DigPerSecond = 100, -- rocks dug per second while the dig button is held
 
 	-- TikTok ------------------------------------------------------------------

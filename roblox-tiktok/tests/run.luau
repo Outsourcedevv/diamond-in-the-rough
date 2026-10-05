@@ -1,8 +1,8 @@
 -- Runs outside Roblox with the Luau CLI: luau tests/run.luau
 local HoldTimer = require("../src/shared/HoldTimer")
 local Format = require("../src/shared/Format")
-local Grid = require("../src/server/Grid")
-local RockStyle = require("../src/server/RockStyle")
+local Grid = require("../src/shared/Grid")
+local RockStyle = require("../src/shared/RockStyle")
 local GiftTier = require("../src/shared/GiftTier")
 
 local passed, failed = 0, 0
@@ -58,25 +58,77 @@ check(r == 255 and g == 136 and b == 0, "hex colour")
 check(Format.parseHex("orange") == nil, "bad colour rejected")
 check(Format.wins("WINS", 3, 0) == "WINS: 3" and Format.wins("WINS", 3, 10) == "WINS: 3/10" and Format.wins("", 2, 0) == "2", "win counter text")
 
--- Mountain grid
--- Visual changes must remain deterministic when a blast uncovers a saved cell,
--- use bounded per-cell geometry and avoid a repeating bead pattern.
-local styles = {}
-local previousShape = ""
-local changesInRow = 0
-for x = -128, 127 do
-	local key = Grid.key(x, 12, 17)
-	local rock = RockStyle.forCell(key)
-	local again = RockStyle.forCell(key)
-	check(rock.shape == again.shape and rock.yaw == again.yaw and rock.shade == again.shade, "uncovered rock keeps its appearance")
-	check(rock.x >= 1.55 and rock.x <= 1.9 and rock.y >= 1.30 and rock.y <= 1.54 and rock.z >= 1.54 and rock.z <= 1.89, "stone sizes stay within the compact rubble envelope")
-	check(math.abs(rock.ox) <= 0.06 and math.abs(rock.oz) <= 0.06 and math.abs(rock.oy) <= 0.04, "stone jitter stays tied to its diggable cell")
-	styles[rock.shape] = true
-	if rock.shape ~= previousShape then changesInRow += 1 end
-	previousShape = rock.shape
+-- Mountain looks and network packing
+local MountainCodec = require("../src/shared/MountainCodec")
+-- Looks depend only on the cell, so a rock looks the same whenever it is drawn.
+local layersSeen = {}
+for x = -40, 40, 3 do
+	for y = 0, 50, 5 do
+		local key = Grid.key(x, y, 7)
+		local layer, r, g, b = RockStyle.look(key, y, 50)
+		local again, r2, g2, b2 = RockStyle.look(key, y, 50)
+		check(layer == again and r == r2 and g == g2 and b == b2, "uncovered rock keeps its appearance")
+		check(r >= 0 and r <= 255 and g >= 0 and g <= 255 and b >= 0 and b <= 255, "colours stay in range")
+		layersSeen[layer] = true
+	end
 end
-check(styles.Part and styles.WedgePart and styles.CornerWedgePart, "rubble mixes three native faceted shapes")
-check(changesInRow > 100, "adjacent rocks do not repeat the same shape in long grid rows")
+check(RockStyle.look(Grid.key(0, 49, 0), 49, 50) == RockStyle.SNOW, "the summit surface is snow")
+check(RockStyle.look(Grid.key(0, 1, 0), 1, 50) == RockStyle.GRASS, "the foothill surface is grass")
+check(RockStyle.look(Grid.key(0, 0, 0), 2, 50) == RockStyle.DIRT, "grass has a dirt layer beneath")
+local deep = RockStyle.look(Grid.key(0, 20, 0), 45, 50)
+check(deep == RockStyle.ROCK or deep == RockStyle.SLATE, "inside the mountain is rock")
+check(layersSeen[RockStyle.SNOW] and layersSeen[RockStyle.GRASS] and layersSeen[RockStyle.CRAG], "the surface mixes snow, grass and crags")
+-- Shapes slope towards open air only where that keeps the shell closed.
+local slope = Grid.blank()
+for x = -3, 3 do
+	for z = -3, 3 do
+		for y = 0, 3 - math.max(math.abs(x), math.abs(z)) do slope.solid[Grid.key(x, y, z)] = true end
+	end
+end
+check(RockStyle.shape(slope, Grid.key(0, 3, 0)) >= 6, "a lone summit cell is a corner spire")
+check(RockStyle.shape(slope, Grid.key(1, 2, 0)) == RockStyle.WEDGE[1], "a ridge slopes down towards open air (+X)")
+check(RockStyle.shape(slope, Grid.key(0, 2, -1)) == RockStyle.WEDGE[4], "a ridge slopes down towards open air (-Z)")
+check(RockStyle.shape(slope, Grid.key(1, 2, 1)) == RockStyle.CORNER[1], "an outside corner uses a corner wedge")
+check(RockStyle.shape(slope, Grid.key(0, 0, 0)) == RockStyle.BLOCK, "covered cells are blocks")
+check(RockStyle.kind(1) == 1 and RockStyle.kind(4) == 2 and RockStyle.kind(9) == 3, "shape kinds")
+-- Column runs round-trip exactly, in any order, across chunk boundaries.
+local cells, expected, order = {}, 0, {}
+for x = -20, 20 do
+	for z = -20, 20, 3 do
+		for y = 0, (x * 7 + z * 3) % 13 do
+			if (x + y) % 5 ~= 0 then
+				table.insert(order, Grid.key(x, y, z))
+				expected += 1
+			end
+		end
+	end
+end
+for i = #order, 2, -1 do
+	local j = (i * 7919) % i + 1
+	order[i], order[j] = order[j], order[i]
+end
+table.insert(order, order[1]) -- duplicates are harmless
+local limit = MountainCodec.MaxRuns
+MountainCodec.MaxRuns = 50
+local chunks = MountainCodec.encode(order)
+MountainCodec.MaxRuns = limit
+check(#chunks > 1, "large change lists split into several chunks")
+local decoded = 0
+for _, chunk in chunks do
+	MountainCodec.decode(chunk, function(key)
+		if not cells[key] then decoded += 1 end
+		cells[key] = true
+	end)
+end
+local allPresent = true
+for _, key in order do if not cells[key] then allPresent = false end end
+check(allPresent and decoded == expected and MountainCodec.count(chunks) == expected, "encoded cells decode to exactly the same set")
+local tops = { [5] = 17, [65535] = 3, [300] = 0 }
+local seenTops = {}
+for _, chunk in MountainCodec.encodePairs(tops) do
+	MountainCodec.decodePairs(chunk, function(column, top) seenTops[column] = top end)
+end
+check(seenTops[5] == 17 and seenTops[65535] == 3 and seenTops[300] == 0, "column tops round-trip")
 
 local seed = 0
 local function rand(a: number?, b: number?): number

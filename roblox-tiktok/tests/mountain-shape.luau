@@ -1,4 +1,4 @@
-local Grid = require("../src/server/Grid")
+local Grid = require("../src/shared/Grid")
 local function rand(a,b) return if a then math.floor((a+b)/2) else 0.5 end
 for _, count in {1, 1000, 25000, 250000} do
  for _, seed in {0, 3.7, 91} do

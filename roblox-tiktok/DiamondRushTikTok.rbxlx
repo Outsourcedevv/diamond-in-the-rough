@@ -8,17 +8,27 @@
   <Item class="Lighting" referent="1">
     <Properties>
       <string name="Name">Lighting</string>
+      <token name="Technology">4</token>
+      <token name="LightingStyle">0</token>
+      <bool name="PrioritizeLightingQuality">true</bool>
+      <bool name="GlobalShadows">true</bool>
     </Properties>
   </Item>
-  <Item class="ReplicatedStorage" referent="2">
+  <Item class="MaterialService" referent="2">
+    <Properties>
+      <string name="Name">MaterialService</string>
+      <bool name="Use2022MaterialsXml">true</bool>
+    </Properties>
+  </Item>
+  <Item class="ReplicatedStorage" referent="3">
     <Properties>
       <string name="Name">ReplicatedStorage</string>
     </Properties>
-    <Item class="Folder" referent="3">
+    <Item class="Folder" referent="4">
       <Properties>
         <string name="Name">DiamondRush</string>
       </Properties>
-      <Item class="ModuleScript" referent="4">
+      <Item class="ModuleScript" referent="5">
         <Properties>
           <string name="Name">Config</string>
           <string name="Source"><![CDATA[--!strict
@@ -49,7 +59,7 @@ local Config = {
 	WinBackgroundColor = "#2B2140",
 
 	-- Rocks -----------------------------------------------------------------------
-	BlockSize = 0.4, -- diggable cell size in studs; irregular rock chips overlap its edges
+	BlockSize = 0.4, -- diggable cell size in studs; each visible rock fills one cell, sloped towards open air
 	DigPerSecond = 100, -- rocks dug per second while the dig button is held
 
 	-- TikTok ------------------------------------------------------------------
@@ -65,21 +75,23 @@ return Config
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="5">
+      <Item class="ModuleScript" referent="6">
         <Properties>
           <string name="Name">DiamondShape</string>
           <string name="Source"><![CDATA[--!strict
 -- An eight-sided brilliant-cut gem, made from native triangular facets.
+-- Light crown, deeper blue pavilion and a bright table give it the familiar
+-- diamond silhouette against any background, including the open sky.
 local DiamondShape = {}
-function DiamondShape.attach(root: BasePart)
-	root.Transparency = 1
-	root.Reflectance = 0
-	root.Material = Enum.Material.SmoothPlastic
-	local scale = root.Size.X
-	local facets = Instance.new("Folder")
-	facets.Name = "Facets"
-	facets.Parent = root
-	local function triangle(a: Vector3, b: Vector3, c: Vector3, shade: number)
+
+export type Facet = { offset: CFrame, size: Vector3, colour: Color3, material: Enum.Material }
+
+local THICKNESS = 0.006
+
+-- Facet layout for a gem whose bounding size is `scale` studs, relative to its centre.
+function DiamondShape.facets(scale: number): { Facet }
+	local list: { Facet } = {}
+	local function triangle(a: Vector3, b: Vector3, c: Vector3, colour: Color3, material: Enum.Material)
 		local ab, ac, bc = b - a, c - a, c - b
 		if ab.Magnitude > ac.Magnitude and ab.Magnitude > bc.Magnitude then c, a = a, c
 		elseif ac.Magnitude > bc.Magnitude then a, b = b, a end
@@ -90,24 +102,12 @@ function DiamondShape.attach(root: BasePart)
 		local height = math.abs(ab:Dot(up))
 		for _, spec in { { (a + b) / 2, right, back, math.abs(ab:Dot(back)) }, { (a + c) / 2, -right, -back, math.abs(ac:Dot(back)) } } do
 			if spec[4] < 0.0001 then continue end
-			local face = Instance.new("WedgePart")
-			face.Name = "Facet"
-			face.Size = Vector3.new(0.005, height, spec[4]) * scale
-			face.CFrame = root.CFrame * CFrame.fromMatrix(spec[1] * scale, spec[2], up, spec[3])
-			face.Color = Color3.fromRGB(100 + shade * 100, 195 + shade * 50, 245)
-			face.Material = Enum.Material.Glass
-			face.Reflectance = 0.18
-			face.Transparency = 0.08
-			face.CanCollide = false
-			face.CanQuery = false
-			face.CanTouch = false
-			face.Massless = true
-			face.CastShadow = false
-			face.Parent = facets
-			local weld = Instance.new("WeldConstraint")
-			weld.Part0 = root
-			weld.Part1 = face
-			weld.Parent = face
+			table.insert(list, {
+				offset = CFrame.fromMatrix(spec[1] * scale, spec[2], up, spec[3]),
+				size = Vector3.new(THICKNESS, height, spec[4]) * scale,
+				colour = colour,
+				material = material,
+			})
 		end
 	end
 	for i = 0, 7 do
@@ -116,12 +116,82 @@ function DiamondShape.attach(root: BasePart)
 		local rimB = Vector3.new(math.cos(b) * 0.5, 0.08, math.sin(b) * 0.5)
 		local topA = Vector3.new(math.cos(a) * 0.26, 0.34, math.sin(a) * 0.26)
 		local topB = Vector3.new(math.cos(b) * 0.26, 0.34, math.sin(b) * 0.26)
-		triangle(Vector3.new(0, -0.55, 0), rimA, rimB, 0.25 + i % 3 * 0.2)
-		triangle(rimA, topA, topB, 0.55 + i % 2 * 0.3)
-		triangle(rimA, topB, rimB, 0.4 + i % 3 * 0.2)
-		triangle(Vector3.new(0, 0.34, 0), topB, topA, 0.9)
+		local alternate = i % 2
+		-- Pavilion: the long point underneath, in deeper blues.
+		triangle(Vector3.new(0, -0.55, 0), rimA, rimB, Color3.fromRGB(62 + alternate * 34, 150 + alternate * 30, 232 + alternate * 12), Enum.Material.SmoothPlastic)
+		-- Crown: pale, alternating facets catch the light.
+		triangle(rimA, topA, topB, Color3.fromRGB(175 + alternate * 45, 232 + alternate * 16, 255), Enum.Material.SmoothPlastic)
+		triangle(rimA, topB, rimB, Color3.fromRGB(140 + alternate * 40, 214 + alternate * 20, 252), Enum.Material.SmoothPlastic)
+		-- Table: the flat top glints.
+		triangle(Vector3.new(0, 0.34, 0), topB, topA, Color3.fromRGB(215, 248, 255), Enum.Material.Neon)
+	end
+	return list
+end
+
+local function facetPart(facet: Facet): Part
+	local face = Instance.new("WedgePart") :: any
+	face.Name = "Facet"
+	face.Size = facet.size
+	face.Color = facet.colour
+	face.Material = facet.material
+	face.Reflectance = if facet.material == Enum.Material.Neon then 0 else 0.3
+	face.CanCollide = false
+	face.CanQuery = false
+	face.CanTouch = false
+	face.Massless = true
+	face.CastShadow = false
+	return face
+end
+
+-- Welds visible facets to an invisible root part (the server's world gem).
+-- The root must already be in the workspace so the welds keep these offsets.
+function DiamondShape.attach(root: BasePart)
+	root.Transparency = 1
+	root.Reflectance = 0
+	root.Material = Enum.Material.SmoothPlastic
+	local facets = Instance.new("Folder")
+	facets.Name = "Facets"
+	facets.Parent = root
+	for _, facet in DiamondShape.facets(root.Size.X) do
+		local face = facetPart(facet)
+		face.CFrame = root.CFrame * facet.offset
+		face.Parent = facets
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = root
+		weld.Part1 = face
+		weld.Parent = face
 	end
 end
+
+-- An unwelded, anchored gem for local effects. Move it with DiamondShape.place:
+-- welds made while a part is outside the workspace keep stale offsets, which
+-- left the old held gem's facets behind at the world origin.
+export type Gem = { model: Model, parts: { BasePart }, offsets: { CFrame }, frames: { CFrame } }
+
+function DiamondShape.build(size: number, name: string): Gem
+	local model = Instance.new("Model")
+	model.Name = name
+	local parts: { BasePart }, offsets: { CFrame }, frames: { CFrame } = {}, {}, {}
+	for _, facet in DiamondShape.facets(size) do
+		local face = facetPart(facet)
+		face.Anchored = true
+		face.Parent = model
+		table.insert(parts, face)
+		table.insert(offsets, facet.offset)
+		table.insert(frames, facet.offset)
+	end
+	return { model = model, parts = parts, offsets = offsets, frames = frames }
+end
+
+-- Moves every facet of a built gem in one engine call.
+function DiamondShape.place(gem: Gem, frame: CFrame)
+	local frames = gem.frames
+	for index, offset in gem.offsets do
+		frames[index] = frame * offset
+	end
+	workspace:BulkMoveTo(gem.parts, frames, Enum.BulkMoveMode.FireCFrameChanged)
+end
+
 -- Facets are independent welded parts; resizing only the invisible root does
 -- not resize the visible gem. Rebuild them only when its size actually changes.
 function DiamondShape.resize(root: BasePart, size: Vector3)
@@ -134,19 +204,21 @@ function DiamondShape.resize(root: BasePart, size: Vector3)
 	root:SetAttribute("GemVisible", nil)
 	DiamondShape.visible(root, visible)
 end
+
 function DiamondShape.visible(root: BasePart, visible: boolean)
 	if root:GetAttribute("GemVisible") == visible then return end
 	root:SetAttribute("GemVisible", visible)
 	root.Transparency = 1
 	for _, face in root.Facets:GetChildren() do
-		(face :: BasePart).Transparency = if visible then 0.08 else 1
+		(face :: BasePart).Transparency = if visible then 0 else 1
 	end
 end
+
 return DiamondShape
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="6">
+      <Item class="ModuleScript" referent="7">
         <Properties>
           <string name="Name">Format</string>
           <string name="Source"><![CDATA[--!strict
@@ -198,7 +270,7 @@ return Format
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="7">
+      <Item class="ModuleScript" referent="8">
         <Properties>
           <string name="Name">GiftTier</string>
           <string name="Source"><![CDATA[--!strict
@@ -215,7 +287,664 @@ return GiftTier
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="8">
+      <Item class="ModuleScript" referent="9">
+        <Properties>
+          <string name="Name">Grid</string>
+          <string name="Source"><![CDATA[--!strict
+--!native
+-- Pure block-grid logic for the mountain, with no Roblox instances, so it can be
+-- tested outside Roblox. The server owns the real grid; each client keeps a
+-- replica to draw the rock. Cells are keyed by one integer; a cell is "exposed"
+-- when at least one of its six neighbours is open air, and only exposed cells
+-- can be blasted away.
+local Grid = {}
+Grid.__index = Grid
+
+local OFFSET = 128
+local SPAN = 256
+local LAYER = SPAN * SPAN
+local NEIGHBOURS = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
+-- The same six neighbours as key offsets. x and z never reach the edge of the
+-- key space, so only a step below layer 0 can leave it.
+local STEPS = { 1, -1, LAYER, -LAYER, SPAN, -SPAN }
+Grid.SPAN = SPAN
+Grid.LAYER = LAYER
+Grid.STEPS = STEPS
+
+-- Reads one bit straight from the pages behind a cell map, skipping the
+-- metatable call that the dictionary interface needs.
+local function hasBit(pages: { [number]: buffer }, key: number): boolean
+	local page = pages[key // 4096]
+	return page ~= nil and bit32.btest(buffer.readu8(page, (key % 4096) // 8), bit32.lshift(1, key % 8))
+end
+Grid.hasBit = hasBit
+
+-- Bit-packed pages avoid resizing a million-entry hash table during a gift.
+-- The dictionary interface keeps all callers using the same cell keys.
+local function newCellMap(): ({ [number]: boolean }, { [number]: buffer })
+	local pages: { [number]: buffer } = {}
+	local masks = { 1, 2, 4, 8, 16, 32, 64, 128 }
+	return setmetatable({}, {
+		__index = function(_self, key: number)
+			local page = pages[key // 4096]
+			if page == nil then return nil end
+			return if bit32.band(buffer.readu8(page, (key % 4096) // 8), masks[key % 8 + 1]) ~= 0 then true else nil
+		end,
+		__newindex = function(_self, key: number, value: boolean?)
+			local index = key // 4096
+			local page = pages[index]
+			if page == nil then
+				if not value then return end
+				page = buffer.create(512)
+				pages[index] = page
+			end
+			local offset, mask = (key % 4096) // 8, masks[key % 8 + 1]
+			local byte = buffer.readu8(page, offset)
+			buffer.writeu8(page, offset, if value then bit32.bor(byte, mask) else bit32.band(byte, bit32.bnot(mask)))
+		end,
+		__iter = function()
+			local pageIndex: number? = nil
+			local page: buffer? = nil
+			local slot = 4096
+			return function(): (number?, boolean?)
+				while true do
+					if slot >= 4096 then
+						pageIndex, page = next(pages, pageIndex)
+						if pageIndex == nil then return nil end
+						slot = 0
+					end
+					local bit = slot
+					slot += 1
+					if bit32.band(buffer.readu8(page :: buffer, bit // 8), masks[bit % 8 + 1]) ~= 0 then
+						return (pageIndex :: number) * 4096 + bit, true
+					end
+				end
+			end
+		end,
+	}) :: any, pages
+end
+
+-- A bit-packed set of cell keys, plus its pages for hasBit.
+Grid.cellMap = newCellMap
+
+-- Surface indices change continuously as the frontier moves. Paging these
+-- numbers also avoids hash-table expansion pauses around large surface sizes.
+local function newIndexMap(): { [number]: number }
+	local pages: { [number]: buffer } = {}
+	return setmetatable({}, {
+		__index = function(_self, key: number)
+			local page = pages[key // 256]
+			if page == nil then return nil end
+			local value = buffer.readu32(page, key % 256 * 4)
+			return if value ~= 0 then value else nil
+		end,
+		__newindex = function(_self, key: number, value: number?)
+			local index = key // 256
+			local page = pages[index]
+			if page == nil then
+				if value == nil then return end
+				page = buffer.create(1024)
+				pages[index] = page
+			end
+			buffer.writeu32(page, key % 256 * 4, value or 0)
+		end,
+	}) :: any
+end
+
+export type Grid = typeof(setmetatable(
+	{} :: {
+		radius: number,
+		height: number,
+		solid: { [number]: boolean },
+		solidPages: { [number]: buffer },
+		order: { number },
+		total: number,
+		removed: number,
+		removedOrder: { number },
+		exposedList: { number },
+		exposedIndex: { [number]: number },
+		rand: (number?, number?) -> number,
+		fresh: { number },
+		sealed: { [number]: boolean },
+		growthHeap: { number }?,
+		growthScores: { number }?,
+		growthQueued: { [number]: boolean }?,
+	},
+	Grid
+))
+
+function Grid.key(x: number, y: number, z: number): number
+	return (x + OFFSET) + (z + OFFSET) * SPAN + y * SPAN * SPAN
+end
+
+function Grid.coords(key: number): (number, number, number)
+	local y = key // (SPAN * SPAN)
+	local rest = key % (SPAN * SPAN)
+	return (rest % SPAN) - OFFSET, y, (rest // SPAN) - OFFSET
+end
+
+local function empty(rand: (number?, number?) -> number): Grid
+	local solid, pages = newCellMap()
+	return setmetatable({
+		radius = 0,
+		height = 0,
+		solid = solid,
+		solidPages = pages,
+		order = {},
+		total = 0,
+		removed = 0,
+		removedOrder = {},
+		exposedList = {},
+		exposedIndex = newIndexMap(),
+		rand = rand,
+		fresh = {},
+		sealed = {},
+		growthHeap = nil,
+		growthScores = nil,
+		growthQueued = nil,
+	}, Grid)
+end
+
+-- An empty replica for a client. Clients only flip cells and ask whether they
+-- are exposed; the server's bookkeeping lists stay empty.
+function Grid.blank(): Grid
+	return empty(function(a: number?, _b: number?): number return a or 0 end)
+end
+
+-- Builds a mountain of exactly `target` cells (one cell = one stone).
+-- rand(): a number in [0, 1); rand(a, b): a whole number from a to b.
+-- checkpoint, when given, is called regularly so the caller can yield.
+function Grid.new(target: number, seed: number, rand: (number?, number?) -> number, checkpoint: (() -> ())?): Grid
+	target = math.max(1, math.floor(target))
+	-- Allocate the rock budget across tapered columns. Removing excess rocks
+	-- from the highest layers would cut the summit into a broad flat stump.
+	local radius = math.clamp(math.ceil((target * 1.06 / 0.94) ^ (1 / 3)), 3, OFFSET - 4)
+	local height = math.max(2, math.floor(radius * 1.05 + 0.5))
+	local self = empty(rand)
+	self.radius = radius
+	self.height = height
+	local scale = 15 / radius
+	local columns = {}
+	local weightTotal = 0
+	for z = -radius, radius do
+		for x = -radius, radius do
+			local distance = math.sqrt(x * x + z * z) / radius
+			if distance <= 1 then
+				local bumps = math.noise(x * 0.16 * scale, z * 0.16 * scale, seed) * 2.6 + math.noise(x * 0.4 * scale, z * 0.4 * scale, seed + 7.3) * 0.9
+				-- Slopes continue almost to the centre, leaving a small summit.
+				local profile = math.min(1, (1 - distance) / 0.94) ^ 1.05
+				local weight = math.max(0, height * profile + bumps * (1 - distance * 0.6) / math.sqrt(scale))
+				table.insert(columns, { x = x, z = z, weight = weight, height = 0, fraction = 0 })
+				weightTotal += weight
+			end
+		end
+	end
+	local count = 0
+	for _, column in columns do
+		local exact = target * column.weight / weightTotal
+		column.height = math.floor(exact)
+		column.fraction = exact - column.height
+		count += column.height
+	end
+	-- Spread rounding remainders across columns instead of shaving the summit.
+	table.sort(columns, function(a, b)
+		if a.fraction ~= b.fraction then return a.fraction > b.fraction end
+		if a.z ~= b.z then return a.z < b.z end
+		return a.x < b.x
+	end)
+	for i = 1, target - count do columns[i].height += 1 end
+	self.height = 0
+	local order = table.create(target)
+	self.order = order
+	for index, column in columns do
+		self.height = math.max(self.height, column.height)
+		for y = 0, column.height - 1 do
+			local key = Grid.key(column.x, y, column.z)
+			self.solid[key] = true
+			table.insert(order, key)
+		end
+		if checkpoint and index % 512 == 0 then checkpoint() end
+	end
+	self.total = #order
+	for index, key in order do
+		if self:isExposed(key) then
+			self:_expose(key)
+		end
+		if checkpoint and index % 4096 == 0 then checkpoint() end
+	end
+	table.clear(self.fresh)
+	return self
+end
+
+function Grid.isSolid(self: Grid, key: number): boolean
+	return hasBit(self.solidPages, key)
+end
+
+-- Open air: not rock, not the sealed diamond cavity and not the ground below layer 0.
+function Grid.isAir(self: Grid, key: number): boolean
+	return key >= 0 and not hasBit(self.solidPages, key) and not self.sealed[key]
+end
+
+-- Visits every solid cell in ascending key order (layer by layer). The visitor
+-- may yield; the grid must not change until the walk finishes.
+function Grid.eachSolid(self: Grid, visit: (number) -> ())
+	local pages = self.solidPages
+	local indices = {}
+	for index in pages do table.insert(indices, index) end
+	table.sort(indices)
+	for _, index in indices do
+		local page = pages[index]
+		local base = index * 4096
+		for byte = 0, 511 do
+			local bits = buffer.readu8(page, byte)
+			if bits ~= 0 then
+				for bit = 0, 7 do
+					if bit32.btest(bits, bit32.lshift(1, bit)) then visit(base + byte * 8 + bit) end
+				end
+			end
+		end
+	end
+end
+
+-- One solid layer behind a surface cell, excluding ground and the diamond cavity.
+function Grid.solidNeighbours(self: Grid, key: number): { number }
+	local pages = self.solidPages
+	local result = {}
+	for _, step in STEPS do
+		local neighbour = key + step
+		if neighbour >= 0 and hasBit(pages, neighbour) then
+			table.insert(result, neighbour)
+		end
+	end
+	return result
+end
+
+function Grid.remaining(self: Grid): number
+	return self.total - self.removed
+end
+
+function Grid.isExposed(self: Grid, key: number): boolean
+	local pages, sealed = self.solidPages, self.sealed
+	for _, step in STEPS do
+		local neighbour = key + step
+		-- The ground under the mountain (below layer 0) counts as solid.
+		if neighbour >= 0 and not hasBit(pages, neighbour) and not sealed[neighbour] then
+			return true
+		end
+	end
+	return false
+end
+
+function Grid._expose(self: Grid, key: number)
+	if self.exposedIndex[key] == nil then
+		table.insert(self.exposedList, key)
+		self.exposedIndex[key] = #self.exposedList
+		table.insert(self.fresh, key)
+	end
+end
+
+function Grid._unexpose(self: Grid, key: number)
+	local index = self.exposedIndex[key]
+	if index == nil then
+		return
+	end
+	local last = self.exposedList[#self.exposedList]
+	self.exposedList[index] = last
+	self.exposedIndex[last] = index
+	self.exposedList[#self.exposedList] = nil
+	self.exposedIndex[key] = nil
+end
+
+function Grid.exposedCount(self: Grid): number
+	return #self.exposedList
+end
+
+-- Removes one solid cell; its solid neighbours become exposed.
+function Grid.remove(self: Grid, key: number): boolean
+	if not self.solid[key] then
+		return false
+	end
+	self.solid[key] = nil
+	self.growthHeap = nil
+	self.growthScores = nil
+	self.growthQueued = nil
+	self.removed += 1
+	table.insert(self.removedOrder, key)
+	self:_unexpose(key)
+	local pages = self.solidPages
+	for _, step in STEPS do
+		local neighbour = key + step
+		if neighbour >= 0 and hasBit(pages, neighbour) then
+			self:_expose(neighbour)
+		end
+	end
+	return true
+end
+
+-- Refill recently excavated cells in reverse order, never the sealed diamond cell.
+function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?, z: number, radius: number? }?, checkpoint: (() -> ())?, onAdded: ((number) -> ())?): { number }
+	-- Bucket integer squared distances so large refills avoid sorting every
+	-- missing rock. Pop nearest buckets first, leaving the gem cell reserved.
+	if focus and focus.y ~= nil then
+		local buckets = {}
+		local distances = {}
+		for index, key in self.removedOrder do
+			local x, y, z = Grid.coords(key)
+			local distance = (x - focus.x)^2 + (y - focus.y)^2 + (z - focus.z)^2
+			if buckets[distance] == nil then
+				buckets[distance] = {}
+				table.insert(distances, distance)
+			end
+			table.insert(buckets[distance], key)
+			if checkpoint and index % 256 == 0 then checkpoint() end
+		end
+		table.sort(distances, function(a, b) return a > b end)
+		local ordered = {}
+		for _, distance in distances do
+			for _, key in buckets[distance] do
+				table.insert(ordered, key)
+				if checkpoint and #ordered % 256 == 0 then checkpoint() end
+			end
+		end
+		self.removedOrder = ordered
+	elseif focus then
+		local distant, nearby = {}, {}
+		for index, key in self.removedOrder do
+			if checkpoint and index % 256 == 0 then checkpoint() end
+			local x, y, z = Grid.coords(key)
+			local distance = (x - focus.x) ^ 2 + (z - focus.z) ^ 2
+			if distance <= (focus.radius or 0) ^ 2 then
+				table.insert(nearby, { key = key, y = y, distance = distance })
+			else
+				table.insert(distant, key)
+			end
+		end
+		-- restore pops from the end: closest column first, lowest cell first.
+		table.sort(nearby, function(a, b)
+			if a.distance ~= b.distance then return a.distance > b.distance end
+			if a.y ~= b.y then return a.y > b.y end
+			return a.key > b.key
+		end)
+		for _, cell in nearby do table.insert(distant, cell.key) end
+		self.removedOrder = distant
+	end
+	local restored = {}
+	-- Bit-packed sets: plain tables rehash with long stalls at this size.
+	local affected = (newCellMap())
+	while #restored < count and #self.removedOrder > 0 do
+		local key = table.remove(self.removedOrder) :: number
+		if not self.solid[key] and not self.sealed[key] then
+			self.solid[key] = true
+			self.removed -= 1
+			table.insert(restored, key)
+			if onAdded then onAdded(key) end
+			if checkpoint and #restored % 256 == 0 then checkpoint() end
+			affected[key] = true
+			for _, neighbour in self:solidNeighbours(key) do affected[neighbour] = true end
+		end
+	end
+	local processed = 0
+	for key in affected do
+		processed += 1
+		if checkpoint and processed % 256 == 0 then checkpoint() end
+		if self:isExposed(key) then self:_expose(key) else self:_unexpose(key) end
+	end
+	if #restored > 0 then self.growthHeap = nil; self.growthScores = nil; self.growthQueued = nil end
+	return restored
+end
+
+function Grid.randomExposed(self: Grid): number?
+	local count = #self.exposedList
+	if count == 0 then
+		return nil
+	end
+	return self.exposedList[self.rand(1, count)]
+end
+
+-- A minimal binary heap of {distance, key} pairs, nearest first.
+local function push(heap: { { number } }, item: { number })
+	table.insert(heap, item)
+	local i = #heap
+	while i > 1 do
+		local parent = i // 2
+		if heap[parent][1] <= heap[i][1] then
+			break
+		end
+		heap[parent], heap[i] = heap[i], heap[parent]
+		i = parent
+	end
+end
+
+local function pop(heap: { { number } }): { number }?
+	local count = #heap
+	if count == 0 then
+		return nil
+	end
+	local top = heap[1]
+	heap[1] = heap[count]
+	heap[count] = nil
+	count -= 1
+	local i = 1
+	while true do
+		local left, right, smallest = i * 2, i * 2 + 1, i
+		if left <= count and heap[left][1] < heap[smallest][1] then
+			smallest = left
+		end
+		if right <= count and heap[right][1] < heap[smallest][1] then
+			smallest = right
+		end
+		if smallest == i then
+			break
+		end
+		heap[smallest], heap[i] = heap[i], heap[smallest]
+		i = smallest
+	end
+	return top
+end
+
+-- Blasts up to `count` cells as one crater around a random exposed cell (or
+-- `centre`): the nearest cells to the centre go first, and the crater only
+-- grows through cells it has opened up. Returns the removed keys and the centre.
+function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?, onRemoved: ((number) -> ())?): ({ number }, number?)
+	local removed: { number } = {}
+	local start = if centre ~= nil and self.solid[centre] and self.exposedIndex[centre] then centre else self:randomExposed()
+	if start == nil then
+		return removed, nil
+	end
+	local cx, cy, cz = Grid.coords(start)
+	local heap: { { number } } = {}
+	local queued = (newCellMap())
+	local pages = self.solidPages
+	local function enqueue(key: number)
+		if queued[key] or not hasBit(pages, key) then
+			return
+		end
+		queued[key] = true
+		local x, y, z = Grid.coords(key)
+		-- Craters dig a little more readily downwards and outwards than up.
+		local dy = (y - cy) * (if y > cy then 1.15 else 0.9)
+		push(heap, { (x - cx) ^ 2 + dy * dy + (z - cz) ^ 2 + self.rand() * 0.6, key })
+	end
+	enqueue(start)
+	while #removed < count do
+		local item = pop(heap)
+		if item == nil then
+			-- The crater ran out of reachable rock: carry on from a new spot.
+			local nextStart = self:randomExposed()
+			if nextStart == nil then
+				break
+			end
+			cx, cy, cz = Grid.coords(nextStart)
+			enqueue(nextStart)
+			continue
+		end
+		local key = item[2]
+		if self:remove(key) then
+			table.insert(removed, key)
+			if onRemoved then onRemoved(key) end
+			if checkpoint and #removed % 256 == 0 then checkpoint() end
+			for _, step in STEPS do
+				local neighbour = key + step
+				if neighbour >= 0 then enqueue(neighbour) end
+			end
+		end
+	end
+	return removed, start
+end
+
+-- Expand the rock's surface without generating a replacement mountain.
+-- Existing tunnels are restored first by Mountain.restore; the sealed diamond
+-- cell is never filled. The cached frontier keeps consecutive growth gifts cheap.
+function Grid.grow(self: Grid, count: number, capacity: number, checkpoint: (() -> ())?, onAdded: ((number) -> ())?): { number }
+	count = math.min(math.max(0, math.floor(count)), math.max(0, capacity - self.total))
+	local added = {}
+	if count == 0 then return added end
+	local heap = self.growthHeap or {}
+	local scores = self.growthScores or {}
+	local queued = self.growthQueued or (newCellMap())
+	-- Parallel numeric arrays avoid allocating a tiny table for every new cell.
+	local function pushCandidate(key: number, score: number)
+		local i = #heap + 1
+		while i > 1 do
+			local parent = i // 2
+			if scores[parent] <= score then break end
+			heap[i], scores[i] = heap[parent], scores[parent]
+			i = parent
+		end
+		heap[i], scores[i] = key, score
+	end
+	local function popCandidate(): number?
+		local count = #heap
+		if count == 0 then return nil end
+		local key = heap[1]
+		local last, lastScore = heap[count], scores[count]
+		heap[count], scores[count] = nil, nil
+		count -= 1
+		if count > 0 then
+			local i = 1
+			while i * 2 <= count do
+				local child = i * 2
+				if child + 1 <= count and scores[child + 1] < scores[child] then child += 1 end
+				if lastScore <= scores[child] then break end
+				heap[i], scores[i] = heap[child], scores[child]
+				i = child
+			end
+			heap[i], scores[i] = last, lastScore
+		end
+		queued[key] = nil
+		return key
+	end
+	local function enqueue(x: number, y: number, z: number)
+		if y < 0 or x * x + z * z > (OFFSET - 4) ^ 2 then return end
+		local key = Grid.key(x, y, z)
+		if self.solid[key] or self.sealed[key] or queued[key] then return end
+		queued[key] = true
+		pushCandidate(key, x * x + z * z + (y * 1.6) ^ 2)
+	end
+	if self.growthHeap == nil then
+		for index, key in self.exposedList do
+			local x, y, z = Grid.coords(key)
+			for _, step in NEIGHBOURS do enqueue(x + step[1], y + step[2], z + step[3]) end
+			if checkpoint and index % 256 == 0 then checkpoint() end
+		end
+		-- A cleared mountain can still be rebuilt (normally restore handles it).
+		if #heap == 0 then enqueue(0, 0, 0) end
+	end
+	self.growthHeap, self.growthScores, self.growthQueued = heap, scores, queued
+	while #added < count do
+		local key = popCandidate()
+		if key == nil then break end
+		if self.solid[key] or self.sealed[key] then continue end
+		self.solid[key] = true
+		self.total += 1
+		table.insert(self.order, key)
+		table.insert(added, key)
+		local x, y, z = Grid.coords(key)
+		self.radius = math.max(self.radius, math.ceil(math.sqrt(x * x + z * z)))
+		self.height = math.max(self.height, y + 1)
+		if self:isExposed(key) then self:_expose(key) end
+		for _, step in NEIGHBOURS do
+			local nx, ny, nz = x + step[1], y + step[2], z + step[3]
+			if ny >= 0 then
+				local neighbour = Grid.key(nx, ny, nz)
+				if self.solid[neighbour] and not self:isExposed(neighbour) then self:_unexpose(neighbour) end
+				enqueue(nx, ny, nz)
+			end
+		end
+		if onAdded then onAdded(key) end
+		if checkpoint and #added % 256 == 0 then checkpoint() end
+	end
+	return added
+end
+
+-- Newly exposed cells since the last call (for drawing them).
+function Grid.takeFresh(self: Grid): { number }
+	local fresh = self.fresh
+	self.fresh = {}
+	return fresh
+end
+
+-- True once any of the cell's six neighbours is open air.
+function Grid.isOpenAround(self: Grid, key: number): boolean
+	return self:isExposed(key)
+end
+
+-- Takes a buried cell out of the rock for the diamond (all six neighbours
+-- solid, in the lower two thirds so it is not found straight away). The
+-- diamond is not stone: it does not count towards the total.
+function Grid.carveHiddenCell(self: Grid, checkpoint: (() -> ())?): number
+	local key = self:pickHiddenCell(checkpoint)
+	if self.solid[key] then
+		-- Sealed: not stone, but it still counts as rock around it until the
+		-- digging reaches it.
+		self.solid[key] = nil
+		self.sealed[key] = true
+		self:_unexpose(key)
+		self.total -= 1
+		local index = table.find(self.order, key)
+		if index then
+			table.remove(self.order, index)
+		end
+	end
+	return key
+end
+
+function Grid.pickHiddenCell(self: Grid, checkpoint: (() -> ())?): number
+	local buried: { number } = {}
+	local low, high, reach = math.max(1, math.floor(self.height * 0.15)), self.height * 0.35, (self.radius * 0.3) ^ 2
+	for index, key in self.order do
+		local x, y, z = Grid.coords(key)
+		-- Cheap position tests first; only central cells need the exposure test.
+		if y >= low and y <= high and x * x + z * z <= reach and self:isSolid(key) and not self:isExposed(key) then
+			table.insert(buried, key)
+		end
+		if checkpoint and index % 8192 == 0 then checkpoint() end
+	end
+	if #buried == 0 then
+		for _, key in self.order do
+			if self.solid[key] then
+				table.insert(buried, key)
+			end
+		end
+	end
+	return buried[self.rand(1, #buried)]
+end
+
+-- The height of the highest solid cell in column (x, z) below layer y, or -1.
+function Grid.supportBelow(self: Grid, x: number, y: number, z: number): number
+	for level = y - 1, 0, -1 do
+		if self.solid[Grid.key(x, level, z)] then
+			return level
+		end
+	end
+	return -1
+end
+
+return Grid
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="10">
         <Properties>
           <string name="Name">HoldTimer</string>
           <string name="Source"><![CDATA[--!strict
@@ -246,13 +975,371 @@ return HoldTimer
 ]]></string>
         </Properties>
       </Item>
+      <Item class="ModuleScript" referent="11">
+        <Properties>
+          <string name="Name">MountainCodec</string>
+          <string name="Source"><![CDATA[--!strict
+--!native
+-- Packs mountain cells for the network. Craters and refills are mostly
+-- vertical runs of rock, so cells travel as column runs:
+--   u16 column, u16 first layer, u16 run length  (6 bytes per run)
+-- A 100,000-rock blast becomes a few thousand runs instead of 100,000 parts.
+local MountainCodec = {}
+
+local LAYER = 65536 -- Grid key = column + layer * 65536
+local RUN_BYTES = 6
+local PAIR_BYTES = 4
+-- Keeps every remote payload small enough to send without stalling a client.
+MountainCodec.MaxRuns = 8000
+
+-- Packs cell keys (any order, no duplicates needed) into one or more buffers.
+function MountainCodec.encode(keys: { number }, checkpoint: (() -> ())?): { buffer }
+	local columns: { [number]: { number } } = {}
+	local order: { number } = {}
+	for index, key in keys do
+		local column = key % LAYER
+		local list = columns[column]
+		if list == nil then
+			list = {}
+			columns[column] = list
+			table.insert(order, column)
+		end
+		table.insert(list, key // LAYER)
+		if checkpoint and index % 4096 == 0 then checkpoint() end
+	end
+	local runs: { number } = {} -- flat triples: column, first, length
+	for index, column in order do
+		local layers = columns[column]
+		table.sort(layers)
+		local first, last = layers[1], layers[1]
+		for i = 2, #layers do
+			local y = layers[i]
+			if y == last + 1 then
+				last = y
+			elseif y ~= last then
+				table.insert(runs, column); table.insert(runs, first); table.insert(runs, last - first + 1)
+				first, last = y, y
+			end
+		end
+		table.insert(runs, column); table.insert(runs, first); table.insert(runs, last - first + 1)
+		if checkpoint and index % 1024 == 0 then checkpoint() end
+	end
+	local chunks: { buffer } = {}
+	local total = #runs // 3
+	local start = 0
+	while start < total do
+		local count = math.min(MountainCodec.MaxRuns, total - start)
+		local chunk = buffer.create(count * RUN_BYTES)
+		for i = 0, count - 1 do
+			local at = (start + i) * 3
+			buffer.writeu16(chunk, i * RUN_BYTES, runs[at + 1])
+			buffer.writeu16(chunk, i * RUN_BYTES + 2, runs[at + 2])
+			buffer.writeu16(chunk, i * RUN_BYTES + 4, runs[at + 3])
+		end
+		table.insert(chunks, chunk)
+		start += count
+	end
+	return chunks
+end
+
+-- Calls visit(key) for every cell in one encoded buffer. visit may yield.
+function MountainCodec.decode(chunk: buffer, visit: (number) -> ())
+	for offset = 0, buffer.len(chunk) - RUN_BYTES, RUN_BYTES do
+		local column = buffer.readu16(chunk, offset)
+		local first = buffer.readu16(chunk, offset + 2)
+		for y = first, first + buffer.readu16(chunk, offset + 4) - 1 do
+			visit(column + y * LAYER)
+		end
+	end
+end
+
+-- How many cells a list of encoded buffers holds.
+function MountainCodec.count(chunks: { buffer }): number
+	local cells = 0
+	for _, chunk in chunks do
+		for offset = 4, buffer.len(chunk) - 2, RUN_BYTES do
+			cells += buffer.readu16(chunk, offset)
+		end
+	end
+	return cells
+end
+
+-- Column -> number pairs (the original column tops), u16 + u16 each.
+function MountainCodec.encodePairs(values: { [number]: number }): { buffer }
+	local flat: { number } = {}
+	for column, value in values do
+		table.insert(flat, column)
+		table.insert(flat, value)
+	end
+	local chunks: { buffer } = {}
+	local perChunk = MountainCodec.MaxRuns
+	local total = #flat // 2
+	local start = 0
+	while start < total do
+		local count = math.min(perChunk, total - start)
+		local chunk = buffer.create(count * PAIR_BYTES)
+		for i = 0, count - 1 do
+			buffer.writeu16(chunk, i * PAIR_BYTES, flat[(start + i) * 2 + 1])
+			buffer.writeu16(chunk, i * PAIR_BYTES + 2, math.clamp(flat[(start + i) * 2 + 2], 0, 65535))
+		end
+		table.insert(chunks, chunk)
+		start += count
+	end
+	return chunks
+end
+
+function MountainCodec.decodePairs(chunk: buffer, visit: (number, number) -> ())
+	for offset = 0, buffer.len(chunk) - PAIR_BYTES, PAIR_BYTES do
+		visit(buffer.readu16(chunk, offset), buffer.readu16(chunk, offset + 2))
+	end
+end
+
+return MountainCodec
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="12">
+        <Properties>
+          <string name="Name">PartShapes</string>
+          <string name="Source"><![CDATA[--!strict
+-- Which way Roblox's native wedge shapes face, measured once by raycasting a
+-- hidden sample of each rather than assumed. Rock slopes and low-poly trees
+-- both depend on it: a wedge turned the wrong way would leave holes or grow
+-- upside-down trees.
+local PartShapes = {}
+
+local wedgeFront: number? = nil
+local cornerTall: { number }? = nil
+
+-- Index of the probe point where the sample's top sits highest, or nil.
+local function probe(className: string, points: { { number } }): number?
+	local ok, result = pcall(function(): number?
+		local sample = Instance.new(className) :: BasePart
+		sample.Size = Vector3.new(4, 4, 4)
+		sample.Anchored = true
+		sample.CanCollide = false
+		sample.CanTouch = false
+		sample.CastShadow = false
+		sample.Transparency = 1
+		sample.CFrame = CFrame.new(0, 4000, 0)
+		sample.Parent = workspace
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Include
+		params.FilterDescendantsInstances = { sample }
+		local best, bestIndex = -math.huge, nil
+		for index, point in points do
+			local hit = workspace:Raycast(Vector3.new(point[1], 4010, point[2]), Vector3.new(0, -20, 0), params)
+			if hit and hit.Position.Y > best + 0.05 then
+				best, bestIndex = hit.Position.Y, index
+			end
+		end
+		sample:Destroy()
+		return bestIndex
+	end)
+	return if ok then result else nil
+end
+
+-- -1 when a wedge slopes down towards its LookVector (-Z), +1 for +Z.
+function PartShapes.wedgeFront(): number
+	if wedgeFront == nil then
+		wedgeFront = if probe("WedgePart", { { 0, 1.5 }, { 0, -1.5 } }) == 2 then 1 else -1
+	end
+	return wedgeFront :: number
+end
+
+-- A wedge rotation (no position) sloping down towards a horizontal direction.
+function PartShapes.wedgeToward(direction: Vector3): CFrame
+	return CFrame.lookAt(Vector3.zero, direction * -PartShapes.wedgeFront())
+end
+
+-- The local (x, z) signs of a corner wedge's tall corner.
+function PartShapes.cornerTall(): { number }
+	if cornerTall == nil then
+		local corners = { { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } }
+		cornerTall = corners[probe("CornerWedgePart", corners) or 2]
+	end
+	return cornerTall :: { number }
+end
+
+-- A corner wedge rotation whose tall corner points along (x, z) signs.
+function PartShapes.cornerToward(x: number, z: number): CFrame
+	local tall = PartShapes.cornerTall()
+	for turn = 0, 3 do
+		local rotation = CFrame.Angles(0, turn * math.pi / 2, 0)
+		local corner = rotation:VectorToWorldSpace(Vector3.new(tall[1], 0, tall[2]))
+		if math.abs(corner.X - x) < 0.1 and math.abs(corner.Z - z) < 0.1 then
+			return rotation
+		end
+	end
+	return CFrame.identity
+end
+
+return PartShapes
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="13">
+        <Properties>
+          <string name="Name">RockStyle</string>
+          <string name="Source"><![CDATA[--!strict
+--!native
+-- How each visible cell of rock is drawn. Pure data, shared by the client
+-- renderer and the tests.
+--
+-- Shape: surface cells slope towards open air with native wedge shapes, so the
+-- mountain reads as smooth faceted rock instead of a pile of cubes. A shape is
+-- only chosen when every face it leaves open borders air or another drawn
+-- (exposed) cell. That keeps the drawn shell watertight with exactly one part
+-- per exposed cell, so no hidden backing layer is needed behind it.
+--
+-- Look: snow caps, grassy foothills with a dirt layer beneath, weathered crags
+-- and layered strata inside. Colours stay close together in the rock: the one
+-- small diamond must still be found by eye.
+local RockStyle = {}
+
+local SPAN = 256
+local LAYER = SPAN * SPAN
+
+RockStyle.NONE = 0
+RockStyle.BLOCK = 1
+-- Wedges slope down towards the named side: +X, -X, +Z, -Z.
+RockStyle.WEDGE = { 2, 3, 4, 5 }
+-- Corner wedges slope down towards two open sides; their tall corner faces away.
+RockStyle.CORNER = { [1] = 6, [2] = 7, [3] = 8, [4] = 9 } -- (+X+Z), (+X-Z), (-X+Z), (-X-Z)
+
+-- Direction vectors for the shape codes (x, z of the open side or sides).
+RockStyle.DIRECTIONS = {
+	[2] = { 1, 0 }, [3] = { -1, 0 }, [4] = { 0, 1 }, [5] = { 0, -1 },
+	[6] = { 1, 1 }, [7] = { 1, -1 }, [8] = { -1, 1 }, [9] = { -1, -1 },
+}
+
+-- 1 block, 2 wedge, 3 corner wedge.
+function RockStyle.kind(shape: number): number
+	if shape <= 1 then return shape end
+	return if shape <= 5 then 2 else 3
+end
+
+local function sample(key: number, salt: number): number
+	local value = bit32.bxor(key, salt)
+	value = (value * 1664525 + 1013904223) % 4294967296
+	value = bit32.bxor(value, bit32.rshift(value, 16))
+	value = (value * 1664525 + 1013904223) % 4294967296
+	value = bit32.bxor(value, bit32.lshift(value, 13))
+	value = bit32.bxor(value, bit32.rshift(value, 17))
+	value = bit32.bxor(value, bit32.lshift(value, 5))
+	return value / 4294967296
+end
+RockStyle.sample = sample
+
+export type Cells = {
+	isAir: (any, number) -> boolean,
+	isSolid: (any, number) -> boolean,
+	isExposed: (any, number) -> boolean,
+}
+
+-- The shape for a solid, exposed cell. `cells` is a Grid (or anything with the
+-- same three queries).
+function RockStyle.shape(cells: any, key: number): number
+	local function drawn(n: number): boolean
+		-- Air, or a solid neighbour that is drawn because it is exposed itself.
+		return cells:isAir(n) or (cells:isSolid(n) and cells:isExposed(n))
+	end
+	if not cells:isAir(key + LAYER) then return RockStyle.BLOCK end
+	if key >= LAYER and cells:isAir(key - LAYER) then return RockStyle.BLOCK end
+	local east, west = cells:isAir(key + 1), cells:isAir(key - 1)
+	local north, south = cells:isAir(key + SPAN), cells:isAir(key - SPAN)
+	local open = (if east then 1 else 0) + (if west then 1 else 0) + (if north then 1 else 0) + (if south then 1 else 0)
+	if open == 0 then return RockStyle.BLOCK end
+	if open == 4 then
+		-- A lone spire: every face is open air, so any corner works.
+		return 6 + math.floor(sample(key, 3141) * 4)
+	end
+	if open == 3 then
+		-- Slope away from the single solid side.
+		if not east then return 3 elseif not west then return 2 elseif not north then return 5 else return 4 end
+	end
+	if open == 1 then
+		-- Both side faces of a wedge are part-open triangles.
+		if east or west then
+			if drawn(key + SPAN) and drawn(key - SPAN) then return if east then 2 else 3 end
+		else
+			if drawn(key + 1) and drawn(key - 1) then return if north then 4 else 5 end
+		end
+		return RockStyle.BLOCK
+	end
+	-- Two open sides.
+	if (east and west) or (north and south) then return RockStyle.BLOCK end
+	local sx = if east then 1 else -1
+	local sz = if north then 1 else -1
+	local backX, backZ = key - sx, key - sz * SPAN
+	local backXDrawn, backZDrawn = drawn(backX), drawn(backZ)
+	if backXDrawn and backZDrawn then
+		return if sx > 0 then (if sz > 0 then 6 else 7) else (if sz > 0 then 8 else 9)
+	end
+	-- A wedge towards one open side leaves its side faces on the other open side
+	-- and on the opposite back cell.
+	if backZDrawn then return if sx > 0 then 2 else 3 end
+	if backXDrawn then return if sz > 0 then 4 else 5 end
+	return RockStyle.BLOCK
+end
+
+-- Looks: index into RockStyle.LAYERS.
+RockStyle.SNOW, RockStyle.GRASS, RockStyle.DIRT, RockStyle.CRAG, RockStyle.ROCK, RockStyle.SLATE = 1, 2, 3, 4, 5, 6
+RockStyle.LAYERS = {
+	{ name = "Snow", material = "Snow", colour = { 236, 241, 246 } },
+	{ name = "Grass", material = "Grass", colour = { 96, 124, 60 } },
+	{ name = "Dirt", material = "Ground", colour = { 108, 86, 62 } },
+	{ name = "Crag", material = "Rock", colour = { 136, 131, 123 } },
+	{ name = "Rock", material = "Rock", colour = { 113, 108, 102 } },
+	{ name = "Slate", material = "Slate", colour = { 98, 96, 97 } },
+}
+
+-- The layer and colour for a cell. `top` is the column's original summit
+-- layer, `height` the original mountain height in layers.
+function RockStyle.look(key: number, top: number?, height: number): (number, number, number, number)
+	local column = key % LAYER
+	local x, y, z = column % SPAN - 128, key // LAYER, column // SPAN - 128
+	local h = y / math.max(1, height)
+	local depth = (top or y) - y
+	local bands = math.noise(x * 0.09, z * 0.09, 4.2)
+	local snowLine = 0.64 + bands * 0.18
+	local grassLine = 0.18 + bands * 0.14
+	local layer
+	if depth <= 0 then
+		layer = if h >= snowLine then RockStyle.SNOW elseif h <= grassLine then RockStyle.GRASS else RockStyle.CRAG
+	elseif depth <= 1 and h >= snowLine then
+		layer = RockStyle.SNOW
+	elseif depth <= 2 and h <= grassLine + 0.06 then
+		layer = RockStyle.DIRT
+	else
+		-- Tilted strata show in crater walls.
+		layer = if math.noise(x * 0.05, y * 0.22 + x * 0.03, z * 0.05) > 0.1 then RockStyle.SLATE else RockStyle.ROCK
+	end
+	local base = RockStyle.LAYERS[layer].colour
+	local shade = 0.9 + sample(key, 7321441) * 0.18
+	local r, g, b = base[1] * shade, base[2] * shade, base[3] * shade
+	if layer == RockStyle.GRASS then
+		-- Sunlit patches drift towards a warmer green.
+		local warm = math.clamp(math.noise(x * 0.21, z * 0.21, 9.1) + 0.5, 0, 1)
+		r, g, b = r + warm * 18, g + warm * 12, b + warm * 4
+	elseif layer >= RockStyle.ROCK and sample(key, 517927) > 0.985 then
+		-- Rare pale quartz flecks keep the rock from looking flat.
+		r, g, b = 165, 160, 150
+	end
+	return layer, math.min(255, r), math.min(255, g), math.min(255, b)
+end
+
+return RockStyle
+]]></string>
+        </Properties>
+      </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="9">
+  <Item class="ServerScriptService" referent="14">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="10">
+    <Item class="Script" referent="15">
       <Properties>
         <string name="Name">DiamondRushServer</string>
         <token name="RunContext">0</token>
@@ -289,6 +1376,11 @@ Notify.Parent = Remotes
 local Request = Instance.new("RemoteEvent")
 Request.Name = "Request"
 Request.Parent = Remotes
+-- Mountain snapshots and change lists travel in order on one remote; every
+-- client draws its own rock from them (see Mountain and MountainView).
+local MountainSync = Instance.new("RemoteEvent")
+MountainSync.Name = "MountainSync"
+MountainSync.Parent = Remotes
 Remotes.Parent = ReplicatedStorage
 
 -- Saved settings --------------------------------------------------------------
@@ -408,10 +1500,11 @@ local _ = StarterPack
 local DiamondShape = require(Shared:WaitForChild("DiamondShape"))
 local diamond = Instance.new("Part")
 diamond.Name = "Diamond"
--- Sizes are relative to the original gem, with a larger held silhouette.
+-- Sizes are relative to the original gem. Held high, it must read clearly as a
+-- diamond to everyone watching, so it is well over twice the found size.
 local DIAMOND_BASE_SIZE = Vector3.new(blockSize, blockSize, blockSize) * 0.85
 local DIAMOND_WORLD_SIZE = DIAMOND_BASE_SIZE * 2
-local DIAMOND_HELD_SIZE = DIAMOND_BASE_SIZE * 4
+local DIAMOND_HELD_SIZE = DIAMOND_BASE_SIZE * 6.5
 diamond.Size = DIAMOND_WORLD_SIZE
 diamond.Material = Enum.Material.Glass
 diamond.Color = Color3.fromRGB(175, 240, 255)
@@ -424,9 +1517,26 @@ diamond.Parent = workspace
 DiamondShape.attach(diamond)
 local glow = Instance.new("PointLight")
 glow.Color = Color3.fromRGB(140, 230, 255)
-glow.Range = 4
-glow.Brightness = 0.6
+glow.Range = 8
+glow.Brightness = 1.2
+glow.Shadows = false
 glow.Parent = diamond
+-- Sparkles around the raised gem while it is held (default sparkle texture).
+local sparkleAttachment = Instance.new("Attachment")
+sparkleAttachment.Name = "Sparkle"
+sparkleAttachment.Parent = diamond
+local sparkles = Instance.new("ParticleEmitter")
+sparkles.Name = "HeldSparkles"
+sparkles.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(150, 235, 255))
+sparkles.LightEmission = 1
+sparkles.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 0) })
+sparkles.Transparency = NumberSequence.new(0.1, 1)
+sparkles.Lifetime = NumberRange.new(0.4, 0.9)
+sparkles.Rate = 14
+sparkles.Speed = NumberRange.new(0.6, 1.8)
+sparkles.SpreadAngle = Vector2.new(180, 180)
+sparkles.Enabled = false
+sparkles.Parent = sparkleAttachment
 local holdOutline = Instance.new("Highlight")
 holdOutline.Name = "CountdownDiamond"
 holdOutline.Adornee = diamond
@@ -484,7 +1594,31 @@ local function showDiamond(visible: boolean)
 	-- No through-rock outline, beacon or floating location label while searching.
 	glow.Enabled = visible and phase == "Holding"
 	holdOutline.Enabled = visible and phase == "Holding"
+	sparkles.Enabled = visible and phase == "Holding"
 	click.MaxActivationDistance = if visible and phase == "Revealed" then PICKUP_DISTANCE else 0
+end
+
+-- Mountain sync --------------------------------------------------------------------
+-- Players whose client asked for the mountain; only they receive changes.
+local synced: { [Player]: boolean } = {}
+local readyAt: { [Player]: number } = {}
+local function sendMessages(messages: { { any } }, player: Player?)
+	for _, message in messages do
+		if player then
+			MountainSync:FireClient(player, message[1], message[2])
+		else
+			for listener in synced do MountainSync:FireClient(listener, message[1], message[2]) end
+		end
+	end
+end
+local lastFlush = 0
+local function flushMountain(effect: string?, at: Vector3?)
+	local current = mountain
+	if current == nil then return end
+	lastFlush = os.clock()
+	for _, diff in current:flush(effect, at) do
+		for listener in synced do MountainSync:FireClient(listener, "diff", diff) end
+	end
 end
 
 -- The find stays at its reserved lower, central cell even when support is dug
@@ -517,15 +1651,21 @@ local cancelHoldForRebuild: () -> Player? = function() return nil end
 local function growthCapacity(): number
 	return math.max(Config.GrowthMaxStone, startingStone * 2)
 end
-local function workCheckpoint(onYield: (() -> ())?): () -> ()
+-- Long rock work yields every few milliseconds so the server keeps its frame
+-- rate. Changes stream to clients while the work continues.
+local function workCheckpoint(onYield: (() -> ())?, effect: string?, budget: number?): () -> ()
 	local frameStart = os.clock()
 	local lastCountUpdate = frameStart
+	local slice = budget or 0.003
 	return function()
-		if os.clock() - frameStart >= 0.003 then
+		if os.clock() - frameStart >= slice then
 			if os.clock() - lastCountUpdate >= 0.1 then
 				-- Publish the final count after geometry is reconciled, not ahead of it.
 				if onYield then onYield() end
 				lastCountUpdate = os.clock()
+			end
+			if mountain and mountain:hasChanges() and os.clock() - lastFlush >= 0.05 then
+				flushMountain(effect)
 			end
 			task.wait()
 			frameStart = os.clock()
@@ -541,26 +1681,23 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 		table.insert(pendingChanges, amount)
 		return
 	end
-	local checkpoint = workCheckpoint()
 	if amount < 0 then
-		local character = holder and holder.Character
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		local focus = if phase == "Holding" and root and root:IsA("BasePart") then root.Position else nil
 		local capacity = growthCapacity()
 		local interrupted = if current:remaining() < capacity then cancelHoldForRebuild() else nil
-		checkpoint = workCheckpoint(function() interruptRebuildHold(0, interrupted) end)
-		local restored, samples = current:restore(-amount, focus, capacity, checkpoint)
+		local checkpoint = workCheckpoint(function() interruptRebuildHold(0, interrupted) end, "restore")
+		local restored, at = current:restore(-amount, capacity, checkpoint)
+		flushMountain("restore", at)
 		if restored > 0 then interruptRebuildHold(restored, interrupted) end
 		refreshStone()
 		if phase == "Revealed" then
 			stopSettling()
 			settleDiamond()
 		end
-		Notify:FireAllClients("restore", { stones = samples, count = restored })
-		return (if #samples > 0 then samples[1].frame.Position else nil), -restored
+		return at, -restored
 	end
 	local count = math.min(amount, current:remaining())
-	local centre = current:blast(count, checkpoint, centreKey)
+	local centre = current:blast(count, workCheckpoint(nil, "blast"), centreKey)
+	flushMountain("blast", centre)
 	-- Gift spectacle is rendered by GiftEffects on each client. Never create a
 	-- physics Explosion: blasts may remove grid stones, never the diamond or rigs.
 	refreshStone()
@@ -610,7 +1747,48 @@ local function lowerArms()
 	table.clear(raisedArms)
 end
 
+-- The diamond holder cannot move until a rebuild cancels the hold or they win.
+local frozen: { player: Player, humanoid: Humanoid, root: BasePart, walk: number, jump: number, jumpHeight: number, autoRotate: boolean }? = nil
+local function freeze(player: Player, character: Model)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if humanoid == nil or root == nil or not root:IsA("BasePart") then return end
+	frozen = {
+		player = player,
+		humanoid = humanoid,
+		root = root,
+		walk = humanoid.WalkSpeed,
+		jump = humanoid.JumpPower,
+		jumpHeight = humanoid.JumpHeight,
+		autoRotate = humanoid.AutoRotate,
+	}
+	humanoid.WalkSpeed = 0
+	humanoid.JumpPower = 0
+	humanoid.JumpHeight = 0
+	humanoid.AutoRotate = false
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	root.Anchored = true
+end
+local function unfreeze()
+	local state = frozen
+	frozen = nil
+	if state == nil then return end
+	if state.humanoid.Parent then
+		state.humanoid.WalkSpeed = state.walk
+		state.humanoid.JumpPower = state.jump
+		state.humanoid.JumpHeight = state.jumpHeight
+		state.humanoid.AutoRotate = state.autoRotate
+	end
+	if state.root.Parent then
+		state.root.Anchored = false
+		-- Hand physics back to the player's own client.
+		pcall(function() state.root:SetNetworkOwner(state.player) end)
+	end
+end
+
 local rebuilding = false
+local REBUILD_SECONDS = 0.5 + 16 * 0.15 -- matches the client's base-to-summit waves
 local function newRound(animated: boolean?)
 	if stoneBusy then requestedRound = animated == true; return end
 	if rebuilding then return end
@@ -618,10 +1796,9 @@ local function newRound(animated: boolean?)
 	setPhase("Rebuilding")
 	showDiamond(false)
 	stopSettling()
-	if mountain ~= nil then
-		mountain:destroy()
-	end
+	mountain = nil
 	holder = nil
+	unfreeze()
 	lowerArms()
 	if holdWeld ~= nil then
 		holdWeld:Destroy()
@@ -631,7 +1808,8 @@ local function newRound(animated: boolean?)
 		teleportHome(player)
 	end
 	startingStone = math.clamp(settings.startingStone, 100, 1500000)
-	local created = Mountain.new(workspace, startingStone, blockSize, reveal, animated == true)
+	-- Larger slices while nothing else runs; the win screen covers the build.
+	local created = Mountain.new(startingStone, blockSize, reveal, workCheckpoint(nil, nil, 0.008))
 	mountain = created
 	startingStone = created:total()
 	diamond.Anchored = true
@@ -643,33 +1821,9 @@ local function newRound(animated: boolean?)
 	State:SetAttribute("HolderUserId", 0)
 	State:SetAttribute("HoldStart", 0)
 	refreshStone()
+	sendMessages(created:snapshot(animated == true, workspace:GetServerTimeNow() + 0.5))
 	if animated then
-		local layers = {}
-		local samples = {}
-		for _, part in created.parts do
-			local layer = math.clamp(math.floor(part.Position.Y / (created.grid.height * blockSize) * 16) + 1, 1, 16)
-			layers[layer] = layers[layer] or {}
-			table.insert(layers[layer], part)
-		end
-		for layer = 1, 16 do
-			local bucket = layers[layer] or {}
-			local taken = 0
-			for _, part in bucket do
-				if not part:GetAttribute("BackingRock") then
-					table.insert(samples, { frame = part.CFrame, size = part.Size, colour = part.Color, layer = layer })
-					taken += 1
-					if taken >= 5 then break end
-				end
-			end
-		end
-		local start = workspace:GetServerTimeNow() + 0.5
-		Notify:FireAllClients("rebuild", { stones = samples, start = start })
-		task.wait(0.5)
-		for layer = 1, 16 do
-			task.wait(0.15)
-			for _, part in layers[layer] or {} do part.Transparency = 0 end
-		end
-		created.folder:SetAttribute("Building", false)
+		task.wait(REBUILD_SECONDS)
 	end
 	rebuilding = false
 	setPhase("Digging")
@@ -695,15 +1849,10 @@ local function grab(player: Player)
 	end
 	-- ClickDetector events can be forged: range and an unobstructed sightline
 	-- are checked again on the server before claiming the single diamond.
+	-- Rock only exists on clients, so the sightline is checked on the grid.
+	local current = mountain
 	local direction = diamond.Position - head.Position
-	if direction.Magnitude > PICKUP_DISTANCE then
-		return
-	end
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { character :: Model }
-	local hit = workspace:Raycast(head.Position, direction, params)
-	if hit == nil or hit.Instance ~= diamond then
+	if current == nil or direction.Magnitude > PICKUP_DISTANCE or current:lineBlocked(head.Position, diamond.Position) then
 		return
 	end
 	stopSettling()
@@ -728,6 +1877,7 @@ local function grab(player: Player)
 	weld.Parent = diamond
 	holdWeld = weld
 	raiseArms(character :: Model)
+	freeze(player, character :: Model)
 	Notify:FireAllClients("grabbed", player.DisplayName)
 end
 
@@ -739,6 +1889,7 @@ local function drop(reason: string)
 	local lost = holder
 	holder = nil
 	holdStarted = 0
+	unfreeze()
 	lowerArms()
 	if holdWeld ~= nil then
 		holdWeld:Destroy()
@@ -763,36 +1914,23 @@ end
 interruptRebuildHold = function(restored: number, interrupted: Player?)
 	local current = mountain
 	if current == nil then return end
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { current.folder }
-	local height = current.grid.height * blockSize * 2 + 50
-	local function surface(x: number, z: number): RaycastResult?
-		return workspace:Raycast(Vector3.new(x, height, z), Vector3.new(0, -height - 100, 0), params)
-	end
-	-- Find the highest actual restored surface, including partially dug summits.
-	local summit: Vector3? = nil
-	if interrupted and restored >= 10000 then
-		local highest: BasePart? = nil
-		for _, part in current.parts do
-			if highest == nil or part.Position.Y > highest.Position.Y then highest = part end
-		end
-		if highest then
-			local hit = surface(highest.Position.X, highest.Position.Z)
-			if hit then summit = hit.Position end
-		end
-	end
+	-- The former holder goes to the highest restored surface after a big rebuild.
+	local summit = if interrupted and restored >= 10000 then current:summit() else nil
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if character == nil or root == nil or not root:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then continue end
-		local ground = surface(root.Position.X, root.Position.Z)
 		local clearance = humanoid.HipHeight + root.Size.Y / 2
 		-- R6 rigs use zero HipHeight; account for their legs.
 		if humanoid.RigType == Enum.HumanoidRigType.R6 then clearance += 2 end
 		local destination = if player == interrupted then summit else nil
-		if destination == nil and ground and ground.Position.Y > root.Position.Y - clearance + 0.1 then destination = ground.Position end
+		if destination == nil then
+			-- Lift players whose body is now inside restored rock onto its surface.
+			local feet = root.Position.Y - clearance
+			local top = current:coveredTop(root.Position, feet + 0.15, root.Position.Y + 1.5)
+			if top then destination = Vector3.new(root.Position.X, top, root.Position.Z) end
+		end
 		if destination then
 			local target = destination + Vector3.new(0, clearance + 1, 0)
 			character:PivotTo(character:GetPivot() + (target - root.Position))
@@ -805,6 +1943,8 @@ end
 
 local function win(player: Player)
 	setPhase("Won")
+	-- The winner may move again; the arm stays raised until the next round.
+	unfreeze()
 	click.MaxActivationDistance = 0
 	local roundTime = workspace:GetServerTimeNow() - roundStart
 	local newBest = settings.best <= 0 or roundTime < settings.best
@@ -1049,8 +2189,10 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 	if action == "mine" then
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
+		-- The client names the rock cell it is aiming at (rock parts are local).
 		local current = mountain
-		if stoneBusy or current == nil or phase == "Won" or phase == "Rebuilding" or holder == player or typeof(value) ~= "Instance" or value == diamond then
+		if stoneBusy or current == nil or phase == "Won" or phase == "Rebuilding" or holder == player
+			or type(value) ~= "number" or value ~= math.floor(value) or value < 0 or value >= 2 ^ 32 then
 			return
 		end
 		local now = os.clock()
@@ -1059,19 +2201,35 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		if allowed < 1 then
 			return
 		end
-		local key = current:keyForPart(value)
+		local key: number = value
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if key == nil or root == nil or not root:IsA("BasePart") then
+		if root == nil or not root:IsA("BasePart") or not current:isExposed(key) then
 			return
 		end
-		if (root.Position - current:keyPosition(key)).Magnitude > 16 then
+		local at = current:keyPosition(key)
+		if (root.Position - at).Magnitude > 16 then
 			return
 		end
 		mineCooldown[player] = now
 		if current:dig(key, allowed) > 0 then
+			flushMountain("dig", at)
 			refreshStone()
 			settleDiamond()
+		end
+		return
+	end
+	if action == "mountainReady" then
+		-- Sent by each client when its renderer is listening (and repeated until
+		-- a snapshot arrives): it gets the whole mountain now and every change
+		-- after it. During a rebuild the new round's snapshot follows shortly.
+		local now = os.clock()
+		if now - (readyAt[player] or -math.huge) < 2 then return end
+		readyAt[player] = now
+		synced[player] = true
+		local current = mountain
+		if current then
+			sendMessages(current:snapshot(false), player)
 		end
 		return
 	end
@@ -1152,6 +2310,8 @@ end
 Players.PlayerRemoving:Connect(function(player)
 	admins[player] = nil
 	mineCooldown[player] = nil
+	synced[player] = nil
+	readyAt[player] = nil
 end)
 
 publishSettings()
@@ -1159,681 +2319,45 @@ State:SetAttribute("TikTok", "Startingâ€¦")
 newRound()
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="11">
-        <Properties>
-          <string name="Name">Grid</string>
-          <string name="Source"><![CDATA[--!strict
--- Pure block-grid logic for the mountain, with no Roblox instances, so it can be
--- tested outside Roblox. Cells are keyed by one integer; a cell is "exposed"
--- when at least one of its six neighbours is open air, and only exposed cells
--- can be blasted away.
-local Grid = {}
-Grid.__index = Grid
-
-local OFFSET = 128
-local SPAN = 256
-local NEIGHBOURS = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
-
--- Bit-packed pages avoid resizing a million-entry hash table during a gift.
--- The dictionary interface keeps all callers using the same cell keys.
-local function newCellMap(): { [number]: boolean }
-	local pages: { [number]: buffer } = {}
-	local masks = { 1, 2, 4, 8, 16, 32, 64, 128 }
-	return setmetatable({}, {
-		__index = function(_self, key: number)
-			local page = pages[key // 4096]
-			if page == nil then return nil end
-			return if bit32.band(buffer.readu8(page, (key % 4096) // 8), masks[key % 8 + 1]) ~= 0 then true else nil
-		end,
-		__newindex = function(_self, key: number, value: boolean?)
-			local index = key // 4096
-			local page = pages[index]
-			if page == nil then
-				if not value then return end
-				page = buffer.create(512)
-				pages[index] = page
-			end
-			local offset, mask = (key % 4096) // 8, masks[key % 8 + 1]
-			local byte = buffer.readu8(page, offset)
-			buffer.writeu8(page, offset, if value then bit32.bor(byte, mask) else bit32.band(byte, bit32.bnot(mask)))
-		end,
-		__iter = function()
-			local pageIndex: number? = nil
-			local page: buffer? = nil
-			local slot = 4096
-			return function(): (number?, boolean?)
-				while true do
-					if slot >= 4096 then
-						pageIndex, page = next(pages, pageIndex)
-						if pageIndex == nil then return nil end
-						slot = 0
-					end
-					local bit = slot
-						slot += 1
-					if bit32.band(buffer.readu8(page :: buffer, bit // 8), masks[bit % 8 + 1]) ~= 0 then
-						return (pageIndex :: number) * 4096 + bit, true
-					end
-				end
-			end
-		end,
-	}) :: any
-end
-
--- Surface indices change continuously as the frontier moves. Paging these
--- numbers also avoids hash-table expansion pauses around large surface sizes.
-local function newIndexMap(): { [number]: number }
-	local pages: { [number]: buffer } = {}
-	return setmetatable({}, {
-		__index = function(_self, key: number)
-			local page = pages[key // 256]
-			if page == nil then return nil end
-			local value = buffer.readu32(page, key % 256 * 4)
-			return if value ~= 0 then value else nil
-		end,
-		__newindex = function(_self, key: number, value: number?)
-			local index = key // 256
-			local page = pages[index]
-			if page == nil then
-				if value == nil then return end
-				page = buffer.create(1024)
-				pages[index] = page
-			end
-			buffer.writeu32(page, key % 256 * 4, value or 0)
-		end,
-	}) :: any
-end
-
-export type Grid = typeof(setmetatable(
-	{} :: {
-		radius: number,
-		height: number,
-		solid: { [number]: boolean },
-		order: { number },
-		total: number,
-		removed: number,
-		removedOrder: { number },
-		exposedList: { number },
-		exposedIndex: { [number]: number },
-		rand: (number?, number?) -> number,
-		fresh: { number },
-		sealed: { [number]: boolean },
-		growthHeap: { number }?,
-		growthScores: { number }?,
-		growthQueued: { [number]: boolean }?,
-	},
-	Grid
-))
-
-function Grid.key(x: number, y: number, z: number): number
-	return (x + OFFSET) + (z + OFFSET) * SPAN + y * SPAN * SPAN
-end
-
-function Grid.coords(key: number): (number, number, number)
-	local y = key // (SPAN * SPAN)
-	local rest = key % (SPAN * SPAN)
-	return (rest % SPAN) - OFFSET, y, (rest // SPAN) - OFFSET
-end
-
--- Builds a mountain of exactly `target` cells (one cell = one stone).
--- rand(): a number in [0, 1); rand(a, b): a whole number from a to b.
-function Grid.new(target: number, seed: number, rand: (number?, number?) -> number): Grid
-	target = math.max(1, math.floor(target))
-	-- Allocate the rock budget across tapered columns. Removing excess rocks
-	-- from the highest layers would cut the summit into a broad flat stump.
-	local radius = math.clamp(math.ceil((target * 1.06 / 0.94) ^ (1 / 3)), 3, OFFSET - 4)
-	local height = math.max(2, math.floor(radius * 1.05 + 0.5))
-	local self = setmetatable({
-		radius = radius,
-		height = height,
-		solid = newCellMap(),
-		order = {},
-		total = 0,
-		removed = 0,
-		removedOrder = {},
-		exposedList = {},
-		exposedIndex = newIndexMap(),
-		rand = rand,
-		fresh = {},
-		sealed = {},
-		growthHeap = nil,
-		growthScores = nil,
-		growthQueued = nil,
-	}, Grid)
-	local scale = 15 / radius
-	local columns = {}
-	local weightTotal = 0
-	for z = -radius, radius do
-		for x = -radius, radius do
-			local distance = math.sqrt(x * x + z * z) / radius
-			if distance <= 1 then
-				local bumps = math.noise(x * 0.16 * scale, z * 0.16 * scale, seed) * 2.6 + math.noise(x * 0.4 * scale, z * 0.4 * scale, seed + 7.3) * 0.9
-				-- Slopes continue almost to the centre, leaving a small summit.
-				local profile = math.min(1, (1 - distance) / 0.94) ^ 1.05
-				local weight = math.max(0, height * profile + bumps * (1 - distance * 0.6) / math.sqrt(scale))
-				table.insert(columns, { x = x, z = z, weight = weight, height = 0, fraction = 0 })
-				weightTotal += weight
-			end
-		end
-	end
-	local count = 0
-	for _, column in columns do
-		local exact = target * column.weight / weightTotal
-		column.height = math.floor(exact)
-		column.fraction = exact - column.height
-		count += column.height
-	end
-	-- Spread rounding remainders across columns instead of shaving the summit.
-	table.sort(columns, function(a, b)
-		if a.fraction ~= b.fraction then return a.fraction > b.fraction end
-		if a.z ~= b.z then return a.z < b.z end
-		return a.x < b.x
-	end)
-	for i = 1, target - count do columns[i].height += 1 end
-	self.height = 0
-	for _, column in columns do
-		self.height = math.max(self.height, column.height)
-		for y = 0, column.height - 1 do
-			local key = Grid.key(column.x, y, column.z)
-			self.solid[key] = true
-			table.insert(self.order, key)
-		end
-	end
-	self.total = #self.order
-	for _, key in self.order do
-		if self:isExposed(key) then
-			self:_expose(key)
-		end
-	end
-	table.clear(self.fresh)
-	return self
-end
-
-function Grid.isSolid(self: Grid, key: number): boolean
-	return self.solid[key] == true
-end
-
--- One solid layer behind a surface cell, excluding ground and the diamond cavity.
-function Grid.solidNeighbours(self: Grid, key: number): { number }
-	local x, y, z = Grid.coords(key)
-	local result = {}
-	for _, step in NEIGHBOURS do
-		local ny = y + step[2]
-		local neighbour = Grid.key(x + step[1], ny, z + step[3])
-		if ny >= 0 and self:isSolid(neighbour) then
-			table.insert(result, neighbour)
-		end
-	end
-	return result
-end
-
-function Grid.remaining(self: Grid): number
-	return self.total - self.removed
-end
-
-function Grid.isExposed(self: Grid, key: number): boolean
-	local x, y, z = Grid.coords(key)
-	for _, step in NEIGHBOURS do
-		local ny = y + step[2]
-		-- The ground under the mountain counts as solid.
-		local neighbour = Grid.key(x + step[1], ny, z + step[3])
-		if ny >= 0 and not self.solid[neighbour] and not self.sealed[neighbour] then
-			return true
-		end
-	end
-	return false
-end
-
-function Grid._expose(self: Grid, key: number)
-	if self.exposedIndex[key] == nil then
-		table.insert(self.exposedList, key)
-		self.exposedIndex[key] = #self.exposedList
-		table.insert(self.fresh, key)
-	end
-end
-
-function Grid._unexpose(self: Grid, key: number)
-	local index = self.exposedIndex[key]
-	if index == nil then
-		return
-	end
-	local last = self.exposedList[#self.exposedList]
-	self.exposedList[index] = last
-	self.exposedIndex[last] = index
-	self.exposedList[#self.exposedList] = nil
-	self.exposedIndex[key] = nil
-end
-
-function Grid.exposedCount(self: Grid): number
-	return #self.exposedList
-end
-
--- Removes one solid cell; its solid neighbours become exposed.
-function Grid.remove(self: Grid, key: number): boolean
-	if not self.solid[key] then
-		return false
-	end
-	self.solid[key] = nil
-	self.growthHeap = nil
-	self.growthScores = nil
-	self.growthQueued = nil
-	self.removed += 1
-	table.insert(self.removedOrder, key)
-	self:_unexpose(key)
-	local x, y, z = Grid.coords(key)
-	for _, step in NEIGHBOURS do
-		local ny = y + step[2]
-		if ny >= 0 then
-			local neighbour = Grid.key(x + step[1], ny, z + step[3])
-			if self.solid[neighbour] then
-				self:_expose(neighbour)
-			end
-		end
-	end
-	return true
-end
-
--- Refill recently excavated cells in reverse order, never the sealed diamond cell.
-function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?, z: number, radius: number? }?, checkpoint: (() -> ())?, onAdded: ((number) -> ())?): { number }
-	-- Bucket integer squared distances so large refills avoid sorting every
-	-- missing rock. Pop nearest buckets first, leaving the gem cell reserved.
-	if focus and focus.y ~= nil then
-		local buckets = {}
-		local distances = {}
-		for index, key in self.removedOrder do
-			local x, y, z = Grid.coords(key)
-			local distance = (x - focus.x)^2 + (y - focus.y)^2 + (z - focus.z)^2
-			if buckets[distance] == nil then
-				buckets[distance] = {}
-				table.insert(distances, distance)
-			end
-			table.insert(buckets[distance], key)
-			if checkpoint and index % 256 == 0 then checkpoint() end
-		end
-		table.sort(distances, function(a, b) return a > b end)
-		local ordered = {}
-		for _, distance in distances do
-			for _, key in buckets[distance] do
-				table.insert(ordered, key)
-				if checkpoint and #ordered % 256 == 0 then checkpoint() end
-			end
-		end
-		self.removedOrder = ordered
-	elseif focus then
-		local distant, nearby = {}, {}
-		for index, key in self.removedOrder do
-			if checkpoint and index % 256 == 0 then checkpoint() end
-			local x, y, z = Grid.coords(key)
-			local distance = (x - focus.x) ^ 2 + (z - focus.z) ^ 2
-			if distance <= (focus.radius or 0) ^ 2 then
-				table.insert(nearby, { key = key, y = y, distance = distance })
-			else
-				table.insert(distant, key)
-			end
-		end
-		-- restore pops from the end: closest column first, lowest cell first.
-		table.sort(nearby, function(a, b)
-			if a.distance ~= b.distance then return a.distance > b.distance end
-			if a.y ~= b.y then return a.y > b.y end
-			return a.key > b.key
-		end)
-		for _, cell in nearby do table.insert(distant, cell.key) end
-		self.removedOrder = distant
-	end
-	local restored = {}
-	local affected = {}
-	while #restored < count and #self.removedOrder > 0 do
-		local key = table.remove(self.removedOrder) :: number
-		if not self.solid[key] and not self.sealed[key] then
-			self.solid[key] = true
-			self.removed -= 1
-			table.insert(restored, key)
-			if onAdded then onAdded(key) end
-			if checkpoint and #restored % 256 == 0 then checkpoint() end
-			affected[key] = true
-			for _, neighbour in self:solidNeighbours(key) do affected[neighbour] = true end
-		end
-	end
-	local processed = 0
-	for key in affected do
-		processed += 1
-		if checkpoint and processed % 256 == 0 then checkpoint() end
-		if self:isExposed(key) then self:_expose(key) else self:_unexpose(key) end
-	end
-	if #restored > 0 then self.growthHeap = nil; self.growthScores = nil; self.growthQueued = nil end
-	return restored
-end
-
-function Grid.randomExposed(self: Grid): number?
-	local count = #self.exposedList
-	if count == 0 then
-		return nil
-	end
-	return self.exposedList[self.rand(1, count)]
-end
-
--- A minimal binary heap of {distance, key} pairs, nearest first.
-local function push(heap: { { number } }, item: { number })
-	table.insert(heap, item)
-	local i = #heap
-	while i > 1 do
-		local parent = i // 2
-		if heap[parent][1] <= heap[i][1] then
-			break
-		end
-		heap[parent], heap[i] = heap[i], heap[parent]
-		i = parent
-	end
-end
-
-local function pop(heap: { { number } }): { number }?
-	local count = #heap
-	if count == 0 then
-		return nil
-	end
-	local top = heap[1]
-	heap[1] = heap[count]
-	heap[count] = nil
-	count -= 1
-	local i = 1
-	while true do
-		local left, right, smallest = i * 2, i * 2 + 1, i
-		if left <= count and heap[left][1] < heap[smallest][1] then
-			smallest = left
-		end
-		if right <= count and heap[right][1] < heap[smallest][1] then
-			smallest = right
-		end
-		if smallest == i then
-			break
-		end
-		heap[smallest], heap[i] = heap[i], heap[smallest]
-		i = smallest
-	end
-	return top
-end
-
--- Blasts up to `count` cells as one crater around a random exposed cell (or
--- `centre`): the nearest cells to the centre go first, and the crater only
--- grows through cells it has opened up. Returns the removed keys and the centre.
-function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?, onRemoved: ((number) -> ())?): ({ number }, number?)
-	local removed: { number } = {}
-	local start = if centre ~= nil and self.solid[centre] and self.exposedIndex[centre] then centre else self:randomExposed()
-	if start == nil then
-		return removed, nil
-	end
-	local cx, cy, cz = Grid.coords(start)
-	local heap: { { number } } = {}
-	local queued: { [number]: boolean } = {}
-	local function enqueue(key: number)
-		if queued[key] or not self.solid[key] then
-			return
-		end
-		queued[key] = true
-		local x, y, z = Grid.coords(key)
-		-- Craters dig a little more readily downwards and outwards than up.
-		local dy = (y - cy) * (if y > cy then 1.15 else 0.9)
-		push(heap, { (x - cx) ^ 2 + dy * dy + (z - cz) ^ 2 + self.rand() * 0.6, key })
-	end
-	enqueue(start)
-	while #removed < count do
-		local item = pop(heap)
-		if item == nil then
-			-- The crater ran out of reachable rock: carry on from a new spot.
-			local nextStart = self:randomExposed()
-			if nextStart == nil then
-				break
-			end
-			cx, cy, cz = Grid.coords(nextStart)
-			enqueue(nextStart)
-			continue
-		end
-		local key = item[2]
-		if self:remove(key) then
-			table.insert(removed, key)
-			if onRemoved then onRemoved(key) end
-			if checkpoint and #removed % 256 == 0 then checkpoint() end
-			local x, y, z = Grid.coords(key)
-			for _, step in NEIGHBOURS do
-				local ny = y + step[2]
-				if ny >= 0 then
-					enqueue(Grid.key(x + step[1], ny, z + step[3]))
-				end
-			end
-		end
-	end
-	return removed, start
-end
-
--- Expand the rock's surface without generating a replacement mountain.
--- Existing tunnels are restored first by Mountain.restore; the sealed diamond
--- cell is never filled. The cached frontier keeps consecutive growth gifts cheap.
-function Grid.grow(self: Grid, count: number, capacity: number, checkpoint: (() -> ())?, onAdded: ((number) -> ())?): { number }
-	count = math.min(math.max(0, math.floor(count)), math.max(0, capacity - self.total))
-	local added = {}
-	if count == 0 then return added end
-	local heap = self.growthHeap or {}
-	local scores = self.growthScores or {}
-	local queued = self.growthQueued or {}
-	-- Parallel numeric arrays avoid allocating a tiny table for every new cell.
-	local function pushCandidate(key: number, score: number)
-		local i = #heap + 1
-		while i > 1 do
-			local parent = i // 2
-			if scores[parent] <= score then break end
-			heap[i], scores[i] = heap[parent], scores[parent]
-			i = parent
-		end
-		heap[i], scores[i] = key, score
-	end
-	local function popCandidate(): number?
-		local count = #heap
-		if count == 0 then return nil end
-		local key = heap[1]
-		local last, lastScore = heap[count], scores[count]
-		heap[count], scores[count] = nil, nil
-		count -= 1
-		if count > 0 then
-			local i = 1
-			while i * 2 <= count do
-				local child = i * 2
-				if child + 1 <= count and scores[child + 1] < scores[child] then child += 1 end
-				if lastScore <= scores[child] then break end
-				heap[i], scores[i] = heap[child], scores[child]
-				i = child
-			end
-			heap[i], scores[i] = last, lastScore
-		end
-		queued[key] = nil
-		return key
-	end
-	local function enqueue(x: number, y: number, z: number)
-		if y < 0 or x * x + z * z > (OFFSET - 4) ^ 2 then return end
-		local key = Grid.key(x, y, z)
-		if self.solid[key] or self.sealed[key] or queued[key] then return end
-		queued[key] = true
-		pushCandidate(key, x * x + z * z + (y * 1.6) ^ 2)
-	end
-	if self.growthHeap == nil then
-		for index, key in self.exposedList do
-			local x, y, z = Grid.coords(key)
-			for _, step in NEIGHBOURS do enqueue(x + step[1], y + step[2], z + step[3]) end
-			if checkpoint and index % 256 == 0 then checkpoint() end
-		end
-		-- A cleared mountain can still be rebuilt (normally restore handles it).
-		if #heap == 0 then enqueue(0, 0, 0) end
-	end
-	self.growthHeap, self.growthScores, self.growthQueued = heap, scores, queued
-	while #added < count do
-		local key = popCandidate()
-		if key == nil then break end
-		if self.solid[key] or self.sealed[key] then continue end
-		self.solid[key] = true
-		self.total += 1
-		table.insert(self.order, key)
-		table.insert(added, key)
-		local x, y, z = Grid.coords(key)
-		self.radius = math.max(self.radius, math.ceil(math.sqrt(x * x + z * z)))
-		self.height = math.max(self.height, y + 1)
-		if self:isExposed(key) then self:_expose(key) end
-		for _, step in NEIGHBOURS do
-			local nx, ny, nz = x + step[1], y + step[2], z + step[3]
-			if ny >= 0 then
-				local neighbour = Grid.key(nx, ny, nz)
-				if self.solid[neighbour] and not self:isExposed(neighbour) then self:_unexpose(neighbour) end
-				enqueue(nx, ny, nz)
-			end
-		end
-		if onAdded then onAdded(key) end
-		if checkpoint and #added % 256 == 0 then checkpoint() end
-	end
-	return added
-end
-
--- Newly exposed cells since the last call (for drawing them).
-function Grid.takeFresh(self: Grid): { number }
-	local fresh = self.fresh
-	self.fresh = {}
-	return fresh
-end
-
--- True once any of the cell's six neighbours is open air.
-function Grid.isOpenAround(self: Grid, key: number): boolean
-	return self:isExposed(key)
-end
-
--- Takes a buried cell out of the rock for the diamond (all six neighbours
--- solid, in the lower two thirds so it is not found straight away). The
--- diamond is not stone: it does not count towards the total.
-function Grid.carveHiddenCell(self: Grid): number
-	local key = self:pickHiddenCell()
-	if self.solid[key] then
-		-- Sealed: not stone, but it still counts as rock around it until the
-		-- digging reaches it.
-		self.solid[key] = nil
-		self.sealed[key] = true
-		self:_unexpose(key)
-		self.total -= 1
-		local index = table.find(self.order, key)
-		if index then
-			table.remove(self.order, index)
-		end
-	end
-	return key
-end
-
-function Grid.pickHiddenCell(self: Grid): number
-	local buried: { number } = {}
-	for _, key in self.order do
-		local x, y, z = Grid.coords(key)
-		if self.solid[key] and not self:isExposed(key)
-			and y >= math.max(1, math.floor(self.height * 0.15)) and y <= self.height * 0.35
-			and x * x + z * z <= (self.radius * 0.3) ^ 2 then
-			table.insert(buried, key)
-		end
-	end
-	if #buried == 0 then
-		for _, key in self.order do
-			if self.solid[key] then
-				table.insert(buried, key)
-			end
-		end
-	end
-	return buried[self.rand(1, #buried)]
-end
-
--- The height of the highest solid cell in column (x, z) below layer y, or -1.
-function Grid.supportBelow(self: Grid, x: number, y: number, z: number): number
-	for level = y - 1, 0, -1 do
-		if self.solid[Grid.key(x, level, z)] then
-			return level
-		end
-	end
-	return -1
-end
-
-return Grid
-]]></string>
-        </Properties>
-      </Item>
-      <Item class="ModuleScript" referent="12">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
--- Draws the exposed stones plus one solid layer behind them. The shell advances
--- as digging opens the mountain, without instantiating all 250,000 cells.
-local Debris = game:GetService("Debris")
+-- The authoritative mountain: the rock grid plus a record of every change.
+-- No rock parts exist on the server. Each client draws the rock itself
+-- (MountainView) from a snapshot and compact change lists, so a huge gift
+-- costs a few kilobytes of network traffic instead of replicating thousands
+-- of parts, and the server never touches rendering.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Grid = require(script.Parent.Grid)
-local RockStyle = require(script.Parent.RockStyle)
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local Grid = require(Shared:WaitForChild("Grid"))
+local Codec = require(Shared:WaitForChild("MountainCodec"))
 
 local Mountain = {}
 Mountain.__index = Mountain
 
-local ROCK = {
-	Color3.fromRGB(92, 88, 84),
-	Color3.fromRGB(110, 106, 100),
-	Color3.fromRGB(128, 124, 116),
-	Color3.fromRGB(146, 140, 130),
-}
-local FLYING_LIMIT = 8
-
--- Fixed-size pages keep numeric part lookups from resizing a large sparse map
--- as gifts move the visible rock surface through tens of thousands of cells.
-local function newPartMap(): { [number]: BasePart }
-	local pages: { [number]: { BasePart } } = {}
-	return setmetatable({}, {
-		__index = function(_self, key: number)
-			local page = pages[key // 256]
-			return if page then page[key % 256 + 1] else nil
-		end,
-		__newindex = function(_self, key: number, value: BasePart?)
-			local index = key // 256
-			local page = pages[index]
-			if page == nil then
-				if value == nil then return end
-				page = table.create(256)
-				pages[index] = page
-			end
-			page[key % 256 + 1] = value
-		end,
-		__iter = function()
-			local pageIndex: number? = nil
-			local page: { BasePart }? = nil
-			local slot = 257
-			return function(): (number?, BasePart?)
-				while true do
-					if slot > 256 then
-						pageIndex, page = next(pages, pageIndex)
-						if pageIndex == nil then return nil end
-						slot = 1
-					end
-					local value = (page :: { BasePart })[slot]
-					local key = (pageIndex :: number) * 256 + slot - 1
-					slot += 1
-					if value then return key, value end
-				end
-			end
-		end,
-	}) :: any
-end
+local LAYER = Grid.LAYER
+local rounds = 0
 
 export type Mountain = typeof(setmetatable(
 	{} :: {
 		grid: Grid.Grid,
-		folder: Folder,
-		parts: { [number]: BasePart },
-		keys: { [BasePart]: number },
-		tops: { [number]: number },
 		blockSize: number,
 		random: Random,
 		diamondKey: number,
 		revealed: boolean,
 		onDiamondCell: (boolean) -> (),
+		tops: { [number]: number },
+		height: number,
+		round: number,
+		removedKeys: { number },
+		addedKeys: { number },
 	},
 	Mountain
 ))
 
-function Mountain.new(parent: Instance, stones: number, blockSize: number, onDiamondCell: (boolean) -> (), building: boolean?): Mountain
+function Mountain.new(stones: number, blockSize: number, onDiamondCell: (boolean) -> (), checkpoint: (() -> ())?): Mountain
 	local random = Random.new()
 	local function rand(a: number?, b: number?): number
 		if a ~= nil and b ~= nil then
@@ -1841,35 +2365,30 @@ function Mountain.new(parent: Instance, stones: number, blockSize: number, onDia
 		end
 		return random:NextNumber()
 	end
-	local grid = Grid.new(stones, random:NextNumber(0, 1000), rand)
-	local diamondKey = grid:carveHiddenCell()
-	local folder = Instance.new("Folder")
-	folder.Name = "Mountain"
-	folder:SetAttribute("Building", building == true)
-	local self = setmetatable({
+	local grid = Grid.new(stones, random:NextNumber(0, 1000), rand, checkpoint)
+	local diamondKey = grid:carveHiddenCell(checkpoint)
+	grid:takeFresh()
+	-- Original column summits: snow and grass only grow on the first surface.
+	local tops: { [number]: number } = {}
+	for index, key in grid.order do
+		local column, y = key % LAYER, key // LAYER
+		if (tops[column] or -1) < y then tops[column] = y end
+		if checkpoint and index % 16384 == 0 then checkpoint() end
+	end
+	rounds += 1
+	return setmetatable({
 		grid = grid,
-		folder = folder,
-		parts = newPartMap(),
-		keys = {},
-		tops = {},
 		blockSize = blockSize,
 		random = random,
 		diamondKey = diamondKey,
 		revealed = false,
 		onDiamondCell = onDiamondCell,
+		tops = tops,
+		height = grid.height,
+		round = rounds,
+		removedKeys = {},
+		addedKeys = {},
 	}, Mountain)
-	for _, key in grid.order do
-		local x, y, z = Grid.coords(key)
-		local column = Grid.key(x, 0, z)
-		self.tops[column] = math.max(self.tops[column] or 0, y)
-	end
-	for index, key in grid.exposedList do
-		self:_drawShell(key)
-		if building and index % 300 == 0 then task.wait() end
-	end
-	grid:takeFresh()
-	folder.Parent = parent
-	return self
 end
 
 function Mountain.cellPosition(self: Mountain, x: number, y: number, z: number): Vector3
@@ -1882,71 +2401,57 @@ function Mountain.keyPosition(self: Mountain, key: number): Vector3
 	return self:cellPosition(x, y, z)
 end
 
-function Mountain._draw(self: Mountain, key: number)
-	local existing: BasePart? = self.parts[key]
-	if not self.grid:isSolid(key) then
-		return
-	end
-	local backing = self.grid.exposedIndex[key] == nil
-	if existing ~= nil then
-		if backing == (existing:GetAttribute("BackingRock") == true) then return end
-		-- The inner stone becomes a faceted, diggable surface stone when uncovered.
-		self.keys[existing] = nil
-		existing:Destroy()
-	end
-	local x, y, z = Grid.coords(key)
+-- The cell containing a world position, or nil outside the grid.
+function Mountain.keyAt(self: Mountain, position: Vector3): number?
 	local size = self.blockSize
-	local style = RockStyle.forCell(key)
-	local part = Instance.new(if backing then "Part" else style.shape) :: BasePart
-	part.Name = "Stone"
-	part.Transparency = if self.folder:GetAttribute("Building") then 1 else 0
-	part.Anchored = true
-	part.CastShadow = false
-	part.Size = Vector3.new(style.x, style.y, style.z) * size
-	part.CFrame = CFrame.new(self:cellPosition(x, y, z) + Vector3.new(style.ox, style.oy, style.oz) * size)
-		* CFrame.Angles(style.pitch, style.yaw, style.roll)
-	if backing then
-		-- Flush blocks close sightlines between the larger irregular surface rocks.
-		part.Size = Vector3.new(1.02, 1.02, 1.02) * size
-		part.CFrame = CFrame.new(self:cellPosition(x, y, z))
-		part:SetAttribute("BackingRock", true)
-	end
-	part.CanCollide = not backing
-	part.CanQuery = not backing
-	part.CanTouch = false
-	part.TopSurface = Enum.SurfaceType.Smooth
-	part.BottomSurface = Enum.SurfaceType.Smooth
-	local height = self.grid.height
-	local top = self.tops[Grid.key(x, 0, z)] or 0
-	-- Colour depends only on the cell, so a rock looks the same whenever it appears.
-	local shade = (math.noise(x * 0.37, y * 0.41, z * 0.29) + 1) / 2
-	if y == top and y >= height * 0.7 then
-		part.Material = Enum.Material.Snow
-		part.Color = Color3.fromRGB(236, 240, 245)
-	elseif y == top and y <= height * 0.18 then
-		part.Material = Enum.Material.Grass
-		part.Color = Color3.fromRGB(88, 140, 70)
-	elseif style.quartz then
-		part.Material = Enum.Material.Rock
-		part.Color = Color3.fromRGB(166, 161, 150)
-	else
-		part.Material = if shade > 0.5 then Enum.Material.Slate else Enum.Material.Rock
-		part.Color = ROCK[math.clamp(1 + math.floor(y / height * #ROCK + shade), 1, #ROCK)]
-	end
-	part.Color = Color3.new(math.min(1, part.Color.R * style.shade), math.min(1, part.Color.G * style.shade), math.min(1, part.Color.B * style.shade))
-	-- Native stone facets need one instance each, without an extra mesh or light.
-	-- Colours stay close together: the one small diamond must be found by eye.
-	part.Parent = self.folder
-	self.parts[key] = part
-	self.keys[part] = key
+	local x = math.floor(position.X / size + 0.5)
+	local z = math.floor(position.Z / size + 0.5)
+	local y = math.floor(position.Y / size)
+	if y < 0 or math.abs(x) > 124 or math.abs(z) > 124 then return nil end
+	return Grid.key(x, y, z)
 end
 
-function Mountain._drawShell(self: Mountain, key: number)
-	if not self.grid:isSolid(key) then return end
-	self:_draw(key)
-	for _, neighbour in self.grid:solidNeighbours(key) do
-		self:_draw(neighbour)
+-- Ordered messages describing the whole mountain for a client.
+function Mountain.snapshot(self: Mountain, animated: boolean?, start: number?): { { any } }
+	local messages: { { any } } = {
+		{ "begin", {
+			round = self.round,
+			blockSize = self.blockSize,
+			diamondKey = self.diamondKey,
+			height = self.height,
+			animated = animated == true,
+			start = start or 0,
+		} },
+	}
+	local keys = table.create(self.grid:remaining())
+	self.grid:eachSolid(function(key) table.insert(keys, key) end)
+	for _, chunk in Codec.encode(keys) do table.insert(messages, { "cells", chunk } :: { any }) end
+	for _, chunk in Codec.encodePairs(self.tops) do table.insert(messages, { "tops", chunk } :: { any }) end
+	table.insert(messages, { "end", true } :: { any })
+	return messages
+end
+
+-- Change lists since the last flush, at most one encoded chunk each, or an
+-- empty list when nothing changed.
+function Mountain.flush(self: Mountain, effect: string?, at: Vector3?): { any }
+	local diffs: { any } = {}
+	if #self.removedKeys > 0 then
+		for _, chunk in Codec.encode(self.removedKeys) do
+			table.insert(diffs, { round = self.round, removed = { chunk }, effect = effect, at = at })
+		end
+		self.removedKeys = {}
 	end
+	if #self.addedKeys > 0 then
+		for _, chunk in Codec.encode(self.addedKeys) do
+			table.insert(diffs, { round = self.round, added = { chunk }, effect = effect, at = at })
+		end
+		self.addedKeys = {}
+	end
+	return diffs
+end
+
+function Mountain.hasChanges(self: Mountain): boolean
+	return #self.removedKeys > 0 or #self.addedKeys > 0
 end
 
 -- Exposure can change in both directions: rebuilding can bury a previously
@@ -1959,84 +2464,28 @@ function Mountain._syncDiamond(self: Mountain)
 	end
 end
 
--- Show a bounded first group during calculation, then draw the final shell.
-function Mountain.restore(self: Mountain, count: number, _near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
+-- Refills dug cells from the diamond outward, then grows new rock up to
+-- `capacity`. Returns how many rocks were added and where the refill started.
+function Mountain.restore(self: Mountain, count: number, capacity: number?, checkpoint: (() -> ())?): (number, Vector3?)
 	local dx, dy, dz = Grid.coords(self.diamondKey)
-	local focus = { x = dx, y = dy, z = dz }
-	local previewed = 0
-	local function startPlacement(key: number)
-		-- Only the first 32 cells get an immediate shell. Never render every
-		-- intermediate layer of a 100k refill again.
-		if previewed >= 32 then return end
-		previewed += 1
-		local neighbours = self.grid:solidNeighbours(key)
-		table.insert(neighbours, key)
-		for _, cell in neighbours do
-			if self.grid:isExposed(cell) then self.grid:_expose(cell) else self.grid:_unexpose(cell) end
-		end
-		self:_drawShell(key)
-		self:_syncDiamond()
-	end
-	local restored = self.grid:restore(count, focus, checkpoint, startPlacement)
-	if capacity and #restored < count then
-		local grown = self.grid:grow(count - #restored, capacity, checkpoint, startPlacement)
+	-- Look the list up on every call: a flush during the work replaces it.
+	local function record(key: number) table.insert(self.addedKeys, key) end
+	local restored = self.grid:restore(count, { x = dx, y = dy, z = dz }, checkpoint, record)
+	local total = #restored
+	local first = restored[1]
+	if capacity and total < count then
+		local grown = self.grid:grow(count - total, capacity, checkpoint, record)
 		for index, key in grown do
-			if checkpoint and index % 256 == 0 then checkpoint() end
-			table.insert(restored, key)
-			local x, y, z = Grid.coords(key)
-			local column = Grid.key(x, 0, z)
-			self.tops[column] = math.max(self.tops[column] or 0, y)
+			local column, y = key % LAYER, key // LAYER
+			if (self.tops[column] or -1) < y then self.tops[column] = y end
+			if checkpoint and index % 1024 == 0 then checkpoint() end
 		end
-	end
-	if #restored == 0 then return 0, {} end
-	-- Interior cells need no instances and no per-cell rendering neighbourhood
-	-- scan. Draw the final surface plus one backing layer to close facet gaps.
-	local needed = {}
-	for index, key in self.grid.exposedList do
-		needed[key] = true
-		for _, neighbour in self.grid:solidNeighbours(key) do needed[neighbour] = true end
-		if checkpoint and index % 128 == 0 then checkpoint() end
-	end
-	-- Replicate the final shell from the diamond outward too; never draw
-	-- intermediate interior layers that will immediately be buried again.
-	local ordered, distances = {}, {}
-	for key in needed do
-		local x, y, z = Grid.coords(key)
-		distances[key] = (x - dx)^2 + (y - dy)^2 + (z - dz)^2
-		table.insert(ordered, key)
-		if checkpoint and #ordered % 256 == 0 then checkpoint() end
-	end
-	table.sort(ordered, function(a, b) return distances[a] < distances[b] end)
-	local processed = 0
-	for _, key in ordered do
-		self:_draw(key)
-		processed += 1
-		if checkpoint and processed % 32 == 0 then checkpoint() end
-	end
-	-- Drop buried parts after drawing the replacement shell, avoiding holes
-	-- during replication. Digging will recreate them if they become exposed.
-	processed = 0
-	for key, part in self.parts do
-		if not needed[key] then
-			self.keys[part] = nil
-			self.parts[key] = nil
-			part:Destroy()
-		end
-		processed += 1
-		if checkpoint and processed % 128 == 0 then checkpoint() end
+		total += #grown
+		first = first or grown[1]
 	end
 	self.grid:takeFresh()
 	self:_syncDiamond()
-	local samples = {}
-	for index, key in restored do
-		if checkpoint and index % 128 == 0 then checkpoint() end
-		local part = self.parts[key]
-		if part and not part:GetAttribute("BackingRock") then
-			table.insert(samples, { frame = part.CFrame, size = part.Size, colour = part.Color, part = part })
-			if #samples >= 24 then break end
-		end
-	end
-	return #restored, samples
+	return total, if first then self:keyPosition(first) else nil
 end
 
 function Mountain.total(self: Mountain): number
@@ -2047,59 +2496,8 @@ function Mountain.remaining(self: Mountain): number
 	return self.grid:remaining()
 end
 
-function Mountain.keyForPart(self: Mountain, part: Instance): number?
-	if part:IsA("BasePart") then
-		return self.keys[part]
-	end
-	return nil
-end
-
 function Mountain.isExposed(self: Mountain, key: number): boolean
 	return self.grid:isSolid(key) and self.grid.exposedIndex[key] ~= nil
-end
-
--- After rocks are removed: drop their parts (a few fly off as rubble), draw the
--- rocks that were uncovered, and check whether the diamond is now in the open.
-function Mountain._settle(self: Mountain, removed: { number }, centre: Vector3?, checkpoint: (() -> ())?)
-	for index, key in removed do
-		if checkpoint and index % 128 == 0 then checkpoint() end
-		local part: BasePart? = self.parts[key]
-		if part ~= nil then
-			self.parts[key] = nil
-			self.keys[part] = nil
-			if index <= FLYING_LIMIT then
-				local away = if centre then (part.Position - centre) else Vector3.new(0, 1, 0)
-				if away.Magnitude < 0.1 then
-					away = Vector3.new(self.random:NextNumber(-1, 1), 1, self.random:NextNumber(-1, 1))
-				end
-				part.Anchored = false
-				part.CanCollide = false
-				part.CanQuery = false
-				part.AssemblyLinearVelocity = away.Unit * self.random:NextNumber(20, 40) + Vector3.new(0, self.random:NextNumber(15, 30), 0)
-				part.AssemblyAngularVelocity = Vector3.new(self.random:NextNumber(-8, 8), self.random:NextNumber(-8, 8), self.random:NextNumber(-8, 8))
-				Debris:AddItem(part, 1.4)
-			else
-				part:Destroy()
-			end
-		end
-	end
-	-- Reconcile each surviving surface/backing cell once instead of redrawing
-	-- the same neighbour up to six times after a large crater.
-	local needed = {}
-	for index, key in self.grid:takeFresh() do
-		if self.grid:isSolid(key) and self.grid.exposedIndex[key] then
-			needed[key] = true
-			for _, neighbour in self.grid:solidNeighbours(key) do needed[neighbour] = true end
-		end
-		if checkpoint and index % 128 == 0 then checkpoint() end
-	end
-	local drawn = 0
-	for key in needed do
-		self:_draw(key)
-		drawn += 1
-		if checkpoint and drawn % 32 == 0 then checkpoint() end
-	end
-	self:_syncDiamond()
 end
 
 -- Blasts `count` rocks as one crater; returns the crater centre.
@@ -2107,22 +2505,11 @@ function Mountain.blast(self: Mountain, count: number, checkpoint: (() -> ())?, 
 	if count <= 0 then
 		return nil
 	end
-	local keys, actualCentre = self.grid:blast(count, centreKey, checkpoint, function(key)
-		-- Remove rendered rocks before the calculation yields, so the crater
-		-- starts opening immediately instead of waiting for all cell accounting.
-		local part = self.parts[key]
-		if part then
-			self.keys[part] = nil
-			self.parts[key] = nil
-			part:Destroy()
-		end
-	end)
-	if actualCentre == nil then
-		return nil
-	end
-	local centre = self:keyPosition(actualCentre)
-	self:_settle(keys, centre, checkpoint)
-	return centre
+	-- Look the list up on every call: a flush during the work replaces it.
+	local _, actualCentre = self.grid:blast(count, centreKey, checkpoint, function(key) table.insert(self.removedKeys, key) end)
+	self.grid:takeFresh()
+	self:_syncDiamond()
+	return if actualCentre then self:keyPosition(actualCentre) else nil
 end
 
 -- Digs up to `count` rocks by hand around an uncovered rock. Returns how many broke.
@@ -2130,19 +2517,10 @@ function Mountain.dig(self: Mountain, key: number, count: number): number
 	if count <= 0 or not self:isExposed(key) then
 		return 0
 	end
-	local keys = self.grid:blast(count, key)
-	self:_settle(keys, self:keyPosition(key))
+	local keys = self.grid:blast(count, key, nil, function(cell) table.insert(self.removedKeys, cell) end)
+	self.grid:takeFresh()
+	self:_syncDiamond()
 	return #keys
-end
-
--- Digs out one uncovered rock by hand. Returns true when it broke.
-function Mountain.mine(self: Mountain, key: number): boolean
-	if not self:isExposed(key) then
-		return false
-	end
-	self.grid:remove(key)
-	self:_settle({ key }, nil)
-	return true
 end
 
 -- Where a loose find at `position` comes to rest: on top of the highest rock
@@ -2156,335 +2534,627 @@ function Mountain.restingHeight(self: Mountain, position: Vector3): number
 	return (below + 1) * size
 end
 
-function Mountain.destroy(self: Mountain)
-	self.folder:Destroy()
-	self.parts = {}
-	table.clear(self.keys)
+-- True when rock stands between two points. Rock is drawn with sloped faces
+-- that do not fill their whole cell, so one grazed cell is allowed.
+function Mountain.lineBlocked(self: Mountain, from: Vector3, to: Vector3): boolean
+	local delta = to - from
+	local steps = math.max(1, math.ceil(delta.Magnitude / (self.blockSize * 0.25)))
+	local seen: { [number]: boolean } = {}
+	local blocked = 0
+	for i = 0, steps do
+		local key = self:keyAt(from + delta * (i / steps))
+		if key and not seen[key] and key ~= self.diamondKey and self.grid:isSolid(key) then
+			seen[key] = true
+			blocked += 1
+			if blocked > 1 then return true end
+		end
+	end
+	return false
+end
+
+-- If rock fills the space between `bottom` and `top` at or around `position`
+-- (a character buried by a rebuild), the height of the rock surface above it.
+function Mountain.coveredTop(self: Mountain, position: Vector3, bottom: number, top: number): number?
+	local size = self.blockSize
+	local grid = self.grid
+	local best: number? = nil
+	for _, offset in { { 0, 0 }, { 0.7, 0 }, { -0.7, 0 }, { 0, 0.7 }, { 0, -0.7 } } do
+		local x = math.floor((position.X + offset[1]) / size + 0.5)
+		local z = math.floor((position.Z + offset[2]) / size + 0.5)
+		if math.abs(x) <= 124 and math.abs(z) <= 124 then
+			for y = math.max(0, math.floor(bottom / size)), math.floor(top / size) do
+				if grid:isSolid(Grid.key(x, y, z)) then
+					local surface = y
+					while grid:isSolid(Grid.key(x, surface + 1, z)) or grid.sealed[Grid.key(x, surface + 1, z)] do
+						surface += 1
+					end
+					local lift = (surface + 1) * size
+					if best == nil or lift > best then best = lift end
+					break
+				end
+			end
+		end
+	end
+	return best
+end
+
+-- The top of the highest uncovered rock.
+function Mountain.summit(self: Mountain): Vector3?
+	local best: number? = nil
+	for _, key in self.grid.exposedList do
+		if best == nil or key // LAYER > (best :: number) // LAYER then best = key end
+	end
+	if best == nil then return nil end
+	return self:keyPosition(best) + Vector3.new(0, self.blockSize / 2, 0)
+end
+
+function Mountain.destroy(_self: Mountain)
+	-- Nothing to clean up: the grid is plain data and clients drop their parts
+	-- when the next snapshot arrives.
 end
 
 return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="13">
-        <Properties>
-          <string name="Name">RockStyle</string>
-          <string name="Source"><![CDATA[--!strict
--- Stable, irregular chips: neighbouring cells never look like a row of beads.
--- Pure data keeps newly uncovered stones consistent with the mountain surface.
-local RockStyle = {}
-
-local function sample(key: number, salt: number): number
-	local value = bit32.bxor(key, salt)
-	value = (value * 1664525 + 1013904223) % 4294967296
-	value = bit32.bxor(value, bit32.rshift(value, 16))
-	value = (value * 1664525 + 1013904223) % 4294967296
-	value = bit32.bxor(value, bit32.lshift(value, 13))
-	value = bit32.bxor(value, bit32.rshift(value, 17))
-	value = bit32.bxor(value, bit32.lshift(value, 5))
-	return value / 4294967296
-end
-
-function RockStyle.forCell(key: number)
-	local a = sample(key, 7321441)
-	local b = sample(key, 92837163)
-	local c = sample(key, 517927)
-	local d = sample(key, 1812433253)
-	local shape = if a < 0.48 then "WedgePart" elseif a < 0.68 then "CornerWedgePart" else "Part"
-	return {
-		shape = shape,
-		-- Overlap closes seams while offsets, tilts and unequal axes break the grid.
-		x = 1.55 + b * 0.35,
-		y = 1.30 + c * 0.24,
-		z = 1.54 + d * 0.35,
-		ox = (c - 0.5) * 0.12,
-		oy = (a - 0.5) * 0.08,
-		oz = (b - 0.5) * 0.12,
-		pitch = (d - 0.5) * 0.34,
-		yaw = c * math.pi * 2,
-		roll = (b - 0.5) * 0.34,
-		shade = 0.82 + a * 0.28,
-		quartz = d > 0.975,
-	}
-end
-
-return RockStyle
-]]></string>
-        </Properties>
-      </Item>
-      <Item class="ModuleScript" referent="14">
+      <Item class="ModuleScript" referent="17">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
--- Smooth woodland landscape and a warm cabin camp, built once. Decorative parts never participate in
--- mining raycasts or physics; the central arena stays clear for mountain growth.
+-- An alpine valley around the mountain arena, built once on startup: rolling
+-- meadows, forested hills, a lake, a ring of snow-capped peaks and a log-cabin
+-- mining camp. Decorative parts never take part in mining raycasts or touch
+-- events, and the central arena stays clear and flat for mountain growth.
+--
+-- Natural shapes come from smooth terrain (hills, peaks, boulders) and
+-- low-poly wedge geometry (trees), not plastic balls. The look relies on the
+-- place's Future lighting and 2022 materials (see default.project.json).
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PartShapes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))
+
 local Scenery = {}
 local random = Random.new(4207)
+
 local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
- local p = Instance.new(kind or "Part") :: BasePart
- p.Name = name
- p.Size = size
- p.CFrame = frame
- p.Color = colour
- p.Material = material
- p.Anchored = true
- p.CanCollide = false
- p.CanQuery = false
- p.CanTouch = false
- p.CastShadow = true
- p.Parent = parent
- return p
+	local p = Instance.new(kind or "Part") :: BasePart
+	p.Name = name
+	p.Size = size
+	p.CFrame = frame
+	p.Color = colour
+	p.Material = material
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = true
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
 end
+
 local function solid(p: BasePart): BasePart
- p.CanCollide = true
- return p
+	p.CanCollide = true
+	return p
 end
+
+-- A cylinder between two points.
+local function beam(parent: Instance, name: string, a: Vector3, b: Vector3, width: number, colour: Color3, material: Enum.Material): BasePart
+	local delta = b - a
+	local p = piece(parent, name, Vector3.new(delta.Magnitude, width, width), CFrame.lookAt((a + b) / 2, b) * CFrame.Angles(0, math.pi / 2, 0), colour, material)
+	local cylinder = p :: Part
+	cylinder.Shape = Enum.PartType.Cylinder
+	return p
+end
+
+local function shade(colour: Color3, amount: number): Color3
+	return Color3.new(math.clamp(colour.R * amount, 0, 1), math.clamp(colour.G * amount, 0, 1), math.clamp(colour.B * amount, 0, 1))
+end
+
 local function lantern(parent: Instance, at: Vector3)
- piece(parent,"LanternPost",Vector3.new(0.3,5,0.3),CFrame.new(at+Vector3.new(0,2.5,0)),Color3.fromRGB(83,67,53),Enum.Material.Wood)
- piece(parent,"LanternCap",Vector3.new(1,0.18,1),CFrame.new(at+Vector3.new(0,5.25,0)),Color3.fromRGB(42,53,57),Enum.Material.Metal)
- local lamp=piece(parent,"WarmLantern",Vector3.new(0.5,0.7,0.5),CFrame.new(at+Vector3.new(0,4.8,0)),Color3.fromRGB(255,201,122),Enum.Material.Neon)
- local light=Instance.new("PointLight")
- light.Color=lamp.Color; light.Range=13; light.Brightness=0.8; light.Shadows=false; light.Parent=lamp
+	piece(parent, "LanternPost", Vector3.new(0.3, 5, 0.3), CFrame.new(at + Vector3.new(0, 2.5, 0)), Color3.fromRGB(78, 62, 48), Enum.Material.Wood)
+	piece(parent, "LanternArm", Vector3.new(0.9, 0.18, 0.18), CFrame.new(at + Vector3.new(0.45, 4.9, 0)), Color3.fromRGB(42, 44, 46), Enum.Material.Metal)
+	piece(parent, "LanternCap", Vector3.new(0.7, 0.16, 0.7), CFrame.new(at + Vector3.new(0.85, 4.75, 0)), Color3.fromRGB(42, 44, 46), Enum.Material.Metal)
+	local lamp = piece(parent, "WarmLantern", Vector3.new(0.42, 0.55, 0.42), CFrame.new(at + Vector3.new(0.85, 4.38, 0)), Color3.fromRGB(255, 196, 118), Enum.Material.Neon)
+	lamp.CastShadow = false
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 190, 120)
+	light.Range = 14
+	light.Brightness = 0.9
+	light.Shadows = false
+	light.Parent = lamp
 end
-local function rounded(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material): BasePart
- local p=piece(parent,name,size,frame,colour,material)
- local roundPart = p :: Part
- roundPart.Shape=Enum.PartType.Ball
- return p
+
+-- A low-poly conifer: a trunk and stacked hexagonal cones, each cone six
+-- wedges sloping outward. Higher trees carry snow on their top tier.
+local function conifer(parent: Instance, at: Vector3, height: number, snowy: boolean)
+	local model = Instance.new("Model")
+	model.Name = "Conifer"
+	model.Parent = parent
+	local yaw = random:NextNumber(0, math.pi)
+	beam(model, "Trunk", at - Vector3.new(0, 0.6, 0), at + Vector3.new(0, height * 0.55, 0), height * 0.05, Color3.fromRGB(84, 62, 44), Enum.Material.Wood)
+	local tone = random:NextInteger(-6, 8)
+	local needles = Color3.fromRGB(44 + tone, 80 + tone, 50 + tone)
+	local skirt = height * 0.22
+	for tier = 1, 3 do
+		local t = (tier - 1) / 3
+		local base = skirt + (height - skirt) * t * 0.78
+		local tall = (height - skirt) * (0.5 - t * 0.12)
+		local radius = height * (0.32 - t * 0.15)
+		local width = 2 * radius * math.tan(math.pi / 6) * 1.06
+		local top = tier == 3 and snowy
+		local colour = if top then Color3.fromRGB(226, 233, 240) else shade(needles, 0.92 + tier * 0.06)
+		for k = 0, 5 do
+			local angle = yaw + tier * math.pi / 6 + k * math.pi / 3
+			local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+			local centre = at + Vector3.new(0, base + tall / 2, 0) + direction * (radius / 2)
+			piece(model, "Needles", Vector3.new(width, tall, radius), CFrame.new(centre) * PartShapes.wedgeToward(direction), colour,
+				if top then Enum.Material.Snow else Enum.Material.LeafyGrass, "WedgePart")
+		end
+	end
 end
-local function branch(parent: Instance, name: string, a: Vector3, b: Vector3, width: number, colour: Color3): BasePart
- local delta=b-a
- local p=piece(parent,name,Vector3.new(delta.Magnitude,width,width),CFrame.lookAt((a+b)/2,b)*CFrame.Angles(0,math.pi/2,0),colour,Enum.Material.Wood)
- local cylinder=p :: Part
- cylinder.Shape=Enum.PartType.Cylinder
- return p
+
+-- A faceted broadleaf canopy: a hexagonal cone over an inverted one.
+local function canopy(parent: Instance, centre: Vector3, radius: number, colour: Color3, yaw: number)
+	local width = 2 * radius * math.tan(math.pi / 6) * 1.06
+	local up, down = radius * 0.7, radius * 0.45
+	for k = 0, 5 do
+		local angle = yaw + k * math.pi / 3
+		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local rotation = PartShapes.wedgeToward(direction)
+		piece(parent, "Leaves", Vector3.new(width, up, radius), CFrame.new(centre + Vector3.new(0, up / 2, 0) + direction * (radius / 2)) * rotation, colour, Enum.Material.LeafyGrass, "WedgePart")
+		-- Flipped about its slope direction, the same wedge forms the underside.
+		local under = CFrame.new(centre - Vector3.new(0, down / 2, 0) + direction * (radius / 2)) * CFrame.fromAxisAngle(direction, math.pi) * rotation
+		piece(parent, "Leaves", Vector3.new(width, down, radius), under, shade(colour, 0.82), Enum.Material.LeafyGrass, "WedgePart")
+	end
 end
-local function woodlandTree(parent: Instance, at: Vector3, height: number, detailed: boolean)
- local model=Instance.new("Model"); model.Name="WoodlandTree"; model.Parent=parent
- local birch=random:NextNumber()<0.3
- local bark=if birch then Color3.fromRGB(193,189,168) else Color3.fromRGB(85,72,55)
- local yaw=random:NextNumber(0,math.pi*2)
- local lean=Vector3.new(math.cos(yaw)*height*0.05,0,math.sin(yaw)*height*0.05)
- local trunkTop=at+Vector3.new(0,height*0.7,0)+lean
- local joints={at,at+Vector3.new(0,height*0.25,0)+lean*0.3,at+Vector3.new(0,height*0.48,0)+lean*0.65,trunkTop}
- if detailed then
-  for i=1,3 do branch(model,"TaperedBark",joints[i],joints[i+1],height*(0.048-i*0.008),bark) end
-  for i=1,3 do
-   local angle=yaw+i*math.pi*2/3
-   branch(model,"RootFlare",at+Vector3.new(0,0.7,0),at+Vector3.new(math.cos(angle)*1.5,0.12,math.sin(angle)*1.5),0.45,bark)
-  end
- else branch(model,"Bark",at,trunkTop,height*0.03,bark) end
- local crownCount=if detailed then 6 else 5
- for i=1,crownCount do
-  local angle=yaw+i*2.39996+random:NextNumber(-0.35,0.35)
-  local spread=height*random:NextNumber(0.13,if birch then 0.2 else 0.29)
-  local tip=at+lean+Vector3.new(math.cos(angle)*spread,height*random:NextNumber(0.63,0.85),math.sin(angle)*spread)
-  if detailed then
-   branch(model,"CrownBranch",joints[3],tip,height*0.012,bark)
-   if birch then
-    local band=piece(model,"BirchMark",Vector3.new(0.07,0.14,0.5),CFrame.new(at+lean*0.45+Vector3.new(0.34,height*(0.22+i*0.06),0))*CFrame.Angles(0,yaw,0),Color3.fromRGB(70,68,57),Enum.Material.Wood)
-    band.CastShadow=false
-   end
-  end
-  local width=height*random:NextNumber(0.23,0.34)
-  local shade=random:NextInteger(-7,13)
-  local green=if birch then Color3.fromRGB(95+shade,119+shade,59+shade) else Color3.fromRGB(67+shade,96+shade,51+shade)
-  rounded(model,"LeafCrown",Vector3.new(width,width*0.72,width*0.8),CFrame.new(tip)*CFrame.Angles(0,angle,random:NextNumber(-0.2,0.2)),green,Enum.Material.LeafyGrass)
-  if detailed then
-   rounded(model,"LeafTips",Vector3.new(width*0.65,width*0.5,width*0.7),CFrame.new(tip+Vector3.new(math.cos(angle)*width*0.22,width*0.35,math.sin(angle)*width*0.22)),green,Enum.Material.LeafyGrass)
-  end
- end
- rounded(model,"UpperCrown",Vector3.new(height*0.3,height*0.24,height*0.3),CFrame.new(trunkTop+Vector3.new(0,height*0.16,0)),Color3.fromRGB(89,112,62),Enum.Material.LeafyGrass)
+
+local function birch(parent: Instance, at: Vector3, height: number)
+	local model = Instance.new("Model")
+	model.Name = "Birch"
+	model.Parent = parent
+	local lean = Vector3.new(random:NextNumber(-0.6, 0.6), 0, random:NextNumber(-0.6, 0.6))
+	local top = at + Vector3.new(0, height * 0.72, 0) + lean
+	beam(model, "Trunk", at - Vector3.new(0, 0.5, 0), top, height * 0.055, Color3.fromRGB(214, 210, 196), Enum.Material.Wood)
+	local tone = random:NextInteger(-8, 10)
+	local leaves = Color3.fromRGB(116 + tone, 146 + tone, 62 + tone)
+	canopy(model, top + Vector3.new(0, height * 0.05, 0), height * 0.32, leaves, random:NextNumber(0, math.pi))
+	if random:NextNumber() < 0.6 then
+		local side = Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)).Unit * height * 0.18
+		canopy(model, top + side - Vector3.new(0, height * 0.12, 0), height * 0.2, shade(leaves, 1.06), random:NextNumber(0, math.pi))
+	end
 end
-local function landscape(terrain: Terrain, lake: Vector3, camp: Vector3, radius: number)
- -- Smooth connected terrain, generated in small voxel chunks once on startup.
- -- No spherical hills, wedge mountains, square lake cuts or tiled part paths.
- local resolution=4
- for cx=-320,319,64 do
-  for cz=-320,319,64 do
-   local materials,occupancies={},{}
-   for ix=1,16 do
-    materials[ix]={}; occupancies[ix]={}
-    for iy=1,40 do materials[ix][iy]={}; occupancies[ix][iy]={} end
-    for iz=1,16 do
-     local x,z=cx+(ix-0.5)*4,cz+(iz-0.5)*4
-     local distance=math.sqrt(x*x+z*z)
-     local fade=math.clamp((distance-radius)/65,0,1)
-     fade=fade*fade*(3-2*fade)
-     local broad=math.noise(x/135,z/135,12)*22+math.noise(x/49,z/49,8)*7+math.noise(x/19,z/19,4)*1.5
-     local ridge=math.clamp((distance-160)/125,0,1)
-     local height=fade*(7+broad+ridge*(48+math.noise(x/83,z/83,17)*35))
-     local campDistance=math.sqrt((x-camp.X)^2+(z-camp.Z)^2)
-     height*=math.clamp((campDistance-27)/22,0,1)
-     local shore=math.sqrt(((x-lake.X)/35)^2+((z-lake.Z)/27)^2)+math.noise(x/16,z/16,3)*0.08
-     if shore<1.25 then height=math.min(height,-9+math.clamp(shore,0,1.25)^3*8) end
-     if distance<radius then height=0 end
-     local pathX=math.sin(math.clamp((camp.Z-z)/(camp.Z-26),0,1)*math.pi)*4
-     local path=z>=26 and z<=camp.Z+5 and math.abs(x-pathX)<3.3+math.noise(z/7,0,3)*0.8
-     local surface=if distance<radius then Enum.Material.LeafyGrass elseif shore<1.2 then Enum.Material.Ground elseif path or campDistance<10 then Enum.Material.Ground elseif height>65 then Enum.Material.Rock else Enum.Material.Grass
-     for iy=1,40 do
-      local y=-24+(iy-0.5)*4
-      local occupancy=math.clamp((height-y)/4+0.5,0,1)
-      local material=if y<height-5 then Enum.Material.Rock else surface
-      if shore<1.12 and y>height and y<1 then
-       local water=math.clamp((-1-y)/4+0.5,0,1)
-       if water>occupancy then material=Enum.Material.Water; occupancy=water end
-      end
-      materials[ix][iy][iz]=if occupancy>0 then material else Enum.Material.Air
-      occupancies[ix][iy][iz]=occupancy
-     end
-    end
-   end
-   terrain:WriteVoxels(Region3.new(Vector3.new(cx,-24,cz),Vector3.new(cx+64,136,cz+64)),resolution,materials,occupancies)
-   task.wait()
-  end
- end
+
+-- Terrain height (studs) at a point, before the arena, camp, lake and path are cut in.
+local function hillHeight(x: number, z: number, radius: number): number
+	local distance = math.sqrt(x * x + z * z)
+	local fade = math.clamp((distance - radius) / 60, 0, 1)
+	fade = fade * fade * (3 - 2 * fade)
+	local hills = math.noise(x / 140, z / 140, 12) * 22 + math.noise(x / 52, z / 52, 8) * 7 + math.noise(x / 19, z / 19, 4) * 1.4
+	-- A ring of sharp ridged peaks closes the valley.
+	local ring = math.clamp((distance - 200) / 150, 0, 1)
+	ring = ring * ring * (3 - 2 * ring)
+	local ridged = 1 - math.abs(math.noise(x / 95, z / 95, 17)) * 2
+	local peaks = ring * (50 + ridged * 75 + math.noise(x / 41, z / 41, 23) * 16)
+	return fade * (8 + hills) + peaks
 end
+
+export type Site = { radius: number, camp: Vector3, lake: Vector3 }
+
+local function terrainHeight(x: number, z: number, site: Site): number
+	local radius, camp, lake = site.radius, site.camp, site.lake
+	local distance = math.sqrt(x * x + z * z)
+	if distance < radius then return 0 end
+	local height = hillHeight(x, z, radius)
+	local campDistance = math.sqrt((x - camp.X) ^ 2 + (z - camp.Z) ^ 2)
+	height *= math.clamp((campDistance - 27) / 22, 0, 1)
+	local shore = math.sqrt(((x - lake.X) / 35) ^ 2 + ((z - lake.Z) / 27) ^ 2) + math.noise(x / 16, z / 16, 3) * 0.08
+	if shore < 1.25 then height = math.min(height, -9 + math.clamp(shore, 0, 1.25) ^ 3 * 8) end
+	return height
+end
+
+local function onPath(x: number, z: number, site: Site): boolean
+	local camp = site.camp
+	local pathX = math.sin(math.clamp((camp.Z - z) / (camp.Z - 26), 0, 1) * math.pi) * 4
+	return z >= 26 and z <= camp.Z + 5 and math.abs(x - pathX) < 3.3 + math.noise(z / 7, 0, 3) * 0.8
+end
+
+local EXTENT = 384 -- terrain reaches this far from the mountain in every direction
+local FLOOR, CEILING = -24, 184
+
+local function landscape(terrain: Terrain, site: Site)
+	-- Smooth connected terrain in 64-stud voxel chunks, written once on startup.
+	-- Materials follow height and slope: snow above the snowline, rock on steep
+	-- faces, alpine scrub, grass meadows with leafy patches, dirt paths.
+	local resolution = 4
+	local layers = (CEILING - FLOOR) // resolution
+	for cx = -EXTENT, EXTENT - 1, 64 do
+		for cz = -EXTENT, EXTENT - 1, 64 do
+			local materials, occupancies = {}, {}
+			for ix = 1, 16 do
+				materials[ix] = {}
+				occupancies[ix] = {}
+				for iy = 1, layers do
+					materials[ix][iy] = {}
+					occupancies[ix][iy] = {}
+				end
+				for iz = 1, 16 do
+					local x, z = cx + (ix - 0.5) * 4, cz + (iz - 0.5) * 4
+					local distance = math.sqrt(x * x + z * z)
+					local height = terrainHeight(x, z, site)
+					local slope = math.sqrt((terrainHeight(x + 3, z, site) - terrainHeight(x - 3, z, site)) ^ 2
+						+ (terrainHeight(x, z + 3, site) - terrainHeight(x, z - 3, site)) ^ 2) / 6
+					local campDistance = math.sqrt((x - site.camp.X) ^ 2 + (z - site.camp.Z) ^ 2)
+					local shore = math.sqrt(((x - site.lake.X) / 35) ^ 2 + ((z - site.lake.Z) / 27) ^ 2) + math.noise(x / 16, z / 16, 3) * 0.08
+					local snowLine = 98 + math.noise(x / 60, z / 60, 31) * 22
+					local patch = math.noise(x / 30, z / 30, 41)
+					local surface
+					if distance < site.radius then
+						surface = Enum.Material.LeafyGrass
+					elseif shore < 1.08 then
+						surface = Enum.Material.Mud
+					elseif shore < 1.2 or onPath(x, z, site) or campDistance < 10 then
+						surface = Enum.Material.Ground
+					elseif height > snowLine and slope < 1.3 then
+						surface = Enum.Material.Snow
+					elseif slope > 0.95 or height > snowLine + 18 then
+						surface = Enum.Material.Rock
+					elseif slope > 0.6 then
+						surface = if patch > 0 then Enum.Material.Rock else Enum.Material.Ground
+					elseif height > 72 then
+						surface = if patch > 0.15 then Enum.Material.Rock elseif patch > -0.1 then Enum.Material.Ground else Enum.Material.Grass
+					else
+						surface = if patch > 0.22 then Enum.Material.LeafyGrass else Enum.Material.Grass
+					end
+					for iy = 1, layers do
+						local y = FLOOR + (iy - 0.5) * resolution
+						local occupancy = math.clamp((height - y) / 4 + 0.5, 0, 1)
+						local material = if y < height - 5 then Enum.Material.Rock else surface
+						if shore < 1.12 and y > height and y < 1 then
+							local water = math.clamp((-1 - y) / 4 + 0.5, 0, 1)
+							if water > occupancy then
+								material = Enum.Material.Water
+								occupancy = water
+							end
+						end
+						materials[ix][iy][iz] = if occupancy > 0 then material else Enum.Material.Air
+						occupancies[ix][iy][iz] = occupancy
+					end
+				end
+			end
+			terrain:WriteVoxels(Region3.new(Vector3.new(cx, FLOOR, cz), Vector3.new(cx + 64, CEILING, cz + 64)), resolution, materials, occupancies)
+			task.wait()
+		end
+	end
+end
+
 function Scenery.build(mountainRadius: number, spawnPosition: Vector3)
- -- Animated grass is enabled in the place/project: Decoration and GrassLength
- -- are editor-only properties. LeafyGrass keeps the central arena blade-free.
- local terrain=workspace.Terrain
- local folder=Instance.new("Folder"); folder.Name="Scenery"; folder.Parent=workspace
- local clearRadius=math.max(mountainRadius+14,55)
- local camp=Vector3.new(spawnPosition.X,0,spawnPosition.Z)
- local lake=Vector3.new(clearRadius+72,0,camp.Z+15)
- local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Include; params.FilterDescendantsInstances={terrain}
- local function ground(x: number,z: number): Vector3
-  local hit=workspace:Raycast(Vector3.new(x,180,z),Vector3.new(0,-220,0),params)
-  return if hit then hit.Position else Vector3.new(x,0,z)
- end
- local function clear(at: Vector3): boolean
-  return Vector3.new(at.X,0,at.Z).Magnitude < clearRadius
-   or (Vector3.new(at.X,0,at.Z)-camp).Magnitude<25
-   or (Vector3.new(at.X,0,at.Z)-lake).Magnitude<40
- end
- terrain:SetMaterialColor(Enum.Material.Grass,Color3.fromRGB(103,134,91))
- terrain:SetMaterialColor(Enum.Material.Ground,Color3.fromRGB(125,111,88))
- terrain:SetMaterialColor(Enum.Material.Rock,Color3.fromRGB(106,119,122))
- terrain:FillBlock(CFrame.new(0,-8,0),Vector3.new(1400,16,1400),Enum.Material.Grass)
- landscape(terrain,lake,camp,clearRadius)
- terrain.WaterColor=Color3.fromRGB(58,94,83)
- terrain.WaterTransparency=0.45; terrain.WaterReflectance=0.3
- terrain.WaterWaveSize=0.08; terrain.WaterWaveSpeed=3
- -- A lakeside timber dock, supported above the shallow water.
- local dock=lake+Vector3.new(-34,0.5,0)
- for i=0,11 do
-  solid(piece(folder,"DockPlank",Vector3.new(1.6,0.35,7),CFrame.new(dock+Vector3.new(i*1.65,0,0)),Color3.fromRGB(137+i%3*7,106+i%3*5,76),Enum.Material.WoodPlanks))
- end
- for _,x in {0,16} do
-  for _,z in {-3.2,3.2} do
-   piece(folder,"DockPost",Vector3.new(0.6,6,0.6),CFrame.new(dock+Vector3.new(x,-1.8,z)),Color3.fromRGB(86,74,58),Enum.Material.Wood)
-  end
- end
- lantern(folder,dock+Vector3.new(0,0,-4.2))
- -- Ground sampling prevents trees and flowers floating over the rolling hills.
- local planted=0
- local treePositions = {}
- for _=1,1600 do
-  if planted>=128 then break end
-  local angle=random:NextNumber(0,math.pi*2)
-  local distance=random:NextNumber(clearRadius+15,260)
-  local at=ground(math.cos(angle)*distance,math.sin(angle)*distance)
-  local spaced=true
-  for _,other in treePositions do
-   if (at-other).Magnitude<8 then spaced=false; break end
-  end
-  if spaced and not clear(at) then
-   woodlandTree(folder,at,random:NextNumber(17,33),distance<150)
-   table.insert(treePositions,at)
-   planted+=1
-   if planted%16==0 then task.wait() end
-  end
- end
- local flowerColours={Color3.fromRGB(198,167,215),Color3.fromRGB(248,215,135),Color3.fromRGB(235,231,208)}
- for _=1,95 do
-  local angle=random:NextNumber(0,math.pi*2)
-  local distance=random:NextNumber(clearRadius+5,145)
-  local at=ground(math.cos(angle)*distance,math.sin(angle)*distance)
-  if not clear(at) then
-   local height=random:NextNumber(0.45,1.1)
-   rounded(folder,"MeadowLeaves",Vector3.new(1.1,height,0.7),CFrame.new(at+Vector3.new(0,height/2,0))*CFrame.Angles(0,angle,0),Color3.fromRGB(92,125,77),Enum.Material.LeafyGrass)
-   rounded(folder,"Wildflowers",Vector3.new(0.6,0.18,0.5),CFrame.new(at+Vector3.new(0,height,0)),flowerColours[random:NextInteger(1,3)],Enum.Material.SmoothPlastic)
-  end
- end
- for _=1,32 do
-  local angle=random:NextNumber(0,math.pi*2)
-  local distance=random:NextNumber(clearRadius+8,180)
-  local at=ground(math.cos(angle)*distance,math.sin(angle)*distance)
-  if not clear(at) then
-   local size=random:NextNumber(2,5)
-   rounded(folder,"WeatheredBoulder",Vector3.new(size,size*0.65,size*0.8),CFrame.new(at+Vector3.new(0,size*0.22,0))*CFrame.Angles(0,angle,0.15),Color3.fromRGB(126,139,130),Enum.Material.Rock)
-  end
- end
- -- A timber cabin gives the campsite a sheltered, lived-in focal point.
- local cabin=camp+Vector3.new(-18,0,15)
- local wood=Color3.fromRGB(105,81,60)
- solid(piece(folder,"CabinDeck",Vector3.new(13,0.5,12),CFrame.new(cabin+Vector3.new(0,0.35,-1)),wood,Enum.Material.WoodPlanks))
- for _,x in {-5,5} do
-  solid(piece(folder,"CabinSide",Vector3.new(0.35,7,9),CFrame.new(cabin+Vector3.new(x,3.8,0)),wood,Enum.Material.WoodPlanks))
- end
- solid(piece(folder,"CabinBack",Vector3.new(10,7,0.35),CFrame.new(cabin+Vector3.new(0,3.8,4.5)),wood,Enum.Material.WoodPlanks))
- for _,x in {-3.5,3.5} do
-  solid(piece(folder,"CabinFront",Vector3.new(3,7,0.35),CFrame.new(cabin+Vector3.new(x,3.8,-4.5)),wood,Enum.Material.WoodPlanks))
-  piece(folder,"WindowFrame",Vector3.new(2.3,2.7,0.2),CFrame.new(cabin+Vector3.new(x,4.3,-4.75)),Color3.fromRGB(60,57,48),Enum.Material.Wood)
-  piece(folder,"WarmWindow",Vector3.new(1.95,2.3,0.12),CFrame.new(cabin+Vector3.new(x,4.3,-4.9)),Color3.fromRGB(214,159,85),Enum.Material.Neon)
-  piece(folder,"WindowCrossbar",Vector3.new(1.95,0.12,0.15),CFrame.new(cabin+Vector3.new(x,4.3,-5)),wood,Enum.Material.Wood)
-  piece(folder,"WindowMullion",Vector3.new(0.12,2.3,0.15),CFrame.new(cabin+Vector3.new(x,4.3,-5)),wood,Enum.Material.Wood)
- end
- for side=-1,1,2 do
-  piece(folder,"SlateRoof",Vector3.new(6.4,0.25,11),CFrame.new(cabin+Vector3.new(side*2.9,8.1,0))*CFrame.Angles(0,0,-side*0.35),Color3.fromRGB(58,65,63),Enum.Material.Slate)
- end
- local chimney=piece(folder,"StoneChimney",Vector3.new(1.4,4,1.5),CFrame.new(cabin+Vector3.new(3,8.5,2)),Color3.fromRGB(102,98,88),Enum.Material.Cobblestone)
- local smoke=Instance.new("Smoke"); smoke.Color=Color3.fromRGB(153,153,143); smoke.Opacity=0.08; smoke.Size=2.5; smoke.RiseVelocity=2; smoke.Parent=chimney
- piece(folder,"DoorLintel",Vector3.new(4,1.3,0.4),CFrame.new(cabin+Vector3.new(0,6.65,-4.5)),wood,Enum.Material.Wood)
- solid(piece(folder,"PorchStep",Vector3.new(4,0.3,2),CFrame.new(cabin+Vector3.new(0,0.15,-7)),wood,Enum.Material.WoodPlanks))
- piece(folder,"WovenRug",Vector3.new(5,0.04,5),CFrame.new(cabin+Vector3.new(0,0.62,0)),Color3.fromRGB(148,92,65),Enum.Material.Fabric)
- lantern(folder,cabin+Vector3.new(4,0,-5.5))
- -- Sagging festoon wire and small amber bulbs, without a light per bulb.
- for i=0,14 do
-  local t=i/14
-  local at=camp+Vector3.new(-10+t*20,7-1.4*math.sin(t*math.pi),-6)
-  piece(folder,"FestoonWire",Vector3.new(1.5,0.035,0.035),CFrame.new(at),Color3.fromRGB(48,44,35),Enum.Material.Metal)
-  if i%2==0 then rounded(folder,"FestoonBulb",Vector3.new(0.18,0.27,0.18),CFrame.new(at+Vector3.new(0,-0.2,0)),Color3.fromRGB(255,191,102),Enum.Material.Neon) end
- end
- for _,x in {-10,10} do piece(folder,"FestoonPost",Vector3.new(0.2,7,0.2),CFrame.new(camp+Vector3.new(x,3.5,-6)),wood,Enum.Material.Wood) end
- local fireAt=camp+Vector3.new(12,0,5)
- for i=1,10 do
-  local angle=i/10*math.pi*2
-  rounded(folder,"FireRingStone",Vector3.new(0.85,0.55,0.7),CFrame.new(fireAt+Vector3.new(math.cos(angle)*1.6,0.28,math.sin(angle)*1.6))*CFrame.Angles(0,-angle,0),Color3.fromRGB(115,121,121),Enum.Material.Slate)
- end
- local embers=piece(folder,"Embers",Vector3.new(1.8,0.2,1.8),CFrame.new(fireAt+Vector3.new(0,0.2,0)),Color3.fromRGB(236,133,60),Enum.Material.Neon)
- local fire=Instance.new("Fire"); fire.Size=3; fire.Heat=4; fire.Parent=embers
- local glow=Instance.new("PointLight"); glow.Color=Color3.fromRGB(255,180,100); glow.Range=14; glow.Brightness=1.2; glow.Shadows=false; glow.Parent=embers
- for _,offset in {Vector3.new(-4,0,0),Vector3.new(4,0,0),Vector3.new(0,0,4)} do
-  local seat=CFrame.new(fireAt+offset)*CFrame.Angles(0,if offset.X~=0 then math.pi/2 else 0,0)
-  solid(piece(folder,"CampBench",Vector3.new(3.6,0.35,1.2),seat*CFrame.new(0,1,0),Color3.fromRGB(128,99,69),Enum.Material.WoodPlanks))
-  for _,side in {-1.3,1.3} do piece(folder,"BenchLeg",Vector3.new(0.35,0.85,0.85),seat*CFrame.new(side,0.425,0),wood,Enum.Material.Wood) end
-  piece(folder,"SeatPad",Vector3.new(2.8,0.12,1.1),seat*CFrame.new(0,1.24,0),Color3.fromRGB(121,100,78),Enum.Material.Fabric)
- end
- lantern(folder,camp+Vector3.new(-9,0,-8)); lantern(folder,camp+Vector3.new(9,0,-8))
- Lighting.ClockTime=16.2; Lighting.Brightness=3
- Lighting.GlobalShadows=true; Lighting.ShadowSoftness=0.55
- Lighting.Ambient=Color3.fromRGB(94,102,108); Lighting.OutdoorAmbient=Color3.fromRGB(143,150,144)
- Lighting.ColorShift_Top=Color3.fromRGB(25,15,6)
- Lighting.EnvironmentDiffuseScale=0.8; Lighting.EnvironmentSpecularScale=0.7
- local atmosphere=Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
- atmosphere.Density=0.25; atmosphere.Offset=0.15; atmosphere.Color=Color3.fromRGB(213,228,232)
- atmosphere.Decay=Color3.fromRGB(157,176,189); atmosphere.Haze=1.2; atmosphere.Glare=0.15; atmosphere.Parent=Lighting
- local grade=Instance.new("ColorCorrectionEffect"); grade.Name="AlpineColour"
- grade.Brightness=0.025; grade.Contrast=0.06; grade.Saturation=0.3; grade.TintColor=Color3.fromRGB(255,248,237); grade.Parent=Lighting
- local bloom=Instance.new("BloomEffect"); bloom.Intensity=0.12; bloom.Size=18; bloom.Threshold=1.6; bloom.Parent=Lighting
- local clouds=terrain:FindFirstChildOfClass("Clouds") or Instance.new("Clouds")
- clouds.Cover=0.38; clouds.Density=0.45; clouds.Color=Color3.fromRGB(245,241,230); clouds.Parent=terrain
- local sky=Lighting:FindFirstChildOfClass("Sky") or Instance.new("Sky")
- sky.SunAngularSize=4; sky.CelestialBodiesShown=true; sky.Parent=Lighting
+	-- Animated grass is enabled in the place/project: Decoration and GrassLength
+	-- are editor-only properties. LeafyGrass keeps the central arena blade-free.
+	local terrain = workspace.Terrain
+	local folder = Instance.new("Folder")
+	folder.Name = "Scenery"
+	folder.Parent = workspace
+	local clearRadius = math.max(mountainRadius + 14, 55)
+	local camp = Vector3.new(spawnPosition.X, 0, spawnPosition.Z)
+	local lake = Vector3.new(clearRadius + 72, 0, camp.Z + 15)
+	local site: Site = { radius = clearRadius, camp = camp, lake = lake }
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { terrain }
+	local function ground(x: number, z: number): Vector3
+		local hit = workspace:Raycast(Vector3.new(x, CEILING + 20, z), Vector3.new(0, -(CEILING + 60), 0), params)
+		return if hit then hit.Position else Vector3.new(x, 0, z)
+	end
+	local function clear(at: Vector3, margin: number): boolean
+		local flat = Vector3.new(at.X, 0, at.Z)
+		return flat.Magnitude < clearRadius + margin
+			or (flat - camp).Magnitude < 25 + margin
+			or (flat - lake).Magnitude < 40 + margin
+			or onPath(at.X, at.Z, site)
+	end
+	local function steepness(x: number, z: number): number
+		return math.abs(terrainHeight(x + 3, z, site) - terrainHeight(x - 3, z, site)) / 6
+			+ math.abs(terrainHeight(x, z + 3, site) - terrainHeight(x, z - 3, site)) / 6
+	end
+
+	terrain:SetMaterialColor(Enum.Material.Grass, Color3.fromRGB(102, 126, 64))
+	terrain:SetMaterialColor(Enum.Material.LeafyGrass, Color3.fromRGB(86, 110, 56))
+	terrain:SetMaterialColor(Enum.Material.Ground, Color3.fromRGB(112, 94, 70))
+	terrain:SetMaterialColor(Enum.Material.Mud, Color3.fromRGB(84, 72, 58))
+	terrain:SetMaterialColor(Enum.Material.Rock, Color3.fromRGB(116, 116, 112))
+	terrain:SetMaterialColor(Enum.Material.Snow, Color3.fromRGB(238, 242, 247))
+	terrain:FillBlock(CFrame.new(0, -8, 0), Vector3.new(EXTENT * 4, 16, EXTENT * 4), Enum.Material.Grass)
+	landscape(terrain, site)
+	terrain.WaterColor = Color3.fromRGB(46, 92, 96)
+	terrain.WaterTransparency = 0.62
+	terrain.WaterReflectance = 0.45
+	terrain.WaterWaveSize = 0.06
+	terrain.WaterWaveSpeed = 4
+
+	-- Weathered boulders and outcrops are smooth terrain rock, half buried.
+	local boulders = 0
+	for _ = 1, 400 do
+		if boulders >= 34 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(clearRadius + 10, 230)
+		local at = ground(math.cos(angle) * distance, math.sin(angle) * distance)
+		if not clear(at, 4) and at.Y < 90 then
+			local size = random:NextNumber(2.6, if distance > 140 then 7.5 else 4.5)
+			for i = 1, random:NextInteger(1, 3) do
+				local offset = Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)) * size * 0.8
+				terrain:FillBall(at + offset - Vector3.new(0, size * 0.35, 0), size * (1 - i * 0.18), Enum.Material.Rock)
+			end
+			boulders += 1
+		end
+	end
+
+	-- A lakeside timber dock, supported above the shallow water.
+	local dock = lake + Vector3.new(-34, 0.5, 0)
+	for i = 0, 11 do
+		solid(piece(folder, "DockPlank", Vector3.new(1.55, 0.3, 7), CFrame.new(dock + Vector3.new(i * 1.62, 0, 0)) * CFrame.Angles(0, 0, math.rad(random:NextNumber(-1, 1))), shade(Color3.fromRGB(134, 104, 74), 0.92 + (i % 3) * 0.05), Enum.Material.WoodPlanks))
+	end
+	for _, x in { 0, 8, 16 } do
+		for _, z in { -3.2, 3.2 } do
+			beam(folder, "DockPost", dock + Vector3.new(x, -4.5, z), dock + Vector3.new(x, 1.1, z), 0.55, Color3.fromRGB(80, 66, 52), Enum.Material.Wood)
+		end
+	end
+	lantern(folder, dock + Vector3.new(0, 0, -4.2))
+
+	-- Forests grow in clumps on the hills, thinning out towards the treeline.
+	local trees: { Vector3 } = {}
+	local function spaced(at: Vector3, gap: number): boolean
+		for _, other in trees do
+			if (at - other).Magnitude < gap then return false end
+		end
+		return true
+	end
+	local conifers = 0
+	for attempt = 1, 2400 do
+		if conifers >= 120 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(clearRadius + 26, 300)
+		local x, z = math.cos(angle) * distance, math.sin(angle) * distance
+		local density = math.noise(x / 90, z / 90, 51) + (if distance > 120 then 0.2 else 0)
+		if density > -0.12 and steepness(x, z) < 0.9 then
+			local at = ground(x, z)
+			if at.Y < 96 and not clear(at, 6) and spaced(at, 7.5) then
+				conifer(folder, at, random:NextNumber(15, 30), at.Y > 58)
+				table.insert(trees, at)
+				conifers += 1
+			end
+		end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	local birches = 0
+	for _ = 1, 600 do
+		if birches >= 16 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(clearRadius + 12, 160)
+		local at = ground(math.cos(angle) * distance, math.sin(angle) * distance)
+		if at.Y < 30 and not clear(at, 3) and spaced(at, 9) then
+			birch(folder, at, random:NextNumber(12, 19))
+			table.insert(trees, at)
+			birches += 1
+		end
+	end
+
+	-- The log cabin: stacked round logs, a shingle roof and warm windows.
+	local cabin = camp + Vector3.new(-18, 0, 15)
+	local logColour = Color3.fromRGB(112, 82, 56)
+	local logSize = 0.8
+	local function log(name: string, a: Vector3, b: Vector3, row: number)
+		solid(beam(folder, name, cabin + a, cabin + b, logSize, shade(logColour, 0.9 + (row % 3) * 0.06), Enum.Material.Wood))
+	end
+	for row = 0, 7 do
+		local y = 0.9 + row * logSize * 0.92
+		log("BackLog", Vector3.new(-5.6, y, 4.5), Vector3.new(5.6, y, 4.5), row)
+		for _, x in { -5, 5 } do
+			log("SideLog", Vector3.new(x, y + 0.37, -5.1), Vector3.new(x, y + 0.37, 5.1), row + 1)
+		end
+		-- The front wall leaves room for a door and two windows.
+		local window = row >= 2 and row <= 4
+		local spans: { { number } } = if row >= 6 then { { -5.6, 5.6 } }
+			elseif window then { { -5.6, -4.3 }, { -2.1, -1.3 }, { 1.3, 2.1 }, { 4.3, 5.6 } }
+			else { { -5.6, -1.3 }, { 1.3, 5.6 } }
+		for _, span in spans do
+			log("FrontLog", Vector3.new(span[1], y, -4.5), Vector3.new(span[2], y, -4.5), row)
+		end
+	end
+	local wallTop = 0.9 + 8 * logSize * 0.92
+	-- Gable ends: two wedges each, rising to the ridge.
+	local ridge = 3.2
+	for _, z in { -4.5, 4.5 } do
+		for _, side in { -1, 1 } do
+			local centre = cabin + Vector3.new(side * 2.75, wallTop + ridge / 2, z)
+			piece(folder, "Gable", Vector3.new(0.6, ridge, 5.5), CFrame.new(centre) * PartShapes.wedgeToward(Vector3.new(side, 0, 0)), logColour, Enum.Material.WoodPlanks, "WedgePart")
+		end
+	end
+	local pitch = math.atan2(ridge, 5.5)
+	for _, side in { -1, 1 } do
+		local length = math.sqrt(ridge * ridge + 5.5 * 5.5) + 0.9
+		piece(folder, "Roof", Vector3.new(length, 0.35, 12.4), CFrame.new(cabin + Vector3.new(side * 2.75, wallTop + ridge / 2 + 0.3, 0)) * CFrame.Angles(0, 0, -side * pitch), Color3.fromRGB(70, 62, 58), Enum.Material.RoofShingles)
+	end
+	piece(folder, "RidgeBeam", Vector3.new(0.5, 0.5, 12.8), CFrame.new(cabin + Vector3.new(0, wallTop + ridge + 0.35, 0)), Color3.fromRGB(78, 58, 40), Enum.Material.Wood)
+	local chimney = piece(folder, "StoneChimney", Vector3.new(1.5, 5.5, 1.5), CFrame.new(cabin + Vector3.new(3, wallTop + 2.4, 2.2)), Color3.fromRGB(116, 112, 104), Enum.Material.Cobblestone)
+	local smoke = Instance.new("Smoke")
+	smoke.Color = Color3.fromRGB(160, 160, 152)
+	smoke.Opacity = 0.07
+	smoke.Size = 2.5
+	smoke.RiseVelocity = 2.5
+	smoke.Parent = chimney
+	solid(piece(folder, "CabinFloor", Vector3.new(11, 0.5, 9.4), CFrame.new(cabin + Vector3.new(0, 0.3, 0)), Color3.fromRGB(122, 94, 66), Enum.Material.WoodPlanks))
+	piece(folder, "Door", Vector3.new(2.5, 4.6, 0.25), CFrame.new(cabin + Vector3.new(0, 2.85, -4.4)), Color3.fromRGB(96, 68, 46), Enum.Material.WoodPlanks)
+	piece(folder, "DoorHandle", Vector3.new(0.12, 0.12, 0.3), CFrame.new(cabin + Vector3.new(0.85, 2.8, -4.62)), Color3.fromRGB(52, 50, 48), Enum.Material.Metal)
+	piece(folder, "DoorLintel", Vector3.new(3.4, 0.6, 0.9), CFrame.new(cabin + Vector3.new(0, 5.4, -4.5)), Color3.fromRGB(86, 62, 42), Enum.Material.Wood)
+	for _, x in { -3.2, 3.2 } do
+		local glow = piece(folder, "WarmWindow", Vector3.new(2.2, 2.2, 0.1), CFrame.new(cabin + Vector3.new(x, 3.25, -4.35)), Color3.fromRGB(240, 176, 96), Enum.Material.Neon)
+		glow.CastShadow = false
+		piece(folder, "WindowCrossbar", Vector3.new(2.3, 0.12, 0.14), CFrame.new(cabin + Vector3.new(x, 3.25, -4.45)), Color3.fromRGB(60, 46, 34), Enum.Material.Wood)
+		piece(folder, "WindowMullion", Vector3.new(0.12, 2.3, 0.14), CFrame.new(cabin + Vector3.new(x, 3.25, -4.45)), Color3.fromRGB(60, 46, 34), Enum.Material.Wood)
+		piece(folder, "WindowSill", Vector3.new(2.6, 0.18, 0.5), CFrame.new(cabin + Vector3.new(x, 2.05, -4.75)), Color3.fromRGB(86, 62, 42), Enum.Material.Wood)
+	end
+	local hearth = Instance.new("PointLight")
+	hearth.Color = Color3.fromRGB(255, 176, 96)
+	hearth.Range = 10
+	hearth.Brightness = 0.8
+	hearth.Shadows = false
+	hearth.Parent = folder:FindFirstChild("WarmWindow")
+	-- Porch with a small roof on two posts.
+	solid(piece(folder, "Porch", Vector3.new(7, 0.35, 3), CFrame.new(cabin + Vector3.new(0, 0.25, -6.2)), Color3.fromRGB(128, 98, 70), Enum.Material.WoodPlanks))
+	solid(piece(folder, "PorchStep", Vector3.new(3.4, 0.3, 1.2), CFrame.new(cabin + Vector3.new(0, 0.12, -8.2)), Color3.fromRGB(118, 90, 64), Enum.Material.WoodPlanks))
+	for _, x in { -3.2, 3.2 } do
+		beam(folder, "PorchPost", cabin + Vector3.new(x, 0.4, -7.4), cabin + Vector3.new(x, 5.6, -7.4), 0.4, Color3.fromRGB(96, 70, 48), Enum.Material.Wood)
+	end
+	piece(folder, "PorchRoof", Vector3.new(7.6, 0.25, 3.6), CFrame.new(cabin + Vector3.new(0, 5.85, -6.3)) * CFrame.Angles(math.rad(-14), 0, 0), Color3.fromRGB(70, 62, 58), Enum.Material.RoofShingles)
+	lantern(folder, cabin + Vector3.new(4.6, 0, -8.6))
+
+	-- Woodpile, barrels, crates and a pickaxe make it a working mining camp.
+	for row = 0, 2 do
+		for i = 0, 3 - row do
+			local y = 0.4 + row * 0.68
+			local x = -6.9 - (i + row * 0.5) * 0.72
+			beam(folder, "Firewood", cabin + Vector3.new(x, y, -1.4), cabin + Vector3.new(x, y, 1.4), 0.7, shade(Color3.fromRGB(128, 94, 62), 0.9 + ((i + row) % 3) * 0.06), Enum.Material.Wood)
+		end
+	end
+	local yard = camp + Vector3.new(-9, 0, 4)
+	for i, offset in { Vector3.new(0, 0, 0), Vector3.new(1.4, 0, 0.6) } do
+		local barrel = beam(folder, "Barrel", yard + offset, yard + offset + Vector3.new(0, 1.6, 0), 1.2, Color3.fromRGB(118, 80, 50), Enum.Material.WoodPlanks)
+		solid(barrel)
+		beam(folder, "BarrelHoop", yard + offset + Vector3.new(0, 0.35 + i * 0.02, 0), yard + offset + Vector3.new(0, 0.45, 0), 1.26, Color3.fromRGB(58, 58, 60), Enum.Material.Metal)
+		beam(folder, "BarrelHoop", yard + offset + Vector3.new(0, 1.15, 0), yard + offset + Vector3.new(0, 1.25, 0), 1.26, Color3.fromRGB(58, 58, 60), Enum.Material.Metal)
+	end
+	for i, frame in { CFrame.new(yard + Vector3.new(-1.8, 0.6, -1.2)), CFrame.new(yard + Vector3.new(-1.6, 1.8, -1.0)) * CFrame.Angles(0, 0.3, 0), CFrame.new(yard + Vector3.new(-3.0, 0.6, -0.4)) * CFrame.Angles(0, -0.2, 0) } do
+		solid(piece(folder, "Crate", Vector3.new(1.2, 1.2, 1.2), frame, shade(Color3.fromRGB(150, 116, 76), 0.92 + i * 0.04), Enum.Material.WoodPlanks))
+	end
+	local leanAt = yard + Vector3.new(-2.9, 0, 0.6)
+	beam(folder, "PickaxeHandle", leanAt, leanAt + Vector3.new(0.4, 2.6, 0.5), 0.16, Color3.fromRGB(122, 84, 52), Enum.Material.Wood)
+	piece(folder, "PickaxeHead", Vector3.new(1.5, 0.22, 0.22), CFrame.new(leanAt + Vector3.new(0.4, 2.55, 0.5)) * CFrame.Angles(0, 0.9, 0.25), Color3.fromRGB(150, 154, 158), Enum.Material.Metal)
+
+	-- A trail sign points the way to the mountain.
+	local signAt = camp + Vector3.new(4.5, 0, -11)
+	beam(folder, "SignPost", signAt, signAt + Vector3.new(0, 4.2, 0), 0.35, Color3.fromRGB(92, 68, 46), Enum.Material.Wood)
+	-- The lettered face looks back towards the camp, where players spawn.
+	local board = piece(folder, "SignBoard", Vector3.new(4.4, 1.1, 0.2), CFrame.lookAt(signAt + Vector3.new(0, 3.5, 0), signAt + Vector3.new(0, 3.5, 1)), Color3.fromRGB(132, 100, 66), Enum.Material.WoodPlanks)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 50
+	gui.LightInfluence = 1
+	gui.Parent = board
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.Font = Enum.Font.FredokaOne
+	text.TextScaled = true
+	text.TextColor3 = Color3.fromRGB(250, 236, 206)
+	text.Text = "⛏  DIAMOND MOUNTAIN"
+	text.Parent = gui
+
+	-- Festoon lights over the camp, without a light per bulb.
+	for i = 0, 14 do
+		local t = i / 14
+		local at = camp + Vector3.new(-10 + t * 20, 7 - 1.4 * math.sin(t * math.pi), -6)
+		local wire = piece(folder, "FestoonWire", Vector3.new(1.5, 0.035, 0.035), CFrame.new(at), Color3.fromRGB(48, 44, 35), Enum.Material.Metal)
+		wire.CastShadow = false
+		if i % 2 == 0 then
+			local bulb = piece(folder, "FestoonBulb", Vector3.new(0.18, 0.27, 0.18), CFrame.new(at + Vector3.new(0, -0.2, 0)), Color3.fromRGB(255, 191, 102), Enum.Material.Neon)
+			bulb.CastShadow = false
+		end
+	end
+	for _, x in { -10, 10 } do
+		beam(folder, "FestoonPost", camp + Vector3.new(x, 0, -6), camp + Vector3.new(x, 7.2, -6), 0.25, Color3.fromRGB(96, 70, 48), Enum.Material.Wood)
+	end
+
+	-- The campfire: a stone ring, crossed logs and log benches.
+	local fireAt = camp + Vector3.new(12, 0, 5)
+	for i = 1, 11 do
+		local angle = i / 11 * math.pi * 2
+		local size = random:NextNumber(0.6, 0.85)
+		piece(folder, "FireRingStone", Vector3.new(size * 1.2, size * 0.7, size), CFrame.new(fireAt + Vector3.new(math.cos(angle) * 1.6, size * 0.3, math.sin(angle) * 1.6))
+			* CFrame.Angles(random:NextNumber(-0.3, 0.3), -angle, random:NextNumber(-0.3, 0.3)), Color3.fromRGB(110 + i % 3 * 8, 112 + i % 3 * 8, 110 + i % 3 * 8), Enum.Material.Slate)
+	end
+	for i = 1, 4 do
+		local angle = i * math.pi / 2 + 0.4
+		local foot = fireAt + Vector3.new(math.cos(angle) * 0.9, 0.1, math.sin(angle) * 0.9)
+		beam(folder, "FireLog", foot, fireAt + Vector3.new(0, 1.3, 0), 0.32, Color3.fromRGB(70, 50, 36), Enum.Material.Wood)
+	end
+	local embers = piece(folder, "Embers", Vector3.new(1.6, 0.18, 1.6), CFrame.new(fireAt + Vector3.new(0, 0.12, 0)), Color3.fromRGB(236, 120, 52), Enum.Material.Neon)
+	embers.CastShadow = false
+	local fire = Instance.new("Fire")
+	fire.Size = 3.2
+	fire.Heat = 6
+	fire.Color = Color3.fromRGB(255, 150, 60)
+	fire.SecondaryColor = Color3.fromRGB(255, 70, 20)
+	fire.Parent = embers
+	local glow = Instance.new("PointLight")
+	glow.Color = Color3.fromRGB(255, 170, 90)
+	glow.Range = 16
+	glow.Brightness = 1.4
+	glow.Shadows = false
+	glow.Parent = embers
+	for _, offset in { Vector3.new(-4, 0, 0), Vector3.new(4, 0, 0), Vector3.new(0, 0, 4) } do
+		local across = if offset.X ~= 0 then Vector3.new(0, 0, 1.8) else Vector3.new(1.8, 0, 0)
+		solid(beam(folder, "BenchLog", fireAt + offset + Vector3.new(0, 0.5, 0) - across, fireAt + offset + Vector3.new(0, 0.5, 0) + across, 1, Color3.fromRGB(104, 78, 54), Enum.Material.Wood))
+	end
+	lantern(folder, camp + Vector3.new(-9, 0, -8))
+	lantern(folder, camp + Vector3.new(9, 0, -8))
+
+	-- Light: a clear late-afternoon sun, soft sky light, aerial haze and a
+	-- gentle filmic grade. Technology is Future (set in the place file).
+	Lighting.ClockTime = 15.6
+	Lighting.GeographicLatitude = 38
+	Lighting.Brightness = 2.6
+	Lighting.GlobalShadows = true
+	Lighting.ShadowSoftness = 0.22
+	Lighting.Ambient = Color3.fromRGB(74, 78, 88)
+	Lighting.OutdoorAmbient = Color3.fromRGB(126, 130, 140)
+	Lighting.ColorShift_Top = Color3.fromRGB(30, 18, 6)
+	Lighting.ColorShift_Bottom = Color3.fromRGB(0, 0, 0)
+	Lighting.EnvironmentDiffuseScale = 1
+	Lighting.EnvironmentSpecularScale = 0.85
+	Lighting.ExposureCompensation = 0.1
+	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
+	atmosphere.Density = 0.3
+	atmosphere.Offset = 0.22
+	atmosphere.Color = Color3.fromRGB(198, 214, 230)
+	atmosphere.Decay = Color3.fromRGB(110, 126, 150)
+	atmosphere.Glare = 0.35
+	atmosphere.Haze = 1.6
+	atmosphere.Parent = Lighting
+	local grade = Instance.new("ColorCorrectionEffect")
+	grade.Name = "AlpineGrade"
+	grade.Brightness = 0
+	grade.Contrast = 0.08
+	grade.Saturation = 0.08
+	grade.TintColor = Color3.fromRGB(255, 249, 240)
+	grade.Parent = Lighting
+	local bloom = Instance.new("BloomEffect")
+	bloom.Intensity = 0.45
+	bloom.Size = 24
+	bloom.Threshold = 1.3
+	bloom.Parent = Lighting
+	local rays = Instance.new("SunRaysEffect")
+	rays.Intensity = 0.05
+	rays.Spread = 0.75
+	rays.Parent = Lighting
+	local clouds = terrain:FindFirstChildOfClass("Clouds") or Instance.new("Clouds")
+	clouds.Cover = 0.42
+	clouds.Density = 0.5
+	clouds.Color = Color3.fromRGB(250, 248, 242)
+	clouds.Parent = terrain
+	local sky = Lighting:FindFirstChildOfClass("Sky") or Instance.new("Sky")
+	sky.SunAngularSize = 12
+	sky.CelestialBodiesShown = true
+	sky.Parent = Lighting
 end
+
 return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="15">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -2560,7 +3230,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="16">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -2704,15 +3374,15 @@ return TikTokFeed
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="17">
+  <Item class="StarterPlayer" referent="20">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="18">
+    <Item class="StarterPlayerScripts" referent="21">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="19">
+      <Item class="LocalScript" referent="22">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -2737,6 +3407,26 @@ local Request = Remotes:WaitForChild("Request") :: RemoteEvent
 local RebuildEffects = require(script:WaitForChild("RebuildEffects"))
 local GiftEffects = require(script:WaitForChild("GiftEffects"))
 GiftEffects.start(player:WaitForChild("PlayerGui"))
+
+-- The rock is drawn here, not replicated from the server: the server sends a
+-- snapshot and compact change lists, and MountainView keeps local parts in step.
+local MountainView = require(script:WaitForChild("MountainView"))
+local MountainSync = Remotes:WaitForChild("MountainSync") :: RemoteEvent
+local view = MountainView.new()
+view.onRebuild = RebuildEffects.play
+view.onRestore = RebuildEffects.restore
+MountainSync.OnClientEvent:Connect(function(kind: string, payload: any)
+	view:push(kind, payload)
+end)
+view:start()
+-- Ask for the mountain until a snapshot arrives; the first request can reach
+-- the server before its handlers are ready.
+task.spawn(function()
+	repeat
+		Request:FireServer("mountainReady")
+		task.wait(4)
+	until view.round > 0
+end)
 
 local FONT = Enum.Font.FredokaOne
 local WHITE = Color3.fromRGB(255, 255, 255)
@@ -2772,6 +3462,15 @@ end
 
 local function rounded(parent: Instance, radius: number)
 	make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+end
+
+-- Text changes force a relayout; per-frame labels only update when they differ.
+local shownText: { [TextLabel]: string } = {}
+local function setText(label: TextLabel, text: string)
+	if shownText[label] ~= text then
+		shownText[label] = text
+		label.Text = text
+	end
 end
 
 local function outline(parent: Instance, thickness: number)
@@ -3341,7 +4040,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 	if math.abs(stone - shownStone) < 1 then
 		shownStone = stone
 	end
-	stoneValue.Text = Format.commas(shownStone)
+	setText(stoneValue, Format.commas(shownStone))
 	barFill.Size = UDim2.fromScale(math.clamp(shownStone / starting, 0, 1), 1)
 
 	local phase = attr("Phase", "Digging")
@@ -3350,15 +4049,15 @@ RunService.RenderStepped:Connect(function(dt: number)
 	timerLabel.Visible = phase ~= "Holding"
 	local now = workspace:GetServerTimeNow()
 	local roundStart = attr("RoundStart", now)
-	timerLabel.Text = "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart)
-	status.Text = "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else "")
+	setText(timerLabel, "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart))
+	setText(status, "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else ""))
 
 	if phase == "Holding" then
 		local elapsed = now - attr("HoldStart", now)
 		local shown = HoldTimer.display(elapsed, Config.HoldSeconds, Config.HoldCountFrom, Config.HoldSlowdown)
 		countdown.Visible = true
-		countHolder.Text = "💎 " .. tostring(attr("Holder", "")) .. " — HOLD IT!"
-		countNumber.Text = tostring(shown)
+		setText(countHolder, "💎 " .. tostring(attr("Holder", "")) .. " — HOLD IT!")
+		setText(countNumber, tostring(shown))
 		if shown ~= lastCount then
 			lastCount = shown
 			countNumber.TextColor3 = WHITE:Lerp(GOLD, 1 - shown / Config.HoldCountFrom)
@@ -3382,11 +4081,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
-	if kind == "rebuild" and type(data) == "table" then
-		RebuildEffects.play(data)
-	elseif kind == "restore" and type(data) == "table" then
-		RebuildEffects.restore(data)
-	elseif kind == "giftEffect" and type(data) == "table" then
+	if kind == "giftEffect" and type(data) == "table" then
 		GiftEffects.play(data)
 	elseif kind == "feed" and type(data) == "table" then
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
@@ -3447,11 +4142,10 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 		local result = workspace:Raycast(ray.Origin, ray.Direction * 500, aimParams)
 		if result then aimTarget = result.Instance end
 	end
-	local mountain = workspace:FindFirstChild("Mountain")
 	local target = aimTarget
-	local stone = target ~= nil and mountain ~= nil and target:IsDescendantOf(mountain)
-		and target.Name == "Stone" and not target:GetAttribute("BackingRock")
-	rockOutline.Adornee = if stone then target else nil
+	local stone = target ~= nil and view:keyForPart(target) ~= nil
+	local adornee = if stone then target else nil
+	if rockOutline.Adornee ~= adornee then rockOutline.Adornee = adornee end
 	rockOutline.Enabled = stone
 end)
 local digging = false
@@ -3484,9 +4178,9 @@ RunService.Heartbeat:Connect(function(dt: number)
 	local target = aimTarget
 	local allowed = digging and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
+	local key = if target then view:keyForPart(target) else nil
 	local onRock = allowed and root ~= nil and root:IsA("BasePart")
-		and target ~= nil and target.Name == "Stone"
-		and (root.Position - target.Position).Magnitude <= 16
+		and key ~= nil and (root.Position - (target :: BasePart).Position).Magnitude <= 16
 	player:SetAttribute("DiggingRock", onRock == true)
 	if not allowed then
 		return
@@ -3499,7 +4193,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 	local character = player.Character
 	local tool = character and character:FindFirstChildOfClass("Tool")
 	if tool == nil and onRock then
-		Request:FireServer("mine", target)
+		Request:FireServer("mine", key)
 	end
 end)
 
@@ -3513,21 +4207,30 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
 -- First-person view with two hands in front of the camera (like the PC game).
--- The hands follow the camera, bob while walking and swing when you click.
--- Alternating hands reach, curl around stone and rake rubble back.
+-- The hands follow the camera, bob while walking and alternate reaching,
+-- curling around stone and raking rubble back while digging.
+--
+-- Picking up the diamond: the gem flies from where it lay into your right hand,
+-- the hand lifts it up and the camera eases upward so the gem is framed
+-- against the sky and the mountain. The server freezes the holder in place
+-- until a rebuild cancels the hold or the countdown is won.
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-
 
 local FirstPerson = {}
 
 local SKIN_FALLBACK = Color3.fromRGB(234, 184, 146)
 local SLEEVE = Color3.fromRGB(70, 82, 70)
+local GEM_SIZE = 1.05 -- studs across: about a third of the screen in the raised hand
+local FLY_SECONDS = 0.45 -- world position to hand
+local CAMERA_EASE = 0.7
+local HOLD_PITCH = math.rad(28) -- looking up, but still showing the peak below the gem
 
 local function part(name: string, size: Vector3, colour: Color3, material: Enum.Material?): Part
 	local p = Instance.new("Part")
@@ -3543,6 +4246,11 @@ local function part(name: string, size: Vector3, colour: Color3, material: Enum.
 	return p
 end
 
+local function smooth(value: number): number
+	value = math.clamp(value, 0, 1)
+	return value * value * (3 - 2 * value)
+end
+
 function FirstPerson.start()
 	local player = Players.LocalPlayer
 	player.CameraMode = Enum.CameraMode.LockFirstPerson
@@ -3552,56 +4260,87 @@ function FirstPerson.start()
 	local rig = Instance.new("Model")
 	rig.Name = "FirstPersonHands"
 	local hands = {}
+	local rigParts: { BasePart } = {}
+	local skinParts: { BasePart } = {}
+	local function add(p: BasePart, skin: boolean)
+		p.Parent = rig
+		table.insert(rigParts, p)
+		if skin then table.insert(skinParts, p) end
+	end
 	for _, side in { -1, 1 } do
 		local sleeve = part("Sleeve", Vector3.new(0.42, 0.42, 1.5), SLEEVE, Enum.Material.Fabric)
 		local hand = part("Hand", Vector3.new(0.4, 0.34, 0.45), SKIN_FALLBACK)
-		sleeve.Parent = rig
-		hand.Parent = rig
+		add(sleeve, false)
+		add(hand, true)
 		local fingers = {}
-		for index = 1, 4 do
+		for _ = 1, 4 do
 			local finger = part("FingerBase", Vector3.new(0.075, 0.11, 0.14), SKIN_FALLBACK)
 			local tip = part("FingerTip", Vector3.new(0.072, 0.10, 0.13), SKIN_FALLBACK)
-			finger.Parent = rig
-			tip.Parent = rig
+			add(finger, true)
+			add(tip, true)
 			table.insert(fingers, { base = finger, tip = tip })
 		end
 		local thumb = part("Thumb", Vector3.new(0.12, 0.16, 0.21), SKIN_FALLBACK)
-		thumb.Parent = rig
+		add(thumb, true)
 		table.insert(hands, { side = side, sleeve = sleeve, hand = hand, fingers = fingers, thumb = thumb })
 	end
+	local rigFrames: { CFrame } = table.create(#rigParts, CFrame.identity)
+	local skinColour = SKIN_FALLBACK
 
-	local State = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRushState")
-	local DiamondShape = require(game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush"):WaitForChild("DiamondShape"))
+	local State = ReplicatedStorage:WaitForChild("DiamondRushState")
+	local DiamondShape = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("DiamondShape"))
 	local worldDiamond = workspace:WaitForChild("Diamond") :: BasePart
-	local worldFacets = worldDiamond:WaitForChild("Facets")
-	local worldHidden = false
+
+	-- The server rebuilds the world gem's facets whenever it changes size, so
+	-- the facet folder is looked up again rather than cached.
+	local hiddenFacets: Instance? = nil
 	local function hideWorld(hidden: boolean)
-		if worldHidden == hidden then return end
-		worldHidden = hidden
-		for _, face in worldFacets:GetChildren() do
-			if face:IsA("BasePart") then face.LocalTransparencyModifier = if hidden then 1 else 0 end
+		local facets = worldDiamond:FindFirstChild("Facets")
+		local target = if hidden then facets else nil
+		if target == hiddenFacets then return end
+		if hiddenFacets and hiddenFacets.Parent then
+			for _, face in hiddenFacets:GetChildren() do
+				if face:IsA("BasePart") then face.LocalTransparencyModifier = 0 end
+			end
+		end
+		hiddenFacets = target
+		if target then
+			for _, face in target:GetChildren() do
+				if face:IsA("BasePart") then face.LocalTransparencyModifier = 1 end
+			end
 		end
 	end
-	local gem = part("HeldDiamond", worldDiamond.Size * 1.8, worldDiamond.Color, Enum.Material.SmoothPlastic)
-	DiamondShape.attach(gem)
-	DiamondShape.visible(gem, false)
-	local outline = Instance.new("Highlight")
-	outline.Adornee = gem
-	outline.FillColor = Color3.fromRGB(135, 235, 255)
-	outline.FillTransparency = 0.8
-	outline.OutlineColor = Color3.new(1, 1, 1)
-	outline.OutlineTransparency = 0.15
-	outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	outline.Enabled = false
-	outline.Parent = gem
+
+	-- The held gem: anchored facets moved in one call each frame (no welds).
+	local gem = DiamondShape.build(GEM_SIZE, "HeldDiamond")
+	local core = part("Core", Vector3.new(0.1, 0.1, 0.1), Color3.new(1, 1, 1))
+	core.Transparency = 1
+	core.Parent = gem.model
 	local shine = Instance.new("PointLight")
-	shine.Color = Color3.fromRGB(150, 235, 255)
-	shine.Range = 4
-	shine.Brightness = 0.7
-	shine.Enabled = false
-	shine.Parent = gem
-	-- Keep the complete gem out of the rendered scene until it is held.
-	gem.Parent = nil
+	shine.Color = Color3.fromRGB(160, 235, 255)
+	shine.Range = 6
+	shine.Brightness = 1.2
+	shine.Shadows = false
+	shine.Parent = core
+	local sparkles = Instance.new("ParticleEmitter")
+	sparkles.Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(160, 235, 255))
+	sparkles.LightEmission = 1
+	sparkles.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.22), NumberSequenceKeypoint.new(1, 0) })
+	sparkles.Transparency = NumberSequence.new(0, 1)
+	sparkles.Lifetime = NumberRange.new(0.3, 0.7)
+	sparkles.Rate = 10
+	sparkles.Speed = NumberRange.new(0.3, 0.9)
+	sparkles.SpreadAngle = Vector2.new(180, 180)
+	sparkles.LockedToPart = true
+	sparkles.Enabled = false
+	sparkles.Parent = core
+	local outline = Instance.new("Highlight")
+	outline.FillTransparency = 1
+	outline.OutlineColor = Color3.new(1, 1, 1)
+	outline.OutlineTransparency = 0.35
+	outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	outline.Parent = gem.model
+
 	local hiddenArms: { [BasePart]: number } = {}
 	local armNames = { RightHand = true, RightLowerArm = true, RightUpperArm = true, LeftHand = true, LeftLowerArm = true, LeftUpperArm = true, ["Right Arm"] = true, ["Left Arm"] = true }
 	local function restoreArms()
@@ -3611,42 +4350,59 @@ function FirstPerson.start()
 		table.clear(hiddenArms)
 	end
 	player.CharacterRemoving:Connect(restoreArms)
-	local lift = 0 -- 0 = digging pose, 1 = diamond raised to the sky
+
 	local function isHolding(): boolean
 		-- Display names are not unique: only the actual holder gets this view.
 		return State:GetAttribute("Phase") == "Holding" and State:GetAttribute("HolderUserId") == player.UserId
 	end
 
-	-- While you hold the diamond the camera is locked, tilted up towards it.
-	local lockedYaw: number? = nil
+	-- Hold state, set when the hold begins.
+	local holdClock = 0
+	local holdYaw = 0
+	local startPitch = 0
+	local gemFrom: CFrame? = nil
+	local lastWorldGem: CFrame? = nil
+	local wasHolding = false
+
+	-- While you hold the diamond the camera is locked, easing up towards it.
 	RunService:BindToRenderStep("DiamondRushHoldCamera", Enum.RenderPriority.Camera.Value + 1, function()
 		local camera = workspace.CurrentCamera
 		local character = player.Character
 		local head = character and character:FindFirstChild("Head")
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		local holding = isHolding() and humanoid ~= nil and humanoid.Health > 0
+		if not holding and State:GetAttribute("Phase") == "Revealed" then
+			lastWorldGem = worldDiamond.CFrame
+		end
 		if holding and camera and head and head:IsA("BasePart") then
-			if lockedYaw == nil then
+			if not wasHolding then
+				wasHolding = true
+				holdClock = os.clock()
 				local look = camera.CFrame.LookVector
-				lockedYaw = math.atan2(-look.X, -look.Z)
+				holdYaw = math.atan2(-look.X, -look.Z)
+				startPitch = math.asin(math.clamp(look.Y, -1, 1))
+				gemFrom = lastWorldGem
 				camera.CameraType = Enum.CameraType.Scriptable
 			end
-			camera.CFrame = CFrame.new(head.Position + Vector3.new(0, 0.6, 0)) * CFrame.Angles(0, lockedYaw :: number, 0) * CFrame.Angles(math.rad(62), 0, 0)
-		elseif lockedYaw ~= nil then
-			lockedYaw = nil
+			local t = os.clock() - holdClock
+			local pitch = startPitch + (HOLD_PITCH - startPitch) * smooth(t / CAMERA_EASE)
+			local breathe = math.sin(t * 1.6) * math.rad(0.6)
+			camera.CFrame = CFrame.new(head.Position + Vector3.new(0, 0.6, 0))
+				* CFrame.Angles(0, holdYaw + breathe * 0.5, 0) * CFrame.Angles(pitch + breathe, 0, 0)
+		elseif wasHolding then
+			wasHolding = false
+			gemFrom = nil
 			if camera then
 				camera.CameraType = Enum.CameraType.Custom
 			end
 		end
 	end)
+
 	local cycle = 1
 	local punchSide = 1
 	local bob = 0
 	local digBlend = 0
-	local function smooth(value: number): number
-		value = math.clamp(value, 0, 1)
-		return value * value * (3 - 2 * value)
-	end
+	local lift = 0 -- 0 = digging pose, 1 = diamond raised high
 
 	-- Position the hands after both Roblox's camera and our hold-camera update.
 	RunService:BindToRenderStep("DiamondRushHands", Enum.RenderPriority.Camera.Value + 2, function(dt: number)
@@ -3655,8 +4411,8 @@ function FirstPerson.start()
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if camera == nil or character == nil or humanoid == nil or humanoid.Health <= 0 then
 			rig.Parent = nil
-			gem.Parent = nil
-			shine.Enabled = false
+			gem.model.Parent = nil
+			sparkles.Enabled = false
 			restoreArms()
 			hideWorld(false)
 			return
@@ -3665,21 +4421,23 @@ function FirstPerson.start()
 		-- Scriptable cameras bypass the normal first-person transparency controller.
 		-- Hide the real limbs so they cannot float above the custom hands.
 		for _, limb in character:GetChildren() do
-			if limb:IsA("BasePart") and armNames[limb.Name] then
-				if hiddenArms[limb] == nil then hiddenArms[limb] = limb.LocalTransparencyModifier end
+			if limb:IsA("BasePart") and armNames[limb.Name] and hiddenArms[limb] == nil then
+				hiddenArms[limb] = limb.LocalTransparencyModifier
 				limb.LocalTransparencyModifier = 1
 			end
 		end
-		-- Skin tone from the avatar.
+		-- Skin tone from the avatar, applied only when it changes.
 		local colours = character:FindFirstChildOfClass("BodyColors")
 		local skin = if colours then colours.RightArmColor3 else SKIN_FALLBACK
+		if skin ~= skinColour then
+			skinColour = skin
+			for _, p in skinParts do p.Color = skin end
+		end
 		local tool = character:FindFirstChildOfClass("Tool")
 		-- Keep any third-person tool from obscuring the local hand and diamond.
 		if tool then
 			for _, d in tool:GetDescendants() do
-				if d:IsA("BasePart") then
-					d.LocalTransparencyModifier = 1
-				end
+				if d:IsA("BasePart") then d.LocalTransparencyModifier = 1 end
 			end
 		end
 		local moving = humanoid.MoveDirection.Magnitude > 0.1 and humanoid.FloorMaterial ~= Enum.Material.Air
@@ -3702,12 +4460,23 @@ function FirstPerson.start()
 		local pull = smooth((cycle - 0.48) / 0.52)
 		local extension = reach * (1 - pull) * digBlend
 		local scoop = math.sin(math.clamp((cycle - 0.38) / 0.62, 0, 1) * math.pi) * digBlend
-		-- While you hold the diamond your right hand lifts it to the sky.
-		lift += ((if holding then 1 else 0) - lift) * (1 - math.exp(-dt * 9))
+		lift += ((if holding then 1 else 0) - lift) * (1 - math.exp(-dt * 8))
 		hideWorld(holding)
 		local worldLight = worldDiamond:FindFirstChildOfClass("PointLight")
 		if worldLight then worldLight.Enabled = State:GetAttribute("Phase") == "Holding" and not holding end
+		if holding then
+			-- The world gem's sparkles are for everyone else watching.
+			local worldSparkles = worldDiamond:FindFirstChild("HeldSparkles", true)
+			if worldSparkles and worldSparkles:IsA("ParticleEmitter") then worldSparkles.Enabled = false end
+		end
+
+		local index = 0
+		local function put(frame: CFrame)
+			index += 1
+			rigFrames[index] = frame
+		end
 		local base = camera.CFrame * CFrame.new(math.sin(bob * 0.5) * sway * 0.4, -0.92 + math.sin(bob) * sway * 0.45, -1.6)
+		local palm = CFrame.identity
 		for _, h in hands do
 			local active = if h.side == punchSide then 1 - lift else 0
 			local hit = extension * active
@@ -3716,42 +4485,50 @@ function FirstPerson.start()
 			local support = if h.side ~= punchSide then extension * (1 - lift) else 0
 			local normal = base * CFrame.new(h.side * (0.58 - hit * 0.24), hit * 0.27 - rake * 0.19 + support * 0.05, -hit * 0.62 + prep * 0.12 + rake * 0.16 - support * 0.08)
 				* CFrame.Angles(math.rad(10 - hit * 22 + rake * 34 + prep * 12), math.rad(-h.side * (8 + hit * 12)), math.rad(h.side * (rake * 16 - hit * 8)))
-			-- Camera-relative grip stays below the countdown, well inside the lens.
-			-- 62-degree camera tilt + 28-degree arm tilt still points up at the sky.
+			-- The right hand rises to the right of centre, under the countdown;
+			-- the left hand drops out of view.
 			local raised = if h.side == 1
-				then camera.CFrame * CFrame.new(0.30, -0.56, -1.65) * CFrame.Angles(math.rad(28), math.rad(-8), math.rad(-10))
+				then camera.CFrame * CFrame.new(0.5, -0.62, -1.7) * CFrame.Angles(math.rad(34), math.rad(-12), math.rad(-6))
 				else normal * CFrame.new(0, -1.6, 0.3)
-			local arm = normal:Lerp(raised, lift)
-			h.sleeve.CFrame = arm * CFrame.new(0, 0, 0.46)
-			h.hand.CFrame = arm * CFrame.new(0, 0, -0.35)
-			h.hand.Color = skin
-			h.hand.LocalTransparencyModifier = 0
+			local arm = normal:Lerp(raised, smooth(lift))
+			put(arm * CFrame.new(0, 0, 0.46))
+			local handFrame = arm * CFrame.new(0, 0, -0.35)
+			put(handFrame)
+			if h.side == 1 then palm = handFrame end
 			local grip = math.max(if h.side == 1 then lift else 0, rake * 0.85)
-			for index, finger in h.fingers do
-				local curl = grip * (0.85 + index * 0.035)
-				local joint = h.hand.CFrame * CFrame.new((index - 2.5) * 0.09, 0, -0.20)
-					* CFrame.Angles(math.rad(-46 * curl), 0, 0)
-				finger.base.Color = skin
-				finger.tip.Color = skin
-				finger.base.CFrame = joint * CFrame.new(0, 0, -0.07)
-				finger.tip.CFrame = joint * CFrame.new(0, 0, -0.14)
-					* CFrame.Angles(math.rad(-54 * curl), 0, 0) * CFrame.new(0, 0, -0.065)
+			for fingerIndex, _ in h.fingers do
+				local curl = grip * (0.85 + fingerIndex * 0.035)
+				local joint = handFrame * CFrame.new((fingerIndex - 2.5) * 0.09, 0, -0.20) * CFrame.Angles(math.rad(-46 * curl), 0, 0)
+				put(joint * CFrame.new(0, 0, -0.07))
+				put(joint * CFrame.new(0, 0, -0.14) * CFrame.Angles(math.rad(-54 * curl), 0, 0) * CFrame.new(0, 0, -0.065))
 			end
-			h.thumb.Color = skin
-			h.thumb.CFrame = h.hand.CFrame * CFrame.new(-h.side * 0.17, 0.015, -0.08)
-				* CFrame.Angles(math.rad(-35 * grip), math.rad(h.side * 20 * grip), math.rad(h.side * (15 + 35 * grip)))
-
+			put(handFrame * CFrame.new(-h.side * 0.17, 0.015, -0.08)
+				* CFrame.Angles(math.rad(-35 * grip), math.rad(h.side * 20 * grip), math.rad(h.side * (15 + 35 * grip))))
 		end
-		local showGem = holding
-		DiamondShape.visible(gem, showGem)
-		outline.Enabled = showGem
-		shine.Enabled = showGem
-		if showGem then
-			local palm = hands[2].hand.CFrame
-			gem.CFrame = palm * CFrame.new(0, 0.34, -0.22) * CFrame.Angles(0, math.rad(22.5), 0)
-			gem.Parent = rig
+		workspace:BulkMoveTo(rigParts, rigFrames, Enum.BulkMoveMode.FireCFrameChanged)
+
+		if holding then
+			local t = os.clock() - holdClock
+			-- Upright in the world, crown tipped towards you, slowly turning.
+			local spin = t * 0.9
+			local seat = palm * CFrame.new(0, 0.17 + GEM_SIZE * 0.6, -0.05)
+			local target = CFrame.new(seat.Position) * CFrame.Angles(0, holdYaw, 0) * CFrame.Angles(math.rad(20), 0, 0) * CFrame.Angles(0, spin, 0)
+			local frame = target
+			local from = gemFrom
+			if from and t < FLY_SECONDS then
+				-- Arc from where the gem lay into the hand.
+				local u = smooth(t / FLY_SECONDS)
+				frame = from:Lerp(target, u) + Vector3.new(0, math.sin(u * math.pi) * 0.9, 0)
+			end
+			gem.model.Parent = camera
+			DiamondShape.place(gem, frame)
+			core.CFrame = frame
+			-- A bright flash as it lands, settling to a steady glow.
+			shine.Brightness = 1.2 + 3 * math.max(0, 1 - math.abs(t - FLY_SECONDS) / 0.35)
+			sparkles.Enabled = t >= FLY_SECONDS * 0.5
 		else
-			gem.Parent = nil
+			sparkles.Enabled = false
+			gem.model.Parent = nil
 		end
 	end)
 end
@@ -3760,7 +4537,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -4102,7 +4879,475 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="25">
+          <Properties>
+            <string name="Name">MountainView</string>
+            <string name="Source"><![CDATA[--!strict
+--!native
+-- Draws the mountain on this client. The server only keeps the rock grid and
+-- sends a snapshot plus compact change lists (MountainCodec). Every exposed cell
+-- gets exactly one local part; shapes slope towards open air (RockStyle).
+--
+-- Local parts cost no replication, collide with the local character and block
+-- clicks, exactly like server parts did. All work runs in one worker with a
+-- per-frame time budget, so a 100,000-rock gift opens over a few frames
+-- instead of freezing the game.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local Grid = require(Shared:WaitForChild("Grid"))
+local RockStyle = require(Shared:WaitForChild("RockStyle"))
+local Codec = require(Shared:WaitForChild("MountainCodec"))
+local PartShapes = require(Shared:WaitForChild("PartShapes"))
+
+local MountainView = {}
+MountainView.__index = MountainView
+
+local SPAN, LAYER = Grid.SPAN, Grid.LAYER
+local STEPS = Grid.STEPS
+local SIDES = { 1, -1, SPAN, -SPAN }
+local hasBit = Grid.hasBit
+local POOL_LIMIT = 3000
+local DEBRIS_PER_CHANGE = 4
+local DEBRIS_LIMIT = 24
+local REBUILD_LAYERS = 16
+local REBUILD_STEP = 0.15 -- seconds between rebuild layers, matching the server
+
+local MATERIALS: { Enum.Material } = {}
+for index, layer in RockStyle.LAYERS do
+	MATERIALS[index] = (Enum.Material :: any)[layer.material]
+end
+
+-- Rotation for every shape code, so a wedge slopes down towards open air and a
+-- corner wedge turns its tall corner away from both open sides.
+local function shapeRotations(): { [number]: CFrame }
+	local rotations: { [number]: CFrame } = { [RockStyle.BLOCK] = CFrame.identity }
+	for code, direction in RockStyle.DIRECTIONS do
+		rotations[code] = if code <= 5
+			then PartShapes.wedgeToward(Vector3.new(direction[1], 0, direction[2]))
+			else PartShapes.cornerToward(-direction[1], -direction[2])
+	end
+	return rotations
+end
+
+export type View = typeof(setmetatable({} :: {
+	folder: Folder?,
+	grid: Grid.Grid?,
+	parts: { [number]: BasePart },
+	codes: { [number]: number },
+	keys: { [BasePart]: number },
+	tops: { [number]: number },
+	pool: { { BasePart } },
+	templates: { BasePart },
+	rotations: { [number]: CFrame },
+	queue: { any },
+	head: number,
+	tail: number,
+	round: number,
+	height: number,
+	blockSize: number,
+	ready: boolean,
+	meta: any,
+	sliceStart: number,
+	debris: { any },
+	debrisConnection: RBXScriptConnection?,
+	onRebuild: ((any) -> ())?,
+	onRestore: ((any) -> ())?,
+}, MountainView))
+
+function MountainView.new(): View
+	local self = setmetatable({
+		folder = nil,
+		grid = nil,
+		parts = {},
+		codes = {},
+		keys = {},
+		tops = {},
+		pool = { {}, {}, {} },
+		templates = {},
+		rotations = shapeRotations(),
+		queue = {},
+		head = 1,
+		tail = 0,
+		round = 0,
+		height = 1,
+		blockSize = 0.4,
+		ready = false,
+		meta = nil,
+		sliceStart = os.clock(),
+		debris = {},
+		debrisConnection = nil,
+		onRebuild = nil,
+		onRestore = nil,
+	}, MountainView)
+	return self
+end
+
+function MountainView._makeTemplates(self: View)
+	local size = self.blockSize * 1.02 -- a hair of overlap hides seams between cells
+	for kind, className in { "Part", "WedgePart", "CornerWedgePart" } do
+		local part = Instance.new(className) :: BasePart
+		part.Name = "Stone"
+		part.Size = Vector3.new(size, size, size)
+		part.Anchored = true
+		part.CanCollide = true
+		part.CanQuery = true
+		part.CanTouch = false
+		part.CastShadow = true
+		part.TopSurface = Enum.SurfaceType.Smooth
+		part.BottomSurface = Enum.SurfaceType.Smooth
+		self.templates[kind] = part
+		self.pool[kind] = {}
+	end
+end
+
+-- Messages from the server, processed strictly in order.
+function MountainView.push(self: View, kind: string, payload: any)
+	self.tail += 1
+	self.queue[self.tail] = { kind = kind, payload = payload }
+end
+
+function MountainView.pending(self: View): number
+	return self.tail - self.head + 1
+end
+
+-- Yields once this frame's share of work is used up. A backlog earns a
+-- slightly larger share so the mountain catches up quickly.
+function MountainView._pace(self: View)
+	local budget = if self:pending() > 2 or not self.ready then 0.006 else 0.004
+	if os.clock() - self.sliceStart >= budget then
+		task.wait()
+		self.sliceStart = os.clock()
+	end
+end
+
+function MountainView.start(self: View)
+	task.spawn(function()
+		while true do
+			local message = self.queue[self.head]
+			if message == nil then
+				self.head, self.tail = 1, 0
+				task.wait()
+				self.sliceStart = os.clock()
+			else
+				self.queue[self.head] = nil
+				self.head += 1
+				local ok, problem = pcall(self._handle, self, message.kind, message.payload)
+				if not ok then warn("[DiamondRush] mountain update failed: " .. tostring(problem)) end
+			end
+		end
+	end)
+end
+
+function MountainView.keyForPart(self: View, part: Instance): number?
+	return if part:IsA("BasePart") then self.keys[part] else nil
+end
+
+function MountainView.keyPosition(self: View, key: number): Vector3
+	local column = key % LAYER
+	local size = self.blockSize
+	return Vector3.new((column % SPAN - 128) * size, (key // LAYER) * size + size / 2, (column // SPAN - 128) * size)
+end
+
+function MountainView._handle(self: View, kind: string, payload: any)
+	if kind == "begin" then
+		self:_begin(payload)
+	elseif kind == "cells" and self.grid then
+		local grid = self.grid :: Grid.Grid
+		local count = 0
+		Codec.decode(payload, function(key)
+			grid.solid[key] = true
+			count += 1
+			if count % 2048 == 0 then self:_pace() end
+		end)
+	elseif kind == "tops" then
+		Codec.decodePairs(payload, function(column, top) self.tops[column] = top end)
+	elseif kind == "end" and self.grid then
+		self:_finishSnapshot()
+	elseif kind == "diff" and self.grid and self.ready and payload.round == self.round then
+		self:_applyDiff(payload)
+	end
+end
+
+function MountainView._begin(self: View, meta: any)
+	-- Drop the previous mountain in one step; it is out of view immediately.
+	local old = self.folder
+	if old then
+		old.Parent = nil
+		task.defer(function() old:Destroy() end)
+	end
+	for _, entry in self.debris do entry.part:Destroy() end
+	table.clear(self.debris)
+	self.meta = meta
+	self.round = meta.round
+	self.height = math.max(1, meta.height)
+	if meta.blockSize ~= self.blockSize or #self.templates == 0 then
+		self.blockSize = meta.blockSize
+		self:_makeTemplates()
+	end
+	self.ready = false
+	self.parts, self.codes, self.keys, self.tops = {}, {}, {}, {}
+	for kind in self.pool do self.pool[kind] = {} end
+	local grid = Grid.blank()
+	grid.sealed[meta.diamondKey] = true
+	self.grid = grid
+	local folder = Instance.new("Folder")
+	folder.Name = "Mountain"
+	folder.Parent = workspace
+	self.folder = folder
+end
+
+function MountainView._finishSnapshot(self: View)
+	local grid = self.grid :: Grid.Grid
+	local exposed: { number } = {}
+	local visited = 0
+	grid:eachSolid(function(key)
+		if grid:isExposed(key) then table.insert(exposed, key) end
+		visited += 1
+		if visited % 4096 == 0 then self:_pace() end
+	end)
+	local meta = self.meta
+	if meta.animated then
+		-- Rise from the base to the summit in waves, with flying stones.
+		local layers: { { number } } = {}
+		for wave = 1, REBUILD_LAYERS do layers[wave] = {} end
+		for _, key in exposed do
+			local wave = math.clamp(math.floor((key // LAYER) / self.height * REBUILD_LAYERS) + 1, 1, REBUILD_LAYERS)
+			table.insert(layers[wave], key)
+		end
+		local samples = {}
+		for wave, keys in layers do
+			for i = 1, math.min(5, #keys) do
+				local key = keys[math.max(1, math.floor(i * #keys / 5))]
+				local shape = RockStyle.shape(grid, key)
+				local _, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height)
+				table.insert(samples, {
+					frame = CFrame.new(self:keyPosition(key)) * (self.rotations[shape] or CFrame.identity),
+					size = self.templates[1].Size,
+					colour = Color3.fromRGB(r, g, b),
+					layer = wave,
+				})
+			end
+		end
+		if self.onRebuild then self.onRebuild({ stones = samples, start = meta.start }) end
+		for wave, keys in layers do
+			while workspace:GetServerTimeNow() < meta.start + wave * REBUILD_STEP do task.wait() end
+			self.sliceStart = os.clock()
+			for index, key in keys do
+				self:_refresh(key)
+				if index % 64 == 0 then self:_pace() end
+			end
+		end
+	else
+		for index, key in exposed do
+			self:_refresh(key)
+			if index % 64 == 0 then self:_pace() end
+		end
+	end
+	self.ready = true
+end
+
+function MountainView._acquire(self: View, kind: number): BasePart
+	local pool = self.pool[kind]
+	local part = pool[#pool]
+	if part then
+		pool[#pool] = nil
+		return part
+	end
+	return self.templates[kind]:Clone()
+end
+
+function MountainView._release(self: View, part: BasePart, kind: number)
+	self.keys[part] = nil
+	local pool = self.pool[kind]
+	if #pool < POOL_LIMIT then
+		part.Parent = nil
+		table.insert(pool, part)
+	else
+		part:Destroy()
+	end
+end
+
+-- Brings one cell's part in line with the grid: created, reshaped or removed.
+function MountainView._refresh(self: View, key: number): BasePart?
+	local grid = self.grid :: Grid.Grid
+	local old = self.codes[key]
+	if not (hasBit(grid.solidPages, key) and grid:isExposed(key)) then
+		if old ~= nil then
+			self.codes[key] = nil
+			local part = self.parts[key]
+			if part then
+				self.parts[key] = nil
+				self:_release(part, RockStyle.kind(old % 16))
+			end
+		end
+		return nil
+	end
+	local shape = RockStyle.shape(grid, key)
+	local layer, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height)
+	local code = shape + layer * 16
+	if code == old then return nil end
+	local kind = RockStyle.kind(shape)
+	local part: BasePart? = self.parts[key]
+	if part and (old == nil or RockStyle.kind(old % 16) ~= kind) then
+		self:_release(part, RockStyle.kind((old or 0) % 16))
+		part = nil
+	end
+	local fresh = part == nil
+	if part == nil then
+		local acquired = self:_acquire(kind)
+		self.parts[key] = acquired
+		self.keys[acquired] = key
+		part = acquired
+	end
+	local stone = part :: BasePart
+	stone.CFrame = CFrame.new(self:keyPosition(key)) * self.rotations[shape]
+	stone.Material = MATERIALS[layer]
+	stone.Color = Color3.fromRGB(r, g, b)
+	if fresh then stone.Parent = self.folder end
+	self.codes[key] = code
+	return if fresh then stone else nil
+end
+
+function MountainView._applyDiff(self: View, diff: any)
+	local grid = self.grid :: Grid.Grid
+	local changed: { number } = {}
+	local added: { number } = {}
+	local flying: { BasePart } = {}
+	local count = 0
+	for _, chunk in diff.removed or {} do
+		Codec.decode(chunk, function(key)
+			if hasBit(grid.solidPages, key) then
+				grid.solid[key] = nil
+				table.insert(changed, key)
+				local part = self.parts[key]
+				if part and #flying < DEBRIS_PER_CHANGE and #self.debris + #flying < DEBRIS_LIMIT and diff.effect ~= nil then
+					-- This rock flies off as rubble instead of vanishing.
+					self.parts[key] = nil
+					self.keys[part] = nil
+					self.codes[key] = nil
+					table.insert(flying, part)
+				end
+			end
+			count += 1
+			if count % 1024 == 0 then self:_pace() end
+		end)
+	end
+	for _, chunk in diff.added or {} do
+		Codec.decode(chunk, function(key)
+			if not hasBit(grid.solidPages, key) then
+				grid.solid[key] = true
+				table.insert(changed, key)
+				table.insert(added, key)
+				local column = key % LAYER
+				local y = key // LAYER
+				if (self.tops[column] or -1) < y then self.tops[column] = y end
+			end
+			count += 1
+			if count % 1024 == 0 then self:_pace() end
+		end)
+	end
+	if #flying > 0 then self:_throwDebris(flying, diff.at) end
+	self:_reconcile(changed)
+	if diff.effect == "restore" and self.onRestore and #added > 0 then
+		local stones = {}
+		for _, key in added do
+			local part = self.parts[key]
+			if part and part.Parent then
+				table.insert(stones, { frame = part.CFrame, size = part.Size, colour = part.Color, part = part })
+				if #stones >= 24 then break end
+			end
+		end
+		self.onRestore({ stones = stones })
+	end
+end
+
+-- Re-checks every cell whose shape can depend on the changed cells: the cells
+-- themselves, their neighbours (air or exposure changed) and the side
+-- neighbours of those (whose shapes test neighbour exposure).
+function MountainView._reconcile(self: View, changed: { number })
+	local grid = self.grid :: Grid.Grid
+	local pages = grid.solidPages
+	local marks, markPages = Grid.cellMap()
+	local list: { number } = {}
+	local function touch(key: number)
+		if not hasBit(markPages, key) then
+			marks[key] = true
+			table.insert(list, key)
+		end
+	end
+	for index, key in changed do
+		touch(key)
+		for _, step in STEPS do
+			local neighbour = key + step
+			if neighbour >= 0 and hasBit(pages, neighbour) then
+				touch(neighbour)
+				for _, side in SIDES do
+					local beside = neighbour + side
+					if hasBit(pages, beside) then touch(beside) end
+				end
+			end
+		end
+		if index % 256 == 0 then self:_pace() end
+	end
+	for index, key in list do
+		self:_refresh(key)
+		if index % 64 == 0 then self:_pace() end
+	end
+end
+
+-- A few removed rocks tumble away from the blast or dig, then return to the pool.
+function MountainView._throwDebris(self: View, parts: { BasePart }, at: Vector3?)
+	local random = Random.new()
+	for _, part in parts do
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CastShadow = false
+		local away = if at then part.Position - at else Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1))
+		if away.Magnitude < 0.05 then away = Vector3.new(random:NextNumber(-1, 1), 0.5, random:NextNumber(-1, 1)) end
+		table.insert(self.debris, {
+			part = part,
+			kind = if part:IsA("CornerWedgePart") then 3 elseif part:IsA("WedgePart") then 2 else 1,
+			velocity = away.Unit * random:NextNumber(8, 16) + Vector3.new(0, random:NextNumber(9, 16), 0),
+			spin = Vector3.new(random:NextNumber(-9, 9), random:NextNumber(-9, 9), random:NextNumber(-9, 9)),
+			age = 0,
+		})
+	end
+	if self.debrisConnection then return end
+	self.debrisConnection = RunService.RenderStepped:Connect(function(dt)
+		for index = #self.debris, 1, -1 do
+			local entry = self.debris[index]
+			entry.age += dt
+			entry.velocity += Vector3.new(0, -50 * dt, 0)
+			local part = entry.part
+			part.CFrame = (part.CFrame + entry.velocity * dt) * CFrame.Angles(entry.spin.X * dt, entry.spin.Y * dt, entry.spin.Z * dt)
+			part.Transparency = math.clamp((entry.age - 0.55) / 0.35, 0, 1)
+			if entry.age >= 0.9 then
+				table.remove(self.debris, index)
+				part.Transparency = 0
+				part.CanCollide = true
+				part.CanQuery = true
+				part.CastShadow = true
+				if part.Parent == self.folder then
+					self:_release(part, entry.kind)
+				else
+					part:Destroy()
+				end
+			end
+		end
+		if #self.debris == 0 and self.debrisConnection then
+			self.debrisConnection:Disconnect()
+			self.debrisConnection = nil
+		end
+	end)
+end
+
+return MountainView
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -4230,12 +5475,12 @@ return RebuildEffects
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="23">
+  <Item class="Workspace" referent="27">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="TerrainGrass">
+    <Item class="Terrain" referent="28">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>

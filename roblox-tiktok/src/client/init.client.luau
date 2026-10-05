@@ -21,6 +21,26 @@ local RebuildEffects = require(script:WaitForChild("RebuildEffects"))
 local GiftEffects = require(script:WaitForChild("GiftEffects"))
 GiftEffects.start(player:WaitForChild("PlayerGui"))
 
+-- The rock is drawn here, not replicated from the server: the server sends a
+-- snapshot and compact change lists, and MountainView keeps local parts in step.
+local MountainView = require(script:WaitForChild("MountainView"))
+local MountainSync = Remotes:WaitForChild("MountainSync") :: RemoteEvent
+local view = MountainView.new()
+view.onRebuild = RebuildEffects.play
+view.onRestore = RebuildEffects.restore
+MountainSync.OnClientEvent:Connect(function(kind: string, payload: any)
+	view:push(kind, payload)
+end)
+view:start()
+-- Ask for the mountain until a snapshot arrives; the first request can reach
+-- the server before its handlers are ready.
+task.spawn(function()
+	repeat
+		Request:FireServer("mountainReady")
+		task.wait(4)
+	until view.round > 0
+end)
+
 local FONT = Enum.Font.FredokaOne
 local WHITE = Color3.fromRGB(255, 255, 255)
 local GOLD = Color3.fromRGB(255, 205, 70)
@@ -55,6 +75,15 @@ end
 
 local function rounded(parent: Instance, radius: number)
 	make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+end
+
+-- Text changes force a relayout; per-frame labels only update when they differ.
+local shownText: { [TextLabel]: string } = {}
+local function setText(label: TextLabel, text: string)
+	if shownText[label] ~= text then
+		shownText[label] = text
+		label.Text = text
+	end
 end
 
 local function outline(parent: Instance, thickness: number)
@@ -624,7 +653,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 	if math.abs(stone - shownStone) < 1 then
 		shownStone = stone
 	end
-	stoneValue.Text = Format.commas(shownStone)
+	setText(stoneValue, Format.commas(shownStone))
 	barFill.Size = UDim2.fromScale(math.clamp(shownStone / starting, 0, 1), 1)
 
 	local phase = attr("Phase", "Digging")
@@ -633,15 +662,15 @@ RunService.RenderStepped:Connect(function(dt: number)
 	timerLabel.Visible = phase ~= "Holding"
 	local now = workspace:GetServerTimeNow()
 	local roundStart = attr("RoundStart", now)
-	timerLabel.Text = "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart)
-	status.Text = "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else "")
+	setText(timerLabel, "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart))
+	setText(status, "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else ""))
 
 	if phase == "Holding" then
 		local elapsed = now - attr("HoldStart", now)
 		local shown = HoldTimer.display(elapsed, Config.HoldSeconds, Config.HoldCountFrom, Config.HoldSlowdown)
 		countdown.Visible = true
-		countHolder.Text = "💎 " .. tostring(attr("Holder", "")) .. " — HOLD IT!"
-		countNumber.Text = tostring(shown)
+		setText(countHolder, "💎 " .. tostring(attr("Holder", "")) .. " — HOLD IT!")
+		setText(countNumber, tostring(shown))
 		if shown ~= lastCount then
 			lastCount = shown
 			countNumber.TextColor3 = WHITE:Lerp(GOLD, 1 - shown / Config.HoldCountFrom)
@@ -665,11 +694,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
-	if kind == "rebuild" and type(data) == "table" then
-		RebuildEffects.play(data)
-	elseif kind == "restore" and type(data) == "table" then
-		RebuildEffects.restore(data)
-	elseif kind == "giftEffect" and type(data) == "table" then
+	if kind == "giftEffect" and type(data) == "table" then
 		GiftEffects.play(data)
 	elseif kind == "feed" and type(data) == "table" then
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
@@ -730,11 +755,10 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 		local result = workspace:Raycast(ray.Origin, ray.Direction * 500, aimParams)
 		if result then aimTarget = result.Instance end
 	end
-	local mountain = workspace:FindFirstChild("Mountain")
 	local target = aimTarget
-	local stone = target ~= nil and mountain ~= nil and target:IsDescendantOf(mountain)
-		and target.Name == "Stone" and not target:GetAttribute("BackingRock")
-	rockOutline.Adornee = if stone then target else nil
+	local stone = target ~= nil and view:keyForPart(target) ~= nil
+	local adornee = if stone then target else nil
+	if rockOutline.Adornee ~= adornee then rockOutline.Adornee = adornee end
 	rockOutline.Enabled = stone
 end)
 local digging = false
@@ -767,9 +791,9 @@ RunService.Heartbeat:Connect(function(dt: number)
 	local target = aimTarget
 	local allowed = digging and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
+	local key = if target then view:keyForPart(target) else nil
 	local onRock = allowed and root ~= nil and root:IsA("BasePart")
-		and target ~= nil and target.Name == "Stone"
-		and (root.Position - target.Position).Magnitude <= 16
+		and key ~= nil and (root.Position - (target :: BasePart).Position).Magnitude <= 16
 	player:SetAttribute("DiggingRock", onRock == true)
 	if not allowed then
 		return
@@ -782,7 +806,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 	local character = player.Character
 	local tool = character and character:FindFirstChildOfClass("Tool")
 	if tool == nil and onRock then
-		Request:FireServer("mine", target)
+		Request:FireServer("mine", key)
 	end
 end)
 

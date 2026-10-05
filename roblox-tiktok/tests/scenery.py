@@ -1,87 +1,135 @@
+"""Builds the scenery under the Luau CLI with a Roblox stand-in and checks the
+terrain, part budget, tree geometry and lighting.
+
+    python3 tests/scenery.py [path/to/luau]
+"""
 from pathlib import Path
-import subprocess, sys
-root=Path(__file__).resolve().parents[1]
-source=(root/'src/server/Scenery.luau').read_text(encoding='utf-8')
-prefix=r'''
-local vector={}
-vector.__index=function(v,k) if k=="Magnitude" then return math.sqrt(v.X*v.X+v.Y*v.Y+v.Z*v.Z) end end
-local function vec(x,y,z) return setmetatable({X=x or 0,Y=y or 0,Z=z or 0},vector) end
-vector.__add=function(a,b) return vec(a.X+b.X,a.Y+b.Y,a.Z+b.Z) end
-vector.__sub=function(a,b) return vec(a.X-b.X,a.Y-b.Y,a.Z-b.Z) end
-vector.__mul=function(a,b) return vec(a.X*b,a.Y*b,a.Z*b) end
-vector.__div=function(a,b) return vec(a.X/b,a.Y/b,a.Z/b) end
-local Vector3={new=vec,zero=vec()}
-local cf={}
-cf.__mul=function(a,b) return setmetatable({Position=a.Position+b.Position},cf) end
-local CFrame={new=function(x,y,z) return setmetatable({Position=if type(x)=="table" then x else vec(x,y,z)},cf) end,Angles=function() return setmetatable({Position=vec()},cf) end}
-CFrame.lookAt=function(at) return setmetatable({Position=at},cf) end
-local Color3={fromRGB=function(r,g,b) return {R=r/255,G=g/255,B=b/255} end}
-local Enum={Material=setmetatable({},{__index=function(_,k) return k end}),PartType={Ball=1,Cylinder=2},RaycastFilterType={Include=1}}
-local instances={}
-local function object(kind)
- local p={ClassName=kind,FindFirstChildOfClass=function() return nil end}
- table.insert(instances,p); return p
+import subprocess
+import sys
+
+root = Path(__file__).resolve().parents[1]
+
+
+def module(path: str) -> str:
+    source = (root / path).read_text(encoding="utf-8")
+    source = source.replace('require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))', "PartShapes")
+    return "(function()\n" + source + "\nend)()"
+
+
+setup = r'''
+local Lighting = Instance.new("Lighting")
+game = { GetService = function(_, name)
+	if name == "Lighting" then return Lighting end
+	return { WaitForChild = function() return {} end }
+end }
+local terrain = Instance.new("Terrain")
+local fills, balls, chunks, snow, rockSteep, water, air = 0, 0, 0, 0, 0, 0, 0
+terrain.SetMaterialColor = function() end
+terrain.FillBlock = function() fills += 1 end
+terrain.FillBall = function(_, centre, radius, material)
+	balls += 1
+	assert(Vector3.new(centre.X, 0, centre.Z).Magnitude > 55 + radius - 8, "boulders stay out of the arena")
+	assert(material == "Material.Rock")
 end
-local Instance={new=object}
-local Lighting=object("Lighting")
-local game={GetService=function() return Lighting end}
-local Random={new=function()
- local state=4207
- local function unit() state=(state*16807)%2147483647;return state/2147483647 end
- return {NextNumber=function(_,a,b) return if a then a+unit()*(b-a) else unit() end,NextInteger=function(_,a,b) return a+math.floor(unit()*(b-a+1)) end}
-end}
-local task={wait=function() end}
-local Region3={new=function(a,b) return {minimum=a,maximum=b} end}
-local RaycastParams={new=function() return {} end}
-local terrain=object("Terrain")
-terrain.SetMaterialColor=function() end
-local terrainCalls=0
-for _,method in {"FillBlock","FillBall","FillWedge"} do
- terrain[method]=function() terrainCalls+=1 end
+local Region3 = { new = function(a, b) return { minimum = a, maximum = b } end }
+terrain.WriteVoxels = function(_, region, resolution, materials, occupancies)
+	chunks += 1
+	assert(resolution == 4)
+	local layers = (region.maximum.Y - region.minimum.Y) // 4
+	for x = 1, 16 do
+		for y = 1, layers do
+			for z = 1, 16 do
+				local value = occupancies[x][y][z]
+				local material = materials[x][y][z]
+				assert(value >= 0 and value <= 1 and value == value)
+				if material == "Material.Snow" then snow += 1 end
+				if material == "Material.Water" then water += 1 end
+				if material == "Material.Air" then air += 1 end
+				local wx, wz = region.minimum.X + (x - 0.5) * 4, region.minimum.Z + (z - 0.5) * 4
+				local wy = region.minimum.Y + (y - 0.5) * 4
+				if wx * wx + wz * wz < 55 * 55 then
+					assert(value == (if wy < 0 then 1 else 0), "keep mountain growth area flat and clear")
+					if value > 0 and wy > -4 then assert(material == "Material.LeafyGrass", "arena floor has no grass blades") end
+				end
+			end
+		end
+	end
 end
-local chunks=0
-terrain.WriteVoxels=function(_,region,resolution,materials,occupancies)
- chunks+=1
- assert(resolution==4)
- for x=1,16 do
-  for y=1,40 do
-   for z=1,16 do
-    local value=occupancies[x][y][z]
-    assert(value>=0 and value<=1 and value==value)
-    local wx,wz=region.minimum.X+(x-0.5)*4,region.minimum.Z+(z-0.5)*4
-    local wy=-24+(y-0.5)*4
-    if wx*wx+wz*wz<55*55 then
-     assert(value==(if wy<0 then 1 else 0),"keep mountain growth area flat and clear")
-    end
-   end
-  end
- end
-end
-local workspace={Terrain=terrain,Raycast=function(_,at) return {Position=vec(at.X,0,at.Z)} end}
-local Scenery=(function()
+workspace.Terrain = terrain
+workspace.Raycast = function(_, at) return { Position = Vector3.new(at.X, 0, at.Z) } end
 '''
-suffix=r'''
-end)()
-Scenery.build(26.4,Vector3.new(0,0.5,56.4))
-local parts,lights,trees=0,0,0
-for _,p in instances do
- if p.Name=="WoodlandTree" then trees+=1 end
- if p.ClassName=="Part" or p.ClassName=="WedgePart" or p.ClassName=="CornerWedgePart" then
-  parts+=1
-  assert(p.Anchored and p.CanQuery==false and p.CanTouch==false,"scenery must not interfere with mining/physics")
-  assert(p.Size.X>0 and p.Size.Y>0 and p.Size.Z>0)
- elseif p.ClassName=="PointLight" then lights+=1;assert(not p.Shadows) end
+
+checks = r'''
+Scenery.build(26.4, Vector3.new(0, 0.5, 56.4))
+local parts, lights, conifers, birches, outward = 0, 0, 0, 0, 0
+for _, p in instances do
+	if p.Name == "Conifer" then conifers += 1 end
+	if p.Name == "Birch" then birches += 1 end
+	if p.ClassName == "Part" or p.ClassName == "WedgePart" or p.ClassName == "CornerWedgePart" then
+		if p.Parent ~= nil then
+			parts += 1
+			assert(p.Anchored and p.CanQuery == false and p.CanTouch == false, "scenery must not interfere with mining/physics: " .. tostring(p.Name))
+			assert(p.Size.X > 0 and p.Size.Y > 0 and p.Size.Z > 0, "positive size: " .. tostring(p.Name))
+		end
+	elseif p.ClassName == "PointLight" then
+		lights += 1
+		assert(not p.Shadows, "point lights skip shadows")
+	end
+	-- Conifer wedges slope down away from their (upright) trunk.
+	if p.Name == "Needles" then
+		local axis = p.Parent:FindFirstChild("Trunk").CFrame.Position
+		local away = Vector3.new(p.CFrame.Position.X - axis.X, 0, p.CFrame.Position.Z - axis.Z).Unit
+		local low = p.CFrame.LookVector * -PartShapes.wedgeFront()
+		assert(Vector3.new(low.X, 0, low.Z).Unit:Dot(away) > 0.99, "conifer wedges slope down outward")
+		outward += 1
+	end
 end
-assert(parts<4000,"decoration count must remain bounded")
-assert(trees==128,"forest should reach its target count")
-assert(lights==5 and terrainCalls==1 and chunks==100)
-assert(Lighting.ClockTime==16.2 and Lighting.Brightness==3)
-print("Forest trees:", trees)
-print(string.format("PASS: smooth terrain and clearance verified, %d static parts, %d local lights, mining queries disabled",parts,lights))
+-- Each birch canopy is twelve wedges: six over six, all facing out from its centre.
+local canopies = {}
+for _, p in instances do
+	if p.Name == "Leaves" then
+		local list = canopies[#canopies]
+		if list == nil or #list == 12 then
+			list = {}
+			table.insert(canopies, list)
+		end
+		table.insert(list, p)
+	end
+end
+for _, list in canopies do
+	assert(#list == 12, "canopies are complete")
+	local centre = Vector3.zero
+	for _, p in list do centre += p.CFrame.Position / 12 end
+	for _, p in list do
+		local away = Vector3.new(p.CFrame.Position.X - centre.X, 0, p.CFrame.Position.Z - centre.Z).Unit
+		local low = p.CFrame.LookVector * -PartShapes.wedgeFront()
+		assert(Vector3.new(low.X, 0, low.Z).Unit:Dot(away) > 0.99, "canopy wedges thin out towards the rim")
+	end
+end
+assert(#canopies >= birches, "every birch has a canopy")
+assert(parts < 4000, "decoration count must remain bounded: " .. parts)
+assert(conifers >= 100 and conifers <= 120, "forest reaches its target: " .. conifers)
+assert(birches >= 10 and birches <= 16, "birches dot the meadows: " .. birches)
+assert(outward == conifers * 18, "every conifer wedge was checked")
+assert(lights >= 5 and lights <= 8, "local lights stay few: " .. lights)
+assert(fills == 1 and chunks == 144, "terrain chunks: " .. chunks)
+assert(balls >= 30, "terrain boulders replace plastic balls: " .. balls)
+assert(snow > 0 and water > 0 and air > 0, "peaks carry snow and the lake holds water")
+assert(Lighting.ClockTime == 15.6 and Lighting.EnvironmentDiffuseScale == 1 and Lighting.GlobalShadows, "lighting is set up")
+print(string.format("PASS: %d conifers, %d birches, %d static parts, %d local lights, %d terrain boulders, %d snow voxels",
+	conifers, birches, parts, lights, balls, snow))
 '''
-generated=root/'tests/scenery.generated.luau'
+
+generated = root / "tests/scenery.generated.luau"
 try:
- generated.write_text(prefix+source+suffix,encoding='utf-8')
- subprocess.run([sys.argv[1] if len(sys.argv)>1 else 'luau',str(generated)],check=True)
+    mock = (root / "tests/roblox-mock.luau").read_text(encoding="utf-8")
+    body = (
+        mock + setup
+        + "\nlocal PartShapes = " + module("src/shared/PartShapes.luau")
+        + "\nlocal Scenery = " + module("src/server/Scenery.luau")
+        + "\n" + checks
+    )
+    generated.write_text(body, encoding="utf-8")
+    subprocess.run([sys.argv[1] if len(sys.argv) > 1 else "luau", str(generated)], check=True)
 finally:
- generated.unlink(missing_ok=True)
+    generated.unlink(missing_ok=True)

@@ -1,79 +1,39 @@
 --!strict
--- Draws the exposed stones plus one solid layer behind them. The shell advances
--- as digging opens the mountain, without instantiating all 250,000 cells.
-local Debris = game:GetService("Debris")
+-- The authoritative mountain: the rock grid plus a record of every change.
+-- No rock parts exist on the server. Each client draws the rock itself
+-- (MountainView) from a snapshot and compact change lists, so a huge gift
+-- costs a few kilobytes of network traffic instead of replicating thousands
+-- of parts, and the server never touches rendering.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Grid = require(script.Parent.Grid)
-local RockStyle = require(script.Parent.RockStyle)
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local Grid = require(Shared:WaitForChild("Grid"))
+local Codec = require(Shared:WaitForChild("MountainCodec"))
 
 local Mountain = {}
 Mountain.__index = Mountain
 
-local ROCK = {
-	Color3.fromRGB(92, 88, 84),
-	Color3.fromRGB(110, 106, 100),
-	Color3.fromRGB(128, 124, 116),
-	Color3.fromRGB(146, 140, 130),
-}
-local FLYING_LIMIT = 8
-
--- Fixed-size pages keep numeric part lookups from resizing a large sparse map
--- as gifts move the visible rock surface through tens of thousands of cells.
-local function newPartMap(): { [number]: BasePart }
-	local pages: { [number]: { BasePart } } = {}
-	return setmetatable({}, {
-		__index = function(_self, key: number)
-			local page = pages[key // 256]
-			return if page then page[key % 256 + 1] else nil
-		end,
-		__newindex = function(_self, key: number, value: BasePart?)
-			local index = key // 256
-			local page = pages[index]
-			if page == nil then
-				if value == nil then return end
-				page = table.create(256)
-				pages[index] = page
-			end
-			page[key % 256 + 1] = value
-		end,
-		__iter = function()
-			local pageIndex: number? = nil
-			local page: { BasePart }? = nil
-			local slot = 257
-			return function(): (number?, BasePart?)
-				while true do
-					if slot > 256 then
-						pageIndex, page = next(pages, pageIndex)
-						if pageIndex == nil then return nil end
-						slot = 1
-					end
-					local value = (page :: { BasePart })[slot]
-					local key = (pageIndex :: number) * 256 + slot - 1
-					slot += 1
-					if value then return key, value end
-				end
-			end
-		end,
-	}) :: any
-end
+local LAYER = Grid.LAYER
+local rounds = 0
 
 export type Mountain = typeof(setmetatable(
 	{} :: {
 		grid: Grid.Grid,
-		folder: Folder,
-		parts: { [number]: BasePart },
-		keys: { [BasePart]: number },
-		tops: { [number]: number },
 		blockSize: number,
 		random: Random,
 		diamondKey: number,
 		revealed: boolean,
 		onDiamondCell: (boolean) -> (),
+		tops: { [number]: number },
+		height: number,
+		round: number,
+		removedKeys: { number },
+		addedKeys: { number },
 	},
 	Mountain
 ))
 
-function Mountain.new(parent: Instance, stones: number, blockSize: number, onDiamondCell: (boolean) -> (), building: boolean?): Mountain
+function Mountain.new(stones: number, blockSize: number, onDiamondCell: (boolean) -> (), checkpoint: (() -> ())?): Mountain
 	local random = Random.new()
 	local function rand(a: number?, b: number?): number
 		if a ~= nil and b ~= nil then
@@ -81,35 +41,30 @@ function Mountain.new(parent: Instance, stones: number, blockSize: number, onDia
 		end
 		return random:NextNumber()
 	end
-	local grid = Grid.new(stones, random:NextNumber(0, 1000), rand)
-	local diamondKey = grid:carveHiddenCell()
-	local folder = Instance.new("Folder")
-	folder.Name = "Mountain"
-	folder:SetAttribute("Building", building == true)
-	local self = setmetatable({
+	local grid = Grid.new(stones, random:NextNumber(0, 1000), rand, checkpoint)
+	local diamondKey = grid:carveHiddenCell(checkpoint)
+	grid:takeFresh()
+	-- Original column summits: snow and grass only grow on the first surface.
+	local tops: { [number]: number } = {}
+	for index, key in grid.order do
+		local column, y = key % LAYER, key // LAYER
+		if (tops[column] or -1) < y then tops[column] = y end
+		if checkpoint and index % 16384 == 0 then checkpoint() end
+	end
+	rounds += 1
+	return setmetatable({
 		grid = grid,
-		folder = folder,
-		parts = newPartMap(),
-		keys = {},
-		tops = {},
 		blockSize = blockSize,
 		random = random,
 		diamondKey = diamondKey,
 		revealed = false,
 		onDiamondCell = onDiamondCell,
+		tops = tops,
+		height = grid.height,
+		round = rounds,
+		removedKeys = {},
+		addedKeys = {},
 	}, Mountain)
-	for _, key in grid.order do
-		local x, y, z = Grid.coords(key)
-		local column = Grid.key(x, 0, z)
-		self.tops[column] = math.max(self.tops[column] or 0, y)
-	end
-	for index, key in grid.exposedList do
-		self:_drawShell(key)
-		if building and index % 300 == 0 then task.wait() end
-	end
-	grid:takeFresh()
-	folder.Parent = parent
-	return self
 end
 
 function Mountain.cellPosition(self: Mountain, x: number, y: number, z: number): Vector3
@@ -122,71 +77,57 @@ function Mountain.keyPosition(self: Mountain, key: number): Vector3
 	return self:cellPosition(x, y, z)
 end
 
-function Mountain._draw(self: Mountain, key: number)
-	local existing: BasePart? = self.parts[key]
-	if not self.grid:isSolid(key) then
-		return
-	end
-	local backing = self.grid.exposedIndex[key] == nil
-	if existing ~= nil then
-		if backing == (existing:GetAttribute("BackingRock") == true) then return end
-		-- The inner stone becomes a faceted, diggable surface stone when uncovered.
-		self.keys[existing] = nil
-		existing:Destroy()
-	end
-	local x, y, z = Grid.coords(key)
+-- The cell containing a world position, or nil outside the grid.
+function Mountain.keyAt(self: Mountain, position: Vector3): number?
 	local size = self.blockSize
-	local style = RockStyle.forCell(key)
-	local part = Instance.new(if backing then "Part" else style.shape) :: BasePart
-	part.Name = "Stone"
-	part.Transparency = if self.folder:GetAttribute("Building") then 1 else 0
-	part.Anchored = true
-	part.CastShadow = false
-	part.Size = Vector3.new(style.x, style.y, style.z) * size
-	part.CFrame = CFrame.new(self:cellPosition(x, y, z) + Vector3.new(style.ox, style.oy, style.oz) * size)
-		* CFrame.Angles(style.pitch, style.yaw, style.roll)
-	if backing then
-		-- Flush blocks close sightlines between the larger irregular surface rocks.
-		part.Size = Vector3.new(1.02, 1.02, 1.02) * size
-		part.CFrame = CFrame.new(self:cellPosition(x, y, z))
-		part:SetAttribute("BackingRock", true)
-	end
-	part.CanCollide = not backing
-	part.CanQuery = not backing
-	part.CanTouch = false
-	part.TopSurface = Enum.SurfaceType.Smooth
-	part.BottomSurface = Enum.SurfaceType.Smooth
-	local height = self.grid.height
-	local top = self.tops[Grid.key(x, 0, z)] or 0
-	-- Colour depends only on the cell, so a rock looks the same whenever it appears.
-	local shade = (math.noise(x * 0.37, y * 0.41, z * 0.29) + 1) / 2
-	if y == top and y >= height * 0.7 then
-		part.Material = Enum.Material.Snow
-		part.Color = Color3.fromRGB(236, 240, 245)
-	elseif y == top and y <= height * 0.18 then
-		part.Material = Enum.Material.Grass
-		part.Color = Color3.fromRGB(88, 140, 70)
-	elseif style.quartz then
-		part.Material = Enum.Material.Rock
-		part.Color = Color3.fromRGB(166, 161, 150)
-	else
-		part.Material = if shade > 0.5 then Enum.Material.Slate else Enum.Material.Rock
-		part.Color = ROCK[math.clamp(1 + math.floor(y / height * #ROCK + shade), 1, #ROCK)]
-	end
-	part.Color = Color3.new(math.min(1, part.Color.R * style.shade), math.min(1, part.Color.G * style.shade), math.min(1, part.Color.B * style.shade))
-	-- Native stone facets need one instance each, without an extra mesh or light.
-	-- Colours stay close together: the one small diamond must be found by eye.
-	part.Parent = self.folder
-	self.parts[key] = part
-	self.keys[part] = key
+	local x = math.floor(position.X / size + 0.5)
+	local z = math.floor(position.Z / size + 0.5)
+	local y = math.floor(position.Y / size)
+	if y < 0 or math.abs(x) > 124 or math.abs(z) > 124 then return nil end
+	return Grid.key(x, y, z)
 end
 
-function Mountain._drawShell(self: Mountain, key: number)
-	if not self.grid:isSolid(key) then return end
-	self:_draw(key)
-	for _, neighbour in self.grid:solidNeighbours(key) do
-		self:_draw(neighbour)
+-- Ordered messages describing the whole mountain for a client.
+function Mountain.snapshot(self: Mountain, animated: boolean?, start: number?): { { any } }
+	local messages: { { any } } = {
+		{ "begin", {
+			round = self.round,
+			blockSize = self.blockSize,
+			diamondKey = self.diamondKey,
+			height = self.height,
+			animated = animated == true,
+			start = start or 0,
+		} },
+	}
+	local keys = table.create(self.grid:remaining())
+	self.grid:eachSolid(function(key) table.insert(keys, key) end)
+	for _, chunk in Codec.encode(keys) do table.insert(messages, { "cells", chunk } :: { any }) end
+	for _, chunk in Codec.encodePairs(self.tops) do table.insert(messages, { "tops", chunk } :: { any }) end
+	table.insert(messages, { "end", true } :: { any })
+	return messages
+end
+
+-- Change lists since the last flush, at most one encoded chunk each, or an
+-- empty list when nothing changed.
+function Mountain.flush(self: Mountain, effect: string?, at: Vector3?): { any }
+	local diffs: { any } = {}
+	if #self.removedKeys > 0 then
+		for _, chunk in Codec.encode(self.removedKeys) do
+			table.insert(diffs, { round = self.round, removed = { chunk }, effect = effect, at = at })
+		end
+		self.removedKeys = {}
 	end
+	if #self.addedKeys > 0 then
+		for _, chunk in Codec.encode(self.addedKeys) do
+			table.insert(diffs, { round = self.round, added = { chunk }, effect = effect, at = at })
+		end
+		self.addedKeys = {}
+	end
+	return diffs
+end
+
+function Mountain.hasChanges(self: Mountain): boolean
+	return #self.removedKeys > 0 or #self.addedKeys > 0
 end
 
 -- Exposure can change in both directions: rebuilding can bury a previously
@@ -199,84 +140,28 @@ function Mountain._syncDiamond(self: Mountain)
 	end
 end
 
--- Show a bounded first group during calculation, then draw the final shell.
-function Mountain.restore(self: Mountain, count: number, _near: Vector3?, capacity: number?, checkpoint: (() -> ())?): (number, { any })
+-- Refills dug cells from the diamond outward, then grows new rock up to
+-- `capacity`. Returns how many rocks were added and where the refill started.
+function Mountain.restore(self: Mountain, count: number, capacity: number?, checkpoint: (() -> ())?): (number, Vector3?)
 	local dx, dy, dz = Grid.coords(self.diamondKey)
-	local focus = { x = dx, y = dy, z = dz }
-	local previewed = 0
-	local function startPlacement(key: number)
-		-- Only the first 32 cells get an immediate shell. Never render every
-		-- intermediate layer of a 100k refill again.
-		if previewed >= 32 then return end
-		previewed += 1
-		local neighbours = self.grid:solidNeighbours(key)
-		table.insert(neighbours, key)
-		for _, cell in neighbours do
-			if self.grid:isExposed(cell) then self.grid:_expose(cell) else self.grid:_unexpose(cell) end
-		end
-		self:_drawShell(key)
-		self:_syncDiamond()
-	end
-	local restored = self.grid:restore(count, focus, checkpoint, startPlacement)
-	if capacity and #restored < count then
-		local grown = self.grid:grow(count - #restored, capacity, checkpoint, startPlacement)
+	-- Look the list up on every call: a flush during the work replaces it.
+	local function record(key: number) table.insert(self.addedKeys, key) end
+	local restored = self.grid:restore(count, { x = dx, y = dy, z = dz }, checkpoint, record)
+	local total = #restored
+	local first = restored[1]
+	if capacity and total < count then
+		local grown = self.grid:grow(count - total, capacity, checkpoint, record)
 		for index, key in grown do
-			if checkpoint and index % 256 == 0 then checkpoint() end
-			table.insert(restored, key)
-			local x, y, z = Grid.coords(key)
-			local column = Grid.key(x, 0, z)
-			self.tops[column] = math.max(self.tops[column] or 0, y)
+			local column, y = key % LAYER, key // LAYER
+			if (self.tops[column] or -1) < y then self.tops[column] = y end
+			if checkpoint and index % 1024 == 0 then checkpoint() end
 		end
-	end
-	if #restored == 0 then return 0, {} end
-	-- Interior cells need no instances and no per-cell rendering neighbourhood
-	-- scan. Draw the final surface plus one backing layer to close facet gaps.
-	local needed = {}
-	for index, key in self.grid.exposedList do
-		needed[key] = true
-		for _, neighbour in self.grid:solidNeighbours(key) do needed[neighbour] = true end
-		if checkpoint and index % 128 == 0 then checkpoint() end
-	end
-	-- Replicate the final shell from the diamond outward too; never draw
-	-- intermediate interior layers that will immediately be buried again.
-	local ordered, distances = {}, {}
-	for key in needed do
-		local x, y, z = Grid.coords(key)
-		distances[key] = (x - dx)^2 + (y - dy)^2 + (z - dz)^2
-		table.insert(ordered, key)
-		if checkpoint and #ordered % 256 == 0 then checkpoint() end
-	end
-	table.sort(ordered, function(a, b) return distances[a] < distances[b] end)
-	local processed = 0
-	for _, key in ordered do
-		self:_draw(key)
-		processed += 1
-		if checkpoint and processed % 32 == 0 then checkpoint() end
-	end
-	-- Drop buried parts after drawing the replacement shell, avoiding holes
-	-- during replication. Digging will recreate them if they become exposed.
-	processed = 0
-	for key, part in self.parts do
-		if not needed[key] then
-			self.keys[part] = nil
-			self.parts[key] = nil
-			part:Destroy()
-		end
-		processed += 1
-		if checkpoint and processed % 128 == 0 then checkpoint() end
+		total += #grown
+		first = first or grown[1]
 	end
 	self.grid:takeFresh()
 	self:_syncDiamond()
-	local samples = {}
-	for index, key in restored do
-		if checkpoint and index % 128 == 0 then checkpoint() end
-		local part = self.parts[key]
-		if part and not part:GetAttribute("BackingRock") then
-			table.insert(samples, { frame = part.CFrame, size = part.Size, colour = part.Color, part = part })
-			if #samples >= 24 then break end
-		end
-	end
-	return #restored, samples
+	return total, if first then self:keyPosition(first) else nil
 end
 
 function Mountain.total(self: Mountain): number
@@ -287,59 +172,8 @@ function Mountain.remaining(self: Mountain): number
 	return self.grid:remaining()
 end
 
-function Mountain.keyForPart(self: Mountain, part: Instance): number?
-	if part:IsA("BasePart") then
-		return self.keys[part]
-	end
-	return nil
-end
-
 function Mountain.isExposed(self: Mountain, key: number): boolean
 	return self.grid:isSolid(key) and self.grid.exposedIndex[key] ~= nil
-end
-
--- After rocks are removed: drop their parts (a few fly off as rubble), draw the
--- rocks that were uncovered, and check whether the diamond is now in the open.
-function Mountain._settle(self: Mountain, removed: { number }, centre: Vector3?, checkpoint: (() -> ())?)
-	for index, key in removed do
-		if checkpoint and index % 128 == 0 then checkpoint() end
-		local part: BasePart? = self.parts[key]
-		if part ~= nil then
-			self.parts[key] = nil
-			self.keys[part] = nil
-			if index <= FLYING_LIMIT then
-				local away = if centre then (part.Position - centre) else Vector3.new(0, 1, 0)
-				if away.Magnitude < 0.1 then
-					away = Vector3.new(self.random:NextNumber(-1, 1), 1, self.random:NextNumber(-1, 1))
-				end
-				part.Anchored = false
-				part.CanCollide = false
-				part.CanQuery = false
-				part.AssemblyLinearVelocity = away.Unit * self.random:NextNumber(20, 40) + Vector3.new(0, self.random:NextNumber(15, 30), 0)
-				part.AssemblyAngularVelocity = Vector3.new(self.random:NextNumber(-8, 8), self.random:NextNumber(-8, 8), self.random:NextNumber(-8, 8))
-				Debris:AddItem(part, 1.4)
-			else
-				part:Destroy()
-			end
-		end
-	end
-	-- Reconcile each surviving surface/backing cell once instead of redrawing
-	-- the same neighbour up to six times after a large crater.
-	local needed = {}
-	for index, key in self.grid:takeFresh() do
-		if self.grid:isSolid(key) and self.grid.exposedIndex[key] then
-			needed[key] = true
-			for _, neighbour in self.grid:solidNeighbours(key) do needed[neighbour] = true end
-		end
-		if checkpoint and index % 128 == 0 then checkpoint() end
-	end
-	local drawn = 0
-	for key in needed do
-		self:_draw(key)
-		drawn += 1
-		if checkpoint and drawn % 32 == 0 then checkpoint() end
-	end
-	self:_syncDiamond()
 end
 
 -- Blasts `count` rocks as one crater; returns the crater centre.
@@ -347,22 +181,11 @@ function Mountain.blast(self: Mountain, count: number, checkpoint: (() -> ())?, 
 	if count <= 0 then
 		return nil
 	end
-	local keys, actualCentre = self.grid:blast(count, centreKey, checkpoint, function(key)
-		-- Remove rendered rocks before the calculation yields, so the crater
-		-- starts opening immediately instead of waiting for all cell accounting.
-		local part = self.parts[key]
-		if part then
-			self.keys[part] = nil
-			self.parts[key] = nil
-			part:Destroy()
-		end
-	end)
-	if actualCentre == nil then
-		return nil
-	end
-	local centre = self:keyPosition(actualCentre)
-	self:_settle(keys, centre, checkpoint)
-	return centre
+	-- Look the list up on every call: a flush during the work replaces it.
+	local _, actualCentre = self.grid:blast(count, centreKey, checkpoint, function(key) table.insert(self.removedKeys, key) end)
+	self.grid:takeFresh()
+	self:_syncDiamond()
+	return if actualCentre then self:keyPosition(actualCentre) else nil
 end
 
 -- Digs up to `count` rocks by hand around an uncovered rock. Returns how many broke.
@@ -370,19 +193,10 @@ function Mountain.dig(self: Mountain, key: number, count: number): number
 	if count <= 0 or not self:isExposed(key) then
 		return 0
 	end
-	local keys = self.grid:blast(count, key)
-	self:_settle(keys, self:keyPosition(key))
+	local keys = self.grid:blast(count, key, nil, function(cell) table.insert(self.removedKeys, cell) end)
+	self.grid:takeFresh()
+	self:_syncDiamond()
 	return #keys
-end
-
--- Digs out one uncovered rock by hand. Returns true when it broke.
-function Mountain.mine(self: Mountain, key: number): boolean
-	if not self:isExposed(key) then
-		return false
-	end
-	self.grid:remove(key)
-	self:_settle({ key }, nil)
-	return true
 end
 
 -- Where a loose find at `position` comes to rest: on top of the highest rock
@@ -396,10 +210,63 @@ function Mountain.restingHeight(self: Mountain, position: Vector3): number
 	return (below + 1) * size
 end
 
-function Mountain.destroy(self: Mountain)
-	self.folder:Destroy()
-	self.parts = {}
-	table.clear(self.keys)
+-- True when rock stands between two points. Rock is drawn with sloped faces
+-- that do not fill their whole cell, so one grazed cell is allowed.
+function Mountain.lineBlocked(self: Mountain, from: Vector3, to: Vector3): boolean
+	local delta = to - from
+	local steps = math.max(1, math.ceil(delta.Magnitude / (self.blockSize * 0.25)))
+	local seen: { [number]: boolean } = {}
+	local blocked = 0
+	for i = 0, steps do
+		local key = self:keyAt(from + delta * (i / steps))
+		if key and not seen[key] and key ~= self.diamondKey and self.grid:isSolid(key) then
+			seen[key] = true
+			blocked += 1
+			if blocked > 1 then return true end
+		end
+	end
+	return false
+end
+
+-- If rock fills the space between `bottom` and `top` at or around `position`
+-- (a character buried by a rebuild), the height of the rock surface above it.
+function Mountain.coveredTop(self: Mountain, position: Vector3, bottom: number, top: number): number?
+	local size = self.blockSize
+	local grid = self.grid
+	local best: number? = nil
+	for _, offset in { { 0, 0 }, { 0.7, 0 }, { -0.7, 0 }, { 0, 0.7 }, { 0, -0.7 } } do
+		local x = math.floor((position.X + offset[1]) / size + 0.5)
+		local z = math.floor((position.Z + offset[2]) / size + 0.5)
+		if math.abs(x) <= 124 and math.abs(z) <= 124 then
+			for y = math.max(0, math.floor(bottom / size)), math.floor(top / size) do
+				if grid:isSolid(Grid.key(x, y, z)) then
+					local surface = y
+					while grid:isSolid(Grid.key(x, surface + 1, z)) or grid.sealed[Grid.key(x, surface + 1, z)] do
+						surface += 1
+					end
+					local lift = (surface + 1) * size
+					if best == nil or lift > best then best = lift end
+					break
+				end
+			end
+		end
+	end
+	return best
+end
+
+-- The top of the highest uncovered rock.
+function Mountain.summit(self: Mountain): Vector3?
+	local best: number? = nil
+	for _, key in self.grid.exposedList do
+		if best == nil or key // LAYER > (best :: number) // LAYER then best = key end
+	end
+	if best == nil then return nil end
+	return self:keyPosition(best) + Vector3.new(0, self.blockSize / 2, 0)
+end
+
+function Mountain.destroy(_self: Mountain)
+	-- Nothing to clean up: the grid is plain data and clients drop their parts
+	-- when the next snapshot arrives.
 end
 
 return Mountain
