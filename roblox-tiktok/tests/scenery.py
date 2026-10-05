@@ -1,7 +1,10 @@
 """Builds the scenery under the Luau CLI with a Roblox stand-in and checks the
 terrain, part budget, tree geometry and lighting: once with the built-in
-scenery, and twice with a stand-in for the imported Blender pack (at true
-size, and at 1/100 scale lying on its back) to check sizing and orientation.
+scenery (a published game that cannot use EditableMesh), once with the Blender
+pack built in game (the server lays it out, then the client's SceneryView
+builds every mesh with a stand-in EditableMesh), and twice with a stand-in for
+an imported pack (at true size, and at 1/100 scale lying on its back) to check
+sizing and orientation.
 
     python3 tests/scenery.py [path/to/luau]
     python3 tests/scenery.py [path/to/luau] --dump   (writes art/previews/layout.txt
@@ -18,6 +21,10 @@ def module(path: str) -> str:
     source = (root / path).read_text(encoding="utf-8")
     source = source.replace('require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))', "PartShapes")
     source = source.replace("require(script.Parent.ScenePack)", "ScenePack")
+    source = source.replace('require(script.Parent:WaitForChild("Inflate"))', "Inflate")
+    source = source.replace('local Shared = ReplicatedStorage:WaitForChild("DiamondRush")\n', "")
+    source = source.replace('require(Shared:WaitForChild("MeshPack"))', "MeshPack")
+    source = source.replace('require(Shared:WaitForChild("ScenePackData"))', "ScenePackData")
     return "(function()\n" + source + "\nend)()"
 
 
@@ -25,10 +32,47 @@ setup = r'''
 local Lighting = Instance.new("Lighting")
 local ServerStorage = Instance.new("Folder")
 local Replicated = Instance.new("Folder")
+Replicated.WaitForChild = function(self, name) return self:FindFirstChild(name) end
+-- EditableMesh works in Studio ("generated"), and fails in a published game
+-- that has not turned on Mesh / Image APIs (the other modes).
+local editableMeshes, meshParts = 0, 0
+local AssetService = {
+	CreateEditableMesh = function()
+		if PACK_MODE ~= "generated" then error("EditableMesh is not enabled for this experience") end
+		editableMeshes += 1
+		local m = { low = Vector3.new(math.huge, math.huge, math.huge), high = Vector3.new(-math.huge, -math.huge, -math.huge), faces = 0, n = 0 }
+		function m:AddVertex(p)
+			self.low = Vector3.new(math.min(self.low.X, p.X), math.min(self.low.Y, p.Y), math.min(self.low.Z, p.Z))
+			self.high = Vector3.new(math.max(self.high.X, p.X), math.max(self.high.Y, p.Y), math.max(self.high.Z, p.Z))
+			self.n += 1
+			return self.n
+		end
+		function m:AddColor() self.n += 1; return self.n end
+		function m:AddNormal() self.n += 1; return self.n end
+		function m:AddTriangle() self.faces += 1; return self.faces end
+		function m:SetFaceNormals() end
+		function m:SetFaceColors() end
+		function m:RemoveUnused() end
+		function m:Destroy() end
+		return m
+	end,
+	CreateMeshPartAsync = function(_, content, options)
+		assert(content.SourceType == "ContentSourceType.Object", "meshes are made from the EditableMesh")
+		assert(options.CollisionFidelity ~= nil, "collision fidelity is chosen")
+		meshParts += 1
+		local part = Instance.new("MeshPart")
+		part.Name = "MeshPart"
+		part.MeshContent = content
+		part.Size = content.Object.high - content.Object.low
+		return part
+	end,
+}
+local Content = { fromObject = function(object) return { SourceType = "ContentSourceType.Object", Object = object } end }
 game = { GetService = function(_, name)
 	if name == "Lighting" then return Lighting end
 	if name == "ServerStorage" then return ServerStorage end
 	if name == "ReplicatedStorage" then return Replicated end
+	if name == "AssetService" then return AssetService end
 	return { WaitForChild = function() return {} end }
 end }
 workspace.FindFirstChild = function(_, name)
@@ -106,7 +150,7 @@ terrain.FillBall = function(_, centre, radius, material)
 end
 -- A stand-in for the imported Blender pack, sized from art/manifest.json.
 local pack = nil
-if PACK_MODE ~= "none" then
+if PACK_MODE == "studs" or PACK_MODE == "tiny-zup" then
 	pack = Instance.new("Model")
 	pack.Name = "DiamondRushScenery"
 	pack.Parent = workspace
@@ -119,12 +163,28 @@ if PACK_MODE ~= "none" then
 	end
 end
 Scenery.build(26.4, Vector3.new(0, 0.5, 56.4), reserved)
+local published = Replicated:FindFirstChild("DiamondRushSceneryPlacements")
+if PACK_MODE == "generated" then
+	-- The server only lays the pack out; each player's game builds it.
+	assert(published ~= nil and #published.Value > 1000, "the placements are sent to the players")
+	for _, p in instances do
+		assert(p.ClassName ~= "MeshPart", "the server builds no meshes itself")
+	end
+	local started = os.clock()
+	SceneryView.start()
+	-- One EditableMesh is the server's check that they can be used here.
+	assert(editableMeshes == 1 + 25 and meshParts == 25, "each mesh is built once and shared by its copies: " .. editableMeshes .. " " .. meshParts)
+	print(string.format("client built the pack in %.0f ms", (os.clock() - started) * 1000))
+else
+	assert(published == nil and editableMeshes == 0, "nothing is sent when the pack is imported or cannot be built")
+end
 if PACK_MODE ~= "none" then
-	assert(pack.Parent == ServerStorage, "the imported pack is moved out of view")
+	if pack then assert(pack.Parent == ServerStorage, "the imported pack is moved out of view") end
 	local counts = {}
 	local camp = Vector3.new(0, 0, 56.4)
 	for _, p in instances do
 		if p.ClassName == "MeshPart" and p.Parent ~= nil and p.Parent ~= pack then
+			assert(p.Parent.Name == (if PACK_MODE == "generated" then "SceneryMeshes" else "Scenery"), "meshes go in the scenery folder")
 			local kind = string.match(p.Name, "^(%a+)")
 			counts[kind] = (counts[kind] or 0) + 1
 			assert(p.Anchored and p.CanQuery == false and p.CanTouch == false and p.Material == "Material.SmoothPlastic", "pack meshes are static, untinted scenery")
@@ -239,13 +299,17 @@ generated = root / "tests/scenery.generated.luau"
 try:
     mock = (root / "tests/roblox-mock.luau").read_text(encoding="utf-8")
     dump = "--dump" in sys.argv
-    modes = ("studs",) if dump else ("none", "studs", "tiny-zup")
+    modes = ("generated",) if dump else ("none", "generated", "studs", "tiny-zup")
     for mode in modes:
         flags = f'local PACK_MODE = "{mode}"\nlocal DUMP_PLACEMENTS = {"true" if dump else "false"}\n'
         body = (
             mock + flags + table + setup.replace('os.getenv and os.getenv("SCENERY_DUMP") ~= nil or false', "true" if dump else "false")
             + "\nlocal PartShapes = " + module("src/shared/PartShapes.luau")
+            + "\nlocal Inflate = " + module("src/shared/Inflate.luau")
+            + "\nlocal MeshPack = " + module("src/shared/MeshPack.luau")
+            + "\nlocal ScenePackData = " + module("src/shared/ScenePackData.luau")
             + "\nlocal ScenePack = " + module("src/server/ScenePack.luau")
+            + "\nlocal SceneryView = " + module("src/client/SceneryView.luau")
             + "\nlocal Scenery = " + module("src/server/Scenery.luau")
             + "\n" + checks
         )

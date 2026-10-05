@@ -13,6 +13,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
 require(script:WaitForChild("FirstPerson")).start()
+require(script:WaitForChild("SceneryView")).start()
 local State = ReplicatedStorage:WaitForChild("DiamondRushState") :: Configuration
 local Remotes = ReplicatedStorage:WaitForChild("DiamondRushRemotes")
 local Notify = Remotes:WaitForChild("Notify") :: RemoteEvent

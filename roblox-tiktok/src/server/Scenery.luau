@@ -4,9 +4,10 @@
 -- mining camp. Decorative parts never take part in mining raycasts or touch
 -- events, and the central arena stays clear and flat for mountain growth.
 --
--- Natural shapes come from smooth terrain (hills, peaks, boulders) and
--- low-poly wedge geometry (trees), not plastic balls. The look relies on the
--- place's Future lighting and 2022 materials (see default.project.json).
+-- Mountains, trees, rocks and undergrowth come from the Blender scenery pack
+-- (see ScenePack); without it, from smooth terrain (peaks, boulders) and
+-- low-poly wedge trees. The look relies on the place's Future lighting and
+-- 2022 materials (see default.project.json).
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PartShapes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))
@@ -238,12 +239,19 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	local folder = Instance.new("Folder")
 	folder.Name = "Scenery"
 	folder.Parent = workspace
-	-- Look for the Blender scenery pack first, before any yielding work.
+	-- The Blender scenery pack: an imported copy if there is one (found before
+	-- any yielding work), else built in game, else the built-in parts.
 	local pack = ScenePack.find()
 	if pack then
-		print("[DiamondRush] Using the imported scenery pack (" .. ScenePack.NAME .. ").")
+		print("[DiamondRush] Scenery: using the imported Blender pack (" .. ScenePack.NAME .. ").")
 	else
-		print("[DiamondRush] Scenery pack not imported: using the built-in scenery. See the README to import art/DiamondRushScenery.fbx.")
+		pack = ScenePack.generated()
+		if pack then
+			print("[DiamondRush] Scenery: building the Blender pack in game.")
+		else
+			print("[DiamondRush] Scenery: this published game cannot build meshes yet, so the built-in scenery is used."
+				.. " Turn on Mesh / Image APIs in the Creator Dashboard, or import art/DiamondRushScenery.fbx (see the README).")
+		end
 	end
 	local clearRadius = math.max(mountainRadius + 14, 55)
 	local camp = Vector3.new(spawnPosition.X, 0, spawnPosition.Z)
@@ -413,6 +421,7 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 				ScenePack.place(meshes, folder, "Stump_A", at, random:NextNumber(0.8, 1.3), random:NextNumber(0, math.pi * 2), { sink = 0.1, collide = true })
 			end
 		end)
+		ScenePack.publish(meshes)
 	else
 		-- Weathered boulders and outcrops are smooth terrain rock, half buried.
 		local boulders = 0
