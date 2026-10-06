@@ -9,21 +9,28 @@
 -- low-poly wedge trees. The look relies on the place's Future lighting and
 -- 2022 materials (see default.project.json).
 --
--- Three themes can be switched live (Scenery.setTheme): the alpine default;
+-- Five themes can be switched live (Scenery.setTheme): the alpine default;
 -- sakura, which adds blossoming cherry trees, a torii gate, stone lanterns and
--- a shrine (see Sakura) under a soft pink spring light; and farm, which fences
+-- a shrine (see Sakura) under a soft pink spring light; farm, which fences
 -- the arena in as a ranch corral with a gate on the trail and adds a barn,
--- silo, cornfield and cows (see Farm) under a warm harvest sun. The alpine
--- theme has a few things of its own, the camp's festoon lights and a
--- watchtower (see Watchtower), which make way for the others.
+-- silo, cornfield and cows (see Farm) under a warm harvest sun; desert, red
+-- sand and mesas with cacti, an oasis and a stepped pyramid (see Desert)
+-- under a hot sun; and haunted, a graveyard, a mausoleum and dead trees (see
+-- Haunted) in moonlit mist. The alpine theme has a few things of its own, the
+-- camp's festoon lights and a watchtower (see Watchtower), which make way for
+-- the others, and a theme can hide some of the valley's trees and plants
+-- (see SceneryThemes): the desert has no forest.
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local PartShapes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))
+local SceneryThemes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("SceneryThemes"))
 local ScenePack = require(script.Parent.ScenePack)
 local Sakura = require(script.Parent.Sakura)
 local Watchtower = require(script.Parent.Watchtower)
 local Farm = require(script.Parent.Farm)
+local Desert = require(script.Parent.Desert)
+local Haunted = require(script.Parent.Haunted)
 
 local Scenery = {}
 local random = Random.new(4207)
@@ -100,7 +107,7 @@ end
 
 -- A low-poly conifer: a trunk and stacked hexagonal cones, each cone six
 -- wedges sloping outward. Higher trees carry snow on their top tier.
-local function conifer(parent: Instance, at: Vector3, height: number, snowy: boolean)
+local function conifer(parent: Instance, at: Vector3, height: number, snowy: boolean): Model
 	local model = Instance.new("Model")
 	model.Name = "Conifer"
 	model.Parent = parent
@@ -125,6 +132,7 @@ local function conifer(parent: Instance, at: Vector3, height: number, snowy: boo
 				if top then Enum.Material.Snow else Enum.Material.LeafyGrass, "WedgePart")
 		end
 	end
+	return model
 end
 
 -- A faceted broadleaf canopy: a hexagonal cone over an inverted one.
@@ -142,7 +150,7 @@ local function canopy(parent: Instance, centre: Vector3, radius: number, colour:
 	end
 end
 
-local function birch(parent: Instance, at: Vector3, height: number)
+local function birch(parent: Instance, at: Vector3, height: number): Model
 	local model = Instance.new("Model")
 	model.Name = "Birch"
 	model.Parent = parent
@@ -156,6 +164,7 @@ local function birch(parent: Instance, at: Vector3, height: number)
 		local side = Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)).Unit * height * 0.18
 		canopy(model, top + side - Vector3.new(0, height * 0.12, 0), height * 0.2, shade(leaves, 1.06), random:NextNumber(0, math.pi))
 	end
+	return model
 end
 
 -- Terrain height (studs) at a point, before the arena, camp, lake and path are cut in.
@@ -282,9 +291,10 @@ export type Look = {
 	clouds: { cover: number, density: number, color: Color3 },
 	terrain: { [Enum.Material]: Color3 },
 	water: Color3,
+	moon: number?, -- the moon's size in the sky (degrees), for night themes
 }
 
-Scenery.THEMES = { "default", "sakura", "farm" }
+Scenery.THEMES = { "default", "sakura", "farm", "desert", "haunted" }
 Scenery.LOOKS = {
 	-- A clear late-afternoon alpine sun, soft sky light, aerial haze and a
 	-- gentle filmic grade.
@@ -358,22 +368,81 @@ Scenery.LOOKS = {
 		},
 		water = Color3.fromRGB(52, 96, 98),
 	},
+	-- A desert canyon at the hottest part of the day: a high white sun
+	-- through a dusty amber haze, red sand and sandstone, bleached peaks, a
+	-- turquoise oasis and an almost cloudless sky.
+	desert = {
+		clock = 13.9,
+		brightness = 3.1,
+		ambient = Color3.fromRGB(96, 82, 70),
+		outdoorAmbient = Color3.fromRGB(158, 138, 116),
+		colorShiftTop = Color3.fromRGB(64, 38, 12),
+		exposure = 0.04,
+		atmosphere = { density = 0.3, offset = 0.24, color = Color3.fromRGB(238, 212, 168), decay = Color3.fromRGB(190, 134, 92), glare = 0.6, haze = 2.2 },
+		grade = { contrast = 0.1, saturation = 0.1, tint = Color3.fromRGB(255, 240, 220) },
+		bloom = { intensity = 0.5, size = 24, threshold = 1.25 },
+		rays = 0.1,
+		clouds = { cover = 0.12, density = 0.3, color = Color3.fromRGB(255, 248, 236) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(212, 174, 120),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(202, 164, 112),
+			[Enum.Material.Ground] = Color3.fromRGB(186, 128, 84),
+			[Enum.Material.Mud] = Color3.fromRGB(150, 108, 74),
+			[Enum.Material.Rock] = Color3.fromRGB(176, 100, 68),
+			[Enum.Material.Snow] = Color3.fromRGB(228, 200, 152),
+		},
+		water = Color3.fromRGB(38, 128, 130),
+	},
+	-- A haunted night: a big full moon over cold blue mist, dark grass and
+	-- stone, grey clouds, and lanterns that glow through the fog. The ambient
+	-- light stays high enough to see the rock you dig.
+	haunted = {
+		clock = 0,
+		brightness = 2.2,
+		ambient = Color3.fromRGB(72, 76, 102),
+		outdoorAmbient = Color3.fromRGB(112, 118, 156),
+		colorShiftTop = Color3.fromRGB(20, 26, 46),
+		exposure = 0.35,
+		atmosphere = { density = 0.42, offset = 0.06, color = Color3.fromRGB(112, 122, 144), decay = Color3.fromRGB(58, 62, 86), glare = 0, haze = 2.6 },
+		grade = { contrast = 0.16, saturation = -0.22, tint = Color3.fromRGB(214, 224, 255) },
+		bloom = { intensity = 1, size = 30, threshold = 0.9 },
+		rays = 0,
+		clouds = { cover = 0.6, density = 0.55, color = Color3.fromRGB(92, 98, 118) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(60, 70, 50),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(50, 60, 44),
+			[Enum.Material.Ground] = Color3.fromRGB(68, 58, 48),
+			[Enum.Material.Mud] = Color3.fromRGB(46, 42, 38),
+			[Enum.Material.Rock] = Color3.fromRGB(86, 86, 94),
+			[Enum.Material.Snow] = Color3.fromRGB(178, 186, 204),
+		},
+		water = Color3.fromRGB(24, 36, 48),
+		moon = 28,
+	},
 } :: { [string]: Look }
 
 -- Scenery that belongs to one theme: shown with it, kept in ServerStorage otherwise.
-local themed: { alpine: Instance?, home: Instance?, sakura: Instance?, farm: Instance? } = {}
-local effects: { atmosphere: Atmosphere, grade: ColorCorrectionEffect, bloom: BloomEffect, rays: SunRaysEffect, clouds: Clouds }? = nil
+local themed: { alpine: Instance?, home: Instance? } = {}
+-- Each theme's own scenery folder, by theme name.
+local themeScenery: { [string]: Instance } = {}
+-- The valley's trees and plants, which some themes hide (see SceneryThemes).
+local vegetation: { Instance } = {}
+local effects: { atmosphere: Atmosphere, grade: ColorCorrectionEffect, bloom: BloomEffect, rays: SunRaysEffect, clouds: Clouds, sky: Sky }? = nil
 local current: string? = nil
 
--- Switches the valley to a theme ("default", "sakura" or "farm") straight away.
+-- Switches the valley to a theme (one of THEMES) straight away.
 -- Returns false for an unknown theme, or before the scenery is built.
 function Scenery.setTheme(name: string): boolean
 	local look = Scenery.LOOKS[name]
 	if look == nil or effects == nil then return false end
 	local fx = effects :: any
 	if themed.alpine then themed.alpine.Parent = if name == "default" then themed.home else ServerStorage end
-	if themed.sakura then themed.sakura.Parent = if name == "sakura" then workspace else ServerStorage end
-	if themed.farm then themed.farm.Parent = if name == "farm" then workspace else ServerStorage end
+	for theme, holder in themeScenery do
+		holder.Parent = if name == theme then workspace else ServerStorage
+	end
+	for _, plant in vegetation do
+		plant.Parent = if SceneryThemes.hides(name, plant.Name) then ServerStorage else themed.home
+	end
 	local terrain = workspace.Terrain
 	for material, colour in look.terrain do
 		terrain:SetMaterialColor(material, colour)
@@ -401,6 +470,7 @@ function Scenery.setTheme(name: string): boolean
 	fx.clouds.Cover = look.clouds.cover
 	fx.clouds.Density = look.clouds.density
 	fx.clouds.Color = look.clouds.color
+	fx.sky.MoonAngularSize = look.moon or 11
 	current = name
 	return true
 end
@@ -794,6 +864,11 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	lantern(folder, camp + Vector3.new(-9, 0, -8))
 	lantern(folder, camp + Vector3.new(9, 0, -8))
 
+	-- The valley's trees and plants that some theme hides (see SceneryThemes).
+	for _, child in folder:GetChildren() do
+		if SceneryThemes.themed(child.Name) then table.insert(vegetation, child) end
+	end
+
 	-- What the themes' own scenery may use, to stay off the arena, camp,
 	-- trail, lake and boards and clear of the valley's trees and rocks.
 	local kit: Sakura.Kit = {
@@ -814,14 +889,12 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	Watchtower.build(kit, alpine)
 	themed.alpine = alpine
 	themed.home = folder
-	-- The sakura theme's scenery, kept out of view until it is chosen.
-	local sakura = Sakura.build(kit)
-	sakura.Parent = ServerStorage
-	themed.sakura = sakura
-	-- The farm theme's ranch, likewise.
-	local farm = Farm.build(kit)
-	farm.Parent = ServerStorage
-	themed.farm = farm
+	-- Each theme's own scenery, kept out of view until it is chosen.
+	for theme, builder in { sakura = Sakura.build, farm = Farm.build, desert = Desert.build, haunted = Haunted.build } :: { [string]: (Sakura.Kit) -> Folder } do
+		local holder = builder(kit)
+		holder.Parent = ServerStorage
+		themeScenery[theme] = holder
+	end
 
 	-- Light that every theme shares; each theme sets the rest (see LOOKS).
 	-- Technology is Future (set in the place file).
@@ -848,7 +921,7 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	sky.SunAngularSize = 12
 	sky.CelestialBodiesShown = true
 	sky.Parent = Lighting
-	effects = { atmosphere = atmosphere, grade = grade, bloom = bloom, rays = rays, clouds = clouds }
+	effects = { atmosphere = atmosphere, grade = grade, bloom = bloom, rays = rays, clouds = clouds, sky = sky }
 	Scenery.setTheme(theme or "default")
 end
 

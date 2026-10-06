@@ -37,7 +37,7 @@ export function rebuildTestEvent(blocks) {
 }
 
 // The map themes the game can show: the alpine valley, sakura in blossom, or a ranch.
-export const THEMES = { default: 'Alpine', sakura: 'Sakura', farm: 'Farm' };
+export const THEMES = { default: 'Alpine', sakura: 'Sakura', farm: 'Farm', desert: 'Desert', haunted: 'Haunted' };
 
 export function themeEvent(theme) {
   if (!Object.hasOwn(THEMES, theme)) {

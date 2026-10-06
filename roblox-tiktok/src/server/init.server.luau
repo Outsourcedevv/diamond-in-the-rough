@@ -63,7 +63,7 @@ local settings = {
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
 	statues = {} :: { any },
-	theme = "default", -- the map's look: "default" (alpine), "sakura" or "farm"
+	theme = "default", -- the map's look: "default" (alpine), "sakura", "farm", "desert" or "haunted"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 }
 -- Single player: every player has their own save (statues, wins, theme,
@@ -168,7 +168,7 @@ local reserved = {}
 for _, spot in boardSpots do table.insert(reserved, { at = spot.at, radius = 30 }) end
 
 -- Hills, distant peaks, a lake, a pine forest, boulders and a campfire, in the
--- saved theme (alpine, sakura or farm).
+-- saved theme (alpine, sakura, farm, desert or haunted).
 local Scenery = require(script.Scenery)
 if Scenery.LOOKS[settings.theme] == nil then settings.theme = "default" end
 Scenery.build(mountainRadius, spawn.Position, reserved, settings.theme)

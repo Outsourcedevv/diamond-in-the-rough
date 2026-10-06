@@ -4527,6 +4527,50 @@ H44kTFtpTKosYs80HUUjx6lJBM1IIhU0wjFDne44YDAzkYybTsIMTzUjZp3NIMZikzorJ1U5ftJ0mVVJ
       </Item>
       <Item class="ModuleScript" referent="19">
         <Properties>
+          <string name="Name">SceneryThemes</string>
+          <string name="Source"><![CDATA[--!strict
+-- Which of the valley's own trees and plants each map theme hides, so a theme
+-- can change the land as well as add to it: the desert has no pine forest or
+-- meadow flowers, and the haunted night keeps only its dark pines (its dead
+-- trees stand in for the leafy birches and oaks). Used by the
+-- server's Scenery (for the built-in and imported scenery) and the client's
+-- SceneryView (for the Blender pack built on each player's computer).
+local SceneryThemes = {}
+
+-- Theme -> kinds of scenery it hides. A kind is the leading word of a
+-- scenery piece's name: "Pine" covers Pine_A and Pine_Snow_B, "Conifer" and
+-- "Birch" the built-in trees.
+SceneryThemes.HIDDEN = {
+	desert = { Pine = true, Birch = true, Oak = true, Bush = true, Flowers = true, Log = true, Stump = true, Conifer = true },
+	haunted = { Flowers = true, Birch = true, Oak = true },
+} :: { [string]: { [string]: boolean } }
+
+-- The kind of a scenery piece from its name ("Pine_Snow_A" -> "Pine").
+function SceneryThemes.kind(name: string): string
+	return string.match(name, "^(%a+)") or name
+end
+
+-- True if `theme` hides the scenery piece called `name`.
+function SceneryThemes.hides(theme: string?, name: string): boolean
+	local hidden = SceneryThemes.HIDDEN[theme or "default"]
+	return hidden ~= nil and hidden[SceneryThemes.kind(name)] == true
+end
+
+-- True if any theme hides the scenery piece called `name`.
+function SceneryThemes.themed(name: string): boolean
+	local kind = SceneryThemes.kind(name)
+	for _, hidden in SceneryThemes.HIDDEN do
+		if hidden[kind] then return true end
+	end
+	return false
+end
+
+return SceneryThemes
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="20">
+        <Properties>
           <string name="Name">Skin</string>
           <string name="Source"><![CDATA[--!strict
 -- The mountain's skin: stone with a diamond hidden inside (the default), or a
@@ -4564,11 +4608,11 @@ return Skin
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="20">
+  <Item class="ServerScriptService" referent="21">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="21">
+    <Item class="Script" referent="22">
       <Properties>
         <string name="Name">DiamondRushServer</string>
         <token name="RunContext">0</token>
@@ -4637,7 +4681,7 @@ local settings = {
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
 	statues = {} :: { any },
-	theme = "default", -- the map's look: "default" (alpine), "sakura" or "farm"
+	theme = "default", -- the map's look: "default" (alpine), "sakura", "farm", "desert" or "haunted"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 }
 -- Single player: every player has their own save (statues, wins, theme,
@@ -4742,7 +4786,7 @@ local reserved = {}
 for _, spot in boardSpots do table.insert(reserved, { at = spot.at, radius = 30 }) end
 
 -- Hills, distant peaks, a lake, a pine forest, boulders and a campfire, in the
--- saved theme (alpine, sakura or farm).
+-- saved theme (alpine, sakura, farm, desert or haunted).
 local Scenery = require(script.Scenery)
 if Scenery.LOOKS[settings.theme] == nil then settings.theme = "default" end
 Scenery.build(mountainRadius, spawn.Position, reserved, settings.theme)
@@ -6105,7 +6149,390 @@ State:SetAttribute("TikTok", "Starting…")
 newRound()
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="22">
+      <Item class="ModuleScript" referent="23">
+        <Properties>
+          <string name="Name">Desert</string>
+          <string name="Source"><![CDATA[--!strict
+-- The desert canyon theme's own scenery: red sandstone mesas stand round the
+-- valley, saguaro and barrel cacti and tumbleweeds dot the sand, palms ring
+-- the lake as an oasis, a sandstone gate with fire bowls frames the trail
+-- where it leaves the camp, and a stepped sandstone pyramid with a stair up
+-- its front, a temple on top and obelisks at its foot stands beside the
+-- mountain, facing the camp. The valley's pine forest, meadow flowers and
+-- bushes make way (see SceneryThemes). Scenery builds it once, alongside the
+-- alpine valley, and keeps it out of view until the theme is chosen (see
+-- Scenery.setTheme). Nothing here takes part in mining raycasts or touch
+-- events; the pyramid, its stair and the gate can be climbed and bumped into.
+local Sakura = require(script.Parent.Sakura)
+
+local Desert = {}
+
+type Kit = Sakura.Kit
+
+local SANDSTONE = { Color3.fromRGB(196, 124, 80), Color3.fromRGB(214, 150, 100), Color3.fromRGB(176, 100, 66), Color3.fromRGB(226, 170, 116) }
+local PALE = Color3.fromRGB(226, 196, 146) -- the pyramid's limestone
+local GOLD = Color3.fromRGB(232, 182, 72)
+local CACTUS = Color3.fromRGB(76, 118, 70)
+local PALM_TRUNK = Color3.fromRGB(132, 102, 70)
+local FROND = Color3.fromRGB(88, 136, 62)
+local DARK = Color3.fromRGB(34, 26, 22)
+local CLAY = Color3.fromRGB(176, 96, 62)
+
+Desert.PYRAMID = 30 -- studs across its lowest step
+Desert.STEPS = 8 -- steps from the ground to the temple
+Desert.STEP_HEIGHT = 3.4
+
+-- Open, fairly flat ground in view of the spawn, to one side of the mountain,
+-- for something `size` across facing the camp. Returns its frame (on the
+-- highest ground under it) and how far its base must reach down, or nil.
+local function site(kit: Kit, random: Random, size: number, gap: number): (CFrame?, number)
+	local best: CFrame? = nil
+	local bestDrop, bestScore = 0, math.huge
+	local half = size / 2
+	for attempt = 1, 500 do
+		local angle = (if random:NextNumber() < 0.5 then -1 else 1) * random:NextNumber(math.rad(30), math.rad(72))
+		local distance = random:NextNumber(75, 150)
+		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
+		local centre = kit.ground(spot.X, spot.Z)
+		if not kit.clear(centre, half + 8) and centre.Y < 30 and kit.steepness(centre.X, centre.Z) < 0.5 and kit.spaced(centre, gap) then
+			local flat = Vector3.new(centre.X, 0, centre.Z)
+			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
+			local base = CFrame.lookAt(flat, flat + facing)
+			local low, high = math.huge, -math.huge
+			local open = true
+			for _, offset in { Vector3.new(-half, 0, -half), Vector3.new(half, 0, -half), Vector3.new(-half, 0, half), Vector3.new(half, 0, half),
+				Vector3.new(0, 0, -half - 6), Vector3.zero } do
+				local at = base * offset
+				local ground = kit.ground(at.X, at.Z)
+				low, high = math.min(low, ground.Y), math.max(high, ground.Y)
+				if kit.clear(ground, 2) or not kit.spaced(ground, gap * 0.5) then open = false end
+			end
+			if open and high - low < 6 then
+				local score = math.abs(math.abs(angle) - math.rad(48)) * 0.6 + distance / 150 + (high - low) * 0.3
+				if score < bestScore then
+					bestScore = score
+					best = base + Vector3.new(0, high, 0)
+					bestDrop = high - low + 1
+				end
+			end
+		end
+		if attempt % 50 == 0 then task.wait() end
+	end
+	return best, bestDrop
+end
+
+-- The stepped pyramid, in its own frame (front, with the stair, facing the camp).
+local function pyramid(kit: Kit, parent: Instance, base: CFrame, drop: number): Model
+	local model = Instance.new("Model")
+	model.Name = "Pyramid"
+	model.Parent = parent
+	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material): BasePart
+		return kit.piece(model, name, size, base * offset, colour, material)
+	end
+	local width, rise = Desert.PYRAMID, Desert.STEP_HEIGHT
+	local shrink = (width - 8) / Desert.STEPS -- each step is this much narrower
+	for step = 0, Desert.STEPS - 1 do
+		local size = width - step * shrink
+		local bottom = step * rise
+		-- The lowest step reaches down to the lowest ground under it.
+		local reach = if step == 0 then drop else 0
+		local colour = if step % 2 == 0 then PALE else Color3.fromRGB(212, 180, 128)
+		kit.solid(put("PyramidStep", Vector3.new(size, rise + reach, size), CFrame.new(0, bottom + (rise - reach) / 2, 0), colour, Enum.Material.Sandstone))
+		-- A dark band of carving round each step's top edge.
+		put("PyramidBand", Vector3.new(size + 0.1, 0.3, size + 0.1), CFrame.new(0, bottom + rise - 0.5, 0), Color3.fromRGB(176, 136, 90), Enum.Material.Sandstone)
+	end
+	-- The stair up the front, steep like a temple's: from the sand in front of
+	-- the lowest step to the temple door, each tread solid down to the ground.
+	local stairWidth = 5
+	local summit = Desert.STEPS * rise
+	local top = width - Desert.STEPS * shrink
+	local treads = Desert.STEPS * 4
+	local foot = -(width / 2 + 4)
+	local run = (-(top / 2) - foot) / treads
+	for tread = 0, treads - 1 do
+		local high = (tread + 1) * rise / 4
+		local front = foot + tread * run
+		local depth = if tread == treads - 1 then run + 1 else run + 0.05
+		kit.solid(put("PyramidStair", Vector3.new(stairWidth, high + drop, depth), CFrame.new(0, (high - drop) / 2, front + depth / 2),
+			if tread % 2 == 0 then Color3.fromRGB(200, 166, 116) else Color3.fromRGB(190, 156, 108), Enum.Material.Sandstone))
+	end
+	-- The temple on top: a dark doorway facing the camp, a gold-banded roof
+	-- and a gold capstone.
+	kit.solid(put("Temple", Vector3.new(top - 1.6, 5, top - 1.6), CFrame.new(0, summit + 2.5, 0), PALE, Enum.Material.Sandstone))
+	put("TempleDoor", Vector3.new(2, 3.4, 0.2), CFrame.new(0, summit + 1.7, -(top - 1.6) / 2 - 0.05), DARK, Enum.Material.Slate)
+	put("TempleLintel", Vector3.new(3, 0.5, 0.4), CFrame.new(0, summit + 3.6, -(top - 1.6) / 2 - 0.1), GOLD, Enum.Material.Foil)
+	put("TempleRoof", Vector3.new(top, 0.6, top), CFrame.new(0, summit + 5.3, 0), Color3.fromRGB(176, 136, 90), Enum.Material.Sandstone)
+	put("TempleGoldBand", Vector3.new(top + 0.1, 0.25, top + 0.1), CFrame.new(0, summit + 5.1, 0), GOLD, Enum.Material.Foil)
+	put("Capstone", Vector3.new(3, 1.4, 3), CFrame.new(0, summit + 6.3, 0), GOLD, Enum.Material.Foil)
+	put("Capstone", Vector3.new(1.6, 1, 1.6), CFrame.new(0, summit + 7.5, 0), GOLD, Enum.Material.Foil)
+	-- Obelisks and fire bowls either side of the foot of the stair.
+	for _, side in { -1, 1 } do
+		local x = side * (stairWidth / 2 + 3.2)
+		local z = -(width / 2 + 3)
+		local foot = base * Vector3.new(x, 0, z)
+		local low = kit.ground(foot.X, foot.Z).Y - base.Position.Y
+		kit.solid(put("ObeliskBase", Vector3.new(2.6, 1.2 - low, 2.6), CFrame.new(x, (1.2 + low) / 2, z), Color3.fromRGB(200, 166, 116), Enum.Material.Sandstone))
+		kit.solid(put("Obelisk", Vector3.new(1.5, 9, 1.5), CFrame.new(x, 1.2 + 4.5, z), PALE, Enum.Material.Sandstone))
+		put("Obelisk", Vector3.new(1.2, 2, 1.2), CFrame.new(x, 1.2 + 10, z), PALE, Enum.Material.Sandstone)
+		put("ObeliskTip", Vector3.new(0.8, 0.8, 0.8), CFrame.new(x, 1.2 + 11.4, z), GOLD, Enum.Material.Foil)
+		local bowlX = side * (stairWidth / 2 + 0.9)
+		local bowlZ = -(width / 2 + 2.4)
+		local bowlFoot = base * Vector3.new(bowlX, 0, bowlZ)
+		local bowlLow = kit.ground(bowlFoot.X, bowlFoot.Z).Y - base.Position.Y
+		kit.beam(model, "BrazierStand", base * Vector3.new(bowlX, bowlLow - 0.3, bowlZ), base * Vector3.new(bowlX, 2.4, bowlZ), 0.5, DARK, Enum.Material.Metal)
+		local bowl = kit.beam(model, "Brazier", base * Vector3.new(bowlX, 2.3, bowlZ), base * Vector3.new(bowlX, 2.9, bowlZ), 1.5, Color3.fromRGB(120, 86, 46), Enum.Material.Metal)
+		local fire = Instance.new("Fire")
+		fire.Size = 2.2
+		fire.Heat = 7
+		fire.Color = Color3.fromRGB(255, 160, 60)
+		fire.SecondaryColor = Color3.fromRGB(255, 80, 20)
+		fire.Parent = bowl
+	end
+	return model
+end
+
+-- A layered sandstone mesa or butte, its stripes in the canyon's reds.
+local function mesa(kit: Kit, parent: Instance, at: Vector3, radius: number, random: Random)
+	local model = Instance.new("Model")
+	model.Name = "Mesa"
+	model.Parent = parent
+	local layers = random:NextInteger(3, 5)
+	local y = at.Y - 14
+	local r = radius
+	local drift = Vector3.zero
+	for layer = 1, layers do
+		local tall = random:NextNumber(8, 14) + (if layer == 1 then 14 else 0)
+		local centre = Vector3.new(at.X, 0, at.Z) + drift
+		kit.beam(model, "MesaLayer", Vector3.new(centre.X, y, centre.Z), Vector3.new(centre.X, y + tall, centre.Z), r * 2, SANDSTONE[(layer - 1) % #SANDSTONE + 1], Enum.Material.Sandstone)
+		y += tall
+		r *= random:NextNumber(0.82, 0.95)
+		drift += Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)) * radius * 0.06
+	end
+	-- A flat cap, a shade paler where the sun bleaches it.
+	kit.beam(model, "MesaTop", Vector3.new(at.X + drift.X, y, at.Z + drift.Z), Vector3.new(at.X + drift.X, y + 1.2, at.Z + drift.Z), r * 2 - 1, Color3.fromRGB(222, 168, 118), Enum.Material.Sandstone)
+end
+
+-- A saguaro: a ribbed trunk with one to three arms turning up.
+local function saguaro(kit: Kit, parent: Instance, at: Vector3, height: number, random: Random)
+	local model = Instance.new("Model")
+	model.Name = "Saguaro"
+	model.Parent = parent
+	local width = height * 0.12
+	local tone = random:NextNumber(0.9, 1.08)
+	local colour = Color3.new(CACTUS.R * tone, CACTUS.G * tone, CACTUS.B * tone)
+	local top = at + Vector3.new(0, height, 0)
+	kit.beam(model, "CactusTrunk", at - Vector3.new(0, 0.5, 0), top, width, colour, Enum.Material.Plastic)
+	local cap = kit.piece(model, "CactusTop", Vector3.new(width, width, width), CFrame.new(top), colour, Enum.Material.Plastic) :: Part
+	cap.Shape = Enum.PartType.Ball
+	local yaw = random:NextNumber(0, math.pi * 2)
+	for arm = 1, random:NextInteger(1, 3) do
+		local angle = yaw + arm * 2.1
+		local out = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local from = at + Vector3.new(0, height * random:NextNumber(0.35, 0.55), 0)
+		local elbow = from + out * height * 0.22
+		local up = elbow + Vector3.new(0, height * random:NextNumber(0.2, 0.32), 0)
+		local armWidth = width * 0.75
+		kit.beam(model, "CactusArm", from, elbow, armWidth, colour, Enum.Material.Plastic)
+		local joint = kit.piece(model, "CactusElbow", Vector3.new(armWidth, armWidth, armWidth), CFrame.new(elbow), colour, Enum.Material.Plastic) :: Part
+		joint.Shape = Enum.PartType.Ball
+		kit.beam(model, "CactusArm", elbow, up, armWidth, colour, Enum.Material.Plastic)
+		local tip = kit.piece(model, "CactusTop", Vector3.new(armWidth, armWidth, armWidth), CFrame.new(up), colour, Enum.Material.Plastic) :: Part
+		tip.Shape = Enum.PartType.Ball
+	end
+end
+
+-- A squat barrel cactus with a pink flower on top.
+local function barrel(kit: Kit, parent: Instance, at: Vector3, size: number)
+	local body = kit.piece(parent, "BarrelCactus", Vector3.new(size, size, size), CFrame.new(at + Vector3.new(0, size * 0.32, 0)), CACTUS, Enum.Material.Plastic) :: Part
+	body.Shape = Enum.PartType.Ball
+	kit.piece(parent, "CactusFlower", Vector3.new(size * 0.35, size * 0.12, size * 0.35), CFrame.new(at + Vector3.new(0, size * 0.82, 0)), Color3.fromRGB(236, 104, 146), Enum.Material.SmoothPlastic)
+end
+
+-- A date palm leaning over the water, its fronds drooping all round.
+local function palm(kit: Kit, parent: Instance, at: Vector3, height: number, lean: Vector3, random: Random)
+	local model = Instance.new("Model")
+	model.Name = "Palm"
+	model.Parent = parent
+	local points = {}
+	for i = 0, 4 do
+		local t = i / 4
+		points[i + 1] = at + Vector3.new(0, height * t, 0) + lean * height * 0.28 * t * t
+	end
+	for i = 1, 4 do
+		kit.beam(model, "PalmTrunk", points[i] - (if i == 1 then Vector3.new(0, 0.5, 0) else Vector3.zero), points[i + 1], 0.9 - i * 0.08, PALM_TRUNK, Enum.Material.Wood)
+	end
+	local crown = points[5]
+	local yaw = random:NextNumber(0, math.pi * 2)
+	for k = 0, 7 do
+		local angle = yaw + k * math.pi / 4
+		local out = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local tip = crown + out * 4.6 + Vector3.new(0, -1.6 + (k % 2) * 0.6, 0)
+		local mid = crown + out * 2.4 + Vector3.new(0, 0.5, 0)
+		for _, span in { { crown, mid }, { mid, tip } } do
+			local a, b = span[1], span[2]
+			kit.piece(model, "PalmFrond", Vector3.new(1.3, 0.12, (b - a).Magnitude + 0.3), CFrame.lookAt((a + b) / 2, b), FROND, Enum.Material.LeafyGrass)
+		end
+	end
+	for k = 1, 3 do
+		local angle = yaw + k * 2.1
+		local date = kit.piece(model, "Dates", Vector3.new(0.7, 0.7, 0.7), CFrame.new(crown + Vector3.new(math.cos(angle) * 0.6, -0.6, math.sin(angle) * 0.6)), Color3.fromRGB(150, 82, 40), Enum.Material.SmoothPlastic) :: Part
+		date.Shape = Enum.PartType.Ball
+	end
+end
+
+-- The gate where the trail leaves the camp: two tapering sandstone pylons with
+-- fire bowls and a gold-banded lintel across.
+local function gate(kit: Kit, parent: Instance, frame: CFrame, span: number)
+	local model = Instance.new("Model")
+	model.Name = "CanyonGate"
+	model.Parent = parent
+	for _, side in { -1, 1 } do
+		local x = side * span / 2
+		local foot = frame * Vector3.new(x, 0, 0)
+		local low = kit.ground(foot.X, foot.Z).Y - frame.Position.Y
+		local y = low - 0.5
+		for i, size in { Vector3.new(2.8, 1.5, 2.8), Vector3.new(2.2, 4, 2.2), Vector3.new(1.9, 3.5, 1.9), Vector3.new(1.6, 3, 1.6) } do
+			local tall = size.Y + (if i == 1 then -low + 0.5 else 0)
+			kit.solid(kit.piece(model, "GatePylon", Vector3.new(size.X, tall, size.Z), frame * CFrame.new(x, y + tall / 2, 0), SANDSTONE[(i - 1) % #SANDSTONE + 1], Enum.Material.Sandstone))
+			y += tall
+		end
+		local bowl = kit.beam(model, "GateBrazier", frame * Vector3.new(x, y + 0.6, 0), frame * Vector3.new(x, y + 1.2, 0), 1.4, Color3.fromRGB(120, 86, 46), Enum.Material.Metal)
+		local fire = Instance.new("Fire")
+		fire.Size = 2
+		fire.Heat = 6
+		fire.Color = Color3.fromRGB(255, 160, 60)
+		fire.SecondaryColor = Color3.fromRGB(255, 80, 20)
+		fire.Parent = bowl
+	end
+	kit.piece(model, "GateLintel", Vector3.new(span + 3, 1.4, 2.2), frame * CFrame.new(0, 11, 0), SANDSTONE[2], Enum.Material.Sandstone)
+	kit.piece(model, "GateGoldBand", Vector3.new(span + 3.1, 0.35, 2.3), frame * CFrame.new(0, 10.6, 0), GOLD, Enum.Material.Foil)
+	kit.piece(model, "GateCornice", Vector3.new(span + 4, 0.5, 2.8), frame * CFrame.new(0, 11.9, 0), SANDSTONE[4], Enum.Material.Sandstone)
+end
+
+-- A clay water pot.
+local function pot(kit: Kit, parent: Instance, at: Vector3, size: number)
+	local body = kit.piece(parent, "ClayPot", Vector3.new(size, size, size), CFrame.new(at + Vector3.new(0, size * 0.45, 0)), CLAY, Enum.Material.Slate) :: Part
+	body.Shape = Enum.PartType.Ball
+	kit.beam(parent, "ClayPotNeck", at + Vector3.new(0, size * 0.8, 0), at + Vector3.new(0, size * 1.05, 0), size * 0.45, CLAY, Enum.Material.Slate)
+end
+
+function Desert.build(kit: Kit): Folder
+	local folder = Instance.new("Folder")
+	folder.Name = "DesertScenery"
+	-- Its own seed, so the alpine valley is laid out the same with or without it.
+	local random = Random.new(8821)
+	local placed: { Vector3 } = {}
+	local function roomy(at: Vector3, gap: number): boolean
+		for _, other in placed do
+			if (Vector3.new(at.X - other.X, 0, at.Z - other.Z)).Magnitude < gap then return false end
+		end
+		return true
+	end
+
+	-- The pyramid goes first, so the cacti grow round it.
+	local base, drop = nil, 0
+	for _, gap in { 12, 8, 5 } do
+		base, drop = site(kit, random, Desert.PYRAMID + 2, gap)
+		if base then break end
+	end
+	if base then
+		pyramid(kit, folder, base :: CFrame, drop)
+	else
+		warn("[DiamondRush] Desert: no open ground for the pyramid, so it is left out.")
+	end
+	local keepOff = if base then Vector3.new((base :: CFrame).Position.X, 0, (base :: CFrame).Position.Z) else nil
+	local function offPyramid(at: Vector3, margin: number): boolean
+		return keepOff == nil or (Vector3.new(at.X, 0, at.Z) - (keepOff :: Vector3)).Magnitude > Desert.PYRAMID * 0.75 + 6 + margin
+	end
+
+	-- Mesas and buttes round the valley, beyond the trees' meadows.
+	local mesas = 0
+	for attempt = 1, 400 do
+		if mesas >= 9 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(200, 330)
+		local radius = random:NextNumber(14, 30)
+		local at = kit.ground(math.cos(angle) * distance, math.sin(angle) * distance)
+		if not kit.clear(at, radius + 6) and offPyramid(at, radius) and roomy(at, radius + 34) then
+			mesa(kit, folder, at, radius, random)
+			table.insert(placed, at)
+			mesas += 1
+		end
+		if attempt % 50 == 0 then task.wait() end
+	end
+	-- Saguaros across the sand, and barrel cacti among them.
+	local saguaros = 0
+	for attempt = 1, 2400 do
+		if saguaros >= 40 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(kit.radius + 8, 230)
+		local at = kit.ground(math.cos(angle) * distance, math.sin(angle) * distance)
+		if not kit.clear(at, 3) and at.Y < 40 and kit.steepness(at.X, at.Z) < 0.6 and kit.spaced(at, 3) and offPyramid(at, 2) and roomy(at, 9) then
+			saguaro(kit, folder, at, random:NextNumber(7, 13), random)
+			table.insert(placed, at)
+			saguaros += 1
+		end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	local barrels = 0
+	for attempt = 1, 1200 do
+		if barrels >= 28 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(kit.radius + 4, 180)
+		local at = kit.ground(math.cos(angle) * distance, math.sin(angle) * distance)
+		if not kit.clear(at, 1.5) and at.Y < 40 and kit.steepness(at.X, at.Z) < 0.6 and kit.spaced(at, 2) and offPyramid(at, 1) and roomy(at, 3) then
+			barrel(kit, folder, at, random:NextNumber(1.1, 1.8))
+			table.insert(placed, at)
+			barrels += 1
+		end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	-- Tumbleweeds caught in the open.
+	local weeds = 0
+	for attempt = 1, 600 do
+		if weeds >= 14 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(kit.radius + 4, 160)
+		local at = kit.ground(math.cos(angle) * distance, math.sin(angle) * distance)
+		if not kit.clear(at, 1) and kit.spaced(at, 2) and offPyramid(at, 1) and roomy(at, 3) then
+			local size = random:NextNumber(1.6, 2.6)
+			local weed = kit.piece(folder, "Tumbleweed", Vector3.new(size, size, size), CFrame.new(at + Vector3.new(0, size * 0.4, 0)), Color3.fromRGB(150, 116, 74), Enum.Material.Grass) :: Part
+			weed.Shape = Enum.PartType.Ball
+			table.insert(placed, at)
+			weeds += 1
+		end
+	end
+	-- The oasis: palms round the lake, leaning out over the water.
+	local palms = 0
+	for attempt = 1, 400 do
+		if palms >= 9 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local stretch = random:NextNumber(1.3, 1.6)
+		local at = kit.ground(kit.lake.X + math.cos(angle) * 35 * stretch, kit.lake.Z + math.sin(angle) * 27 * stretch)
+		if at.Y > 0 and not kit.clear(at, -8) and kit.spaced(at, 2) and roomy(at, 7) then
+			local lean = Vector3.new(kit.lake.X - at.X, 0, kit.lake.Z - at.Z).Unit
+			palm(kit, folder, at, random:NextNumber(10, 15), lean, random)
+			table.insert(placed, at)
+			palms += 1
+		end
+	end
+	-- The gate stands just past the spawn, where the trail leaves the camp,
+	-- framing the mountain from the camp; its pylons stay beside the trail.
+	local gateZ = kit.camp.Z - 9
+	gate(kit, folder, CFrame.new(kit.ground(kit.pathCentre(gateZ), gateZ)), 10)
+	-- Clay pots by the camp.
+	for _, offset in { Vector3.new(-13, 0, -4), Vector3.new(-12, 0, -5.4), Vector3.new(13.5, 0, -4.2) } do
+		local spot = kit.camp + offset
+		pot(kit, folder, kit.ground(spot.X, spot.Z), if offset.X < -12.5 then 1.6 else 1.2)
+	end
+	return folder
+end
+
+return Desert
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="24">
         <Properties>
           <string name="Name">DiamondBird</string>
           <string name="Source"><![CDATA[--!strict
@@ -6362,7 +6789,7 @@ return DiamondBird
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="23">
+      <Item class="ModuleScript" referent="25">
         <Properties>
           <string name="Name">Farm</string>
           <string name="Source"><![CDATA[--!strict
@@ -6880,7 +7307,450 @@ return Farm
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="24">
+      <Item class="ModuleScript" referent="26">
+        <Properties>
+          <string name="Name">Haunted</string>
+          <string name="Source"><![CDATA[--!strict
+-- The haunted night theme's own scenery: an iron cemetery gate between stone
+-- pillars where the trail leaves the camp, a graveyard of crooked headstones
+-- and crosses behind a spiked iron fence, a stone mausoleum with columns and
+-- a green glow under its iron door, bare dead trees across the meadows,
+-- glowing jack-o'-lanterns and pale will-o'-wisps floating in the mist, all
+-- under a full moon (the light is Scenery.LOOKS.haunted). The meadow flowers
+-- and leafy trees make way (see SceneryThemes). Scenery builds it once, alongside the alpine
+-- valley, and keeps it out of view until the theme is chosen (see
+-- Scenery.setTheme). Nothing here takes part in mining raycasts or touch
+-- events; the gate pillars, fence and mausoleum can be bumped into.
+local Sakura = require(script.Parent.Sakura)
+
+local Haunted = {}
+
+type Kit = Sakura.Kit
+
+local STONE = Color3.fromRGB(104, 106, 112)
+local DARK_STONE = Color3.fromRGB(72, 74, 80)
+local MOSS = Color3.fromRGB(70, 84, 62)
+local IRON = Color3.fromRGB(30, 30, 34)
+local DEAD_WOOD = Color3.fromRGB(64, 54, 48)
+local PUMPKIN = Color3.fromRGB(222, 112, 28)
+local CANDLE = Color3.fromRGB(255, 196, 80)
+local GHOST = Color3.fromRGB(150, 255, 200) -- the crypt's and the gate lantern's green glow
+local WISP = Color3.fromRGB(176, 226, 255)
+
+Haunted.CRYPT = Vector3.new(14, 12, 16) -- the mausoleum's width, height to the ridge and depth
+Haunted.GRAVES = { columns = 4, rows = 4, spacing = 4.2 }
+
+local function light(parent: Instance, colour: Color3, range: number, brightness: number)
+	local glow = Instance.new("PointLight")
+	glow.Color = colour
+	glow.Range = range
+	glow.Brightness = brightness
+	glow.Shadows = false
+	glow.Parent = parent
+end
+
+-- Where the mausoleum goes: open, fairly flat ground in view of the spawn, to
+-- one side of the mountain, with room for the graveyard beside it. Returns
+-- its frame (front facing the camp) and how far its plinth must reach down.
+local YARD = 22 -- the graveyard's width beside the crypt
+local function cryptSite(kit: Kit, random: Random, gap: number): (CFrame?, number)
+	local best: CFrame? = nil
+	local bestDrop, bestScore = 0, math.huge
+	local w, d = Haunted.CRYPT.X + 2, Haunted.CRYPT.Z + 6
+	for attempt = 1, 500 do
+		local angle = (if random:NextNumber() < 0.5 then -1 else 1) * random:NextNumber(math.rad(30), math.rad(70))
+		local distance = random:NextNumber(70, 140)
+		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
+		local centre = kit.ground(spot.X, spot.Z)
+		if not kit.clear(centre, 16) and centre.Y < 28 and kit.steepness(centre.X, centre.Z) < 0.5 and kit.spaced(centre, gap) then
+			local flat = Vector3.new(centre.X, 0, centre.Z)
+			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
+			local base = CFrame.lookAt(flat, flat + facing)
+			local low, high = math.huge, -math.huge
+			for _, offset in { Vector3.new(-w / 2, 0, -d / 2), Vector3.new(w / 2, 0, -d / 2), Vector3.new(-w / 2, 0, d / 2), Vector3.new(w / 2, 0, d / 2), Vector3.zero } do
+				local at = base * offset
+				local y = kit.ground(at.X, at.Z).Y
+				low, high = math.min(low, y), math.max(high, y)
+			end
+			if high - low < 4 then
+				-- How much of the graveyard beside it is open ground.
+				local open = 0
+				for i = 0, 3 do
+					for j = 0, 3 do
+						local at = base * Vector3.new(-(w / 2 + 4 + YARD * i / 3), 0, -d / 2 + d * j / 3)
+						local ground = kit.ground(at.X, at.Z)
+						if not kit.clear(ground, 1) and kit.spaced(ground, 2) and kit.steepness(at.X, at.Z) < 0.7 then open += 1 end
+					end
+				end
+				local score = math.abs(math.abs(angle) - math.rad(46)) * 0.6 + distance / 150 + (high - low) * 0.3 + (16 - open) * 0.15
+				if score < bestScore then
+					bestScore = score
+					best = base + Vector3.new(0, high + 0.4, 0)
+					bestDrop = high + 0.4 - low + 0.6
+				end
+			end
+		end
+		if attempt % 50 == 0 then task.wait() end
+	end
+	return best, bestDrop
+end
+
+-- The mausoleum, in its own frame (front facing the camp).
+local function crypt(kit: Kit, parent: Instance, base: CFrame, drop: number): Model
+	local model = Instance.new("Model")
+	model.Name = "Mausoleum"
+	model.Parent = parent
+	local w, h, d = Haunted.CRYPT.X, Haunted.CRYPT.Y, Haunted.CRYPT.Z
+	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
+		return kit.piece(model, name, size, base * offset, colour, material, kind)
+	end
+	local plinth = 1.4
+	kit.solid(put("CryptPlinth", Vector3.new(w + 2, plinth + drop, d + 5), CFrame.new(0, (plinth - drop) / 2, -1.5), DARK_STONE, Enum.Material.Cobblestone))
+	-- Steps up to the portico.
+	for step = 1, 3 do
+		local high = plinth * step / 3
+		kit.solid(put("CryptStep", Vector3.new(6, high + drop, 1), CFrame.new(0, (high - drop) / 2, -(d / 2 + 4) - (3 - step) * 1 - 0.5), DARK_STONE, Enum.Material.Cobblestone))
+	end
+	local wallTop = plinth + h * 0.62
+	kit.solid(put("CryptWalls", Vector3.new(w, wallTop - plinth, d), CFrame.new(0, (plinth + wallTop) / 2, 0), STONE, Enum.Material.Slate))
+	-- Moss creeping up the walls.
+	put("CryptMoss", Vector3.new(w + 0.1, 1.2, d + 0.1), CFrame.new(0, plinth + 0.6, 0), MOSS, Enum.Material.Grass)
+	-- The portico: four columns, an entablature and a pediment.
+	local front = -(d / 2 + 2.6)
+	for _, x in { -w / 2 + 1, -w / 6, w / 6, w / 2 - 1 } do
+		kit.solid(kit.beam(model, "CryptColumn", base * Vector3.new(x, plinth, front), base * Vector3.new(x, wallTop, front), 1.3, STONE, Enum.Material.Marble))
+		put("ColumnBase", Vector3.new(1.8, 0.4, 1.8), CFrame.new(x, plinth + 0.2, front), DARK_STONE, Enum.Material.Slate)
+		put("ColumnCap", Vector3.new(1.8, 0.4, 1.8), CFrame.new(x, wallTop - 0.2, front), DARK_STONE, Enum.Material.Slate)
+	end
+	put("Entablature", Vector3.new(w + 0.6, 1.2, d + 3.4), CFrame.new(0, wallTop + 0.6, -1.3), DARK_STONE, Enum.Material.Slate)
+	local ridge = h - (wallTop + 1.2)
+	local roofBase = wallTop + 1.2
+	for _, z in { front - 0.8, d / 2 + 0.2 } do
+		for _, side in { -1, 1 } do
+			-- Each wedge rises towards the middle (as the farm's barn gables do).
+			local turn = if side > 0 then CFrame.Angles(0, -math.pi / 2, 0) else CFrame.Angles(0, math.pi / 2, 0)
+			put("Pediment", Vector3.new(0.8, ridge, w / 2 + 0.3), CFrame.new(side * (w / 4 + 0.15), roofBase + ridge / 2, z) * turn, STONE, Enum.Material.Slate, "WedgePart")
+		end
+	end
+	local pitch = math.atan2(ridge, w / 2)
+	local slope = math.sqrt(ridge * ridge + (w / 2) * (w / 2)) + 0.8
+	for _, side in { -1, 1 } do
+		put("CryptRoof", Vector3.new(slope, 0.5, d + 4.6), CFrame.new(side * w / 4, roofBase + ridge / 2 + 0.25, -1.3) * CFrame.Angles(0, 0, -side * pitch), DARK_STONE, Enum.Material.Slate)
+	end
+	-- A stone cross on the ridge over the portico.
+	put("CryptCross", Vector3.new(0.5, 2.6, 0.5), CFrame.new(0, h + 1.3, front - 0.6), STONE, Enum.Material.Marble)
+	put("CryptCross", Vector3.new(1.6, 0.5, 0.5), CFrame.new(0, h + 1.8, front - 0.6), STONE, Enum.Material.Marble)
+	-- The iron door, with an eerie green glow leaking round it.
+	local doorZ = -d / 2 - 0.1
+	put("CryptGlow", Vector3.new(3.8, 5.8, 0.1), CFrame.new(0, plinth + 2.9, doorZ + 0.02), GHOST, Enum.Material.Neon)
+	put("CryptDoor", Vector3.new(3.4, 5.4, 0.25), CFrame.new(0, plinth + 2.7, doorZ - 0.1), IRON, Enum.Material.DiamondPlate)
+	put("CryptDoorRing", Vector3.new(0.5, 0.5, 0.15), CFrame.new(0.9, plinth + 2.8, doorZ - 0.3), Color3.fromRGB(110, 96, 70), Enum.Material.Metal)
+	local glowPart = put("CryptLamp", Vector3.new(0.4, 0.4, 0.4), CFrame.new(0, plinth + 3, doorZ - 1.2), GHOST, Enum.Material.Neon)
+	glowPart.Transparency = 1
+	light(glowPart, GHOST, 16, 1.4)
+	-- Stone urns at the plinth's front corners.
+	for _, side in { -1, 1 } do
+		local at = CFrame.new(side * (w / 2 + 0.4), plinth, -(d / 2 + 3.4))
+		put("UrnFoot", Vector3.new(1, 0.6, 1), at * CFrame.new(0, 0.3, 0), DARK_STONE, Enum.Material.Slate)
+		local urn = put("Urn", Vector3.new(1.3, 1.3, 1.3), at * CFrame.new(0, 1.2, 0), STONE, Enum.Material.Marble) :: Part
+		urn.Shape = Enum.PartType.Ball
+	end
+	return model
+end
+
+-- A headstone of one of three shapes, leaning a little.
+local function headstone(kit: Kit, parent: Instance, frame: CFrame, kind: number, random: Random)
+	local model = Instance.new("Model")
+	model.Name = "Grave"
+	model.Parent = parent
+	local tone = random:NextNumber(0.85, 1.12)
+	local colour = Color3.new(STONE.R * tone, STONE.G * tone, STONE.B * tone)
+	local lean = frame * CFrame.Angles(random:NextNumber(-0.14, 0.1), 0, random:NextNumber(-0.1, 0.1))
+	if kind == 1 then
+		-- A round-topped headstone.
+		kit.piece(model, "Headstone", Vector3.new(2, 2.2, 0.45), lean * CFrame.new(0, 0.6, 0), colour, Enum.Material.Slate)
+		local top = kit.piece(model, "HeadstoneTop", Vector3.new(0.45, 2, 2), lean * CFrame.new(0, 1.7, 0) * CFrame.Angles(0, math.pi / 2, 0), colour, Enum.Material.Slate) :: Part
+		top.Shape = Enum.PartType.Cylinder
+	elseif kind == 2 then
+		-- A stone cross.
+		kit.piece(model, "GraveCross", Vector3.new(0.45, 3.4, 0.45), lean * CFrame.new(0, 1.2, 0), colour, Enum.Material.Marble)
+		kit.piece(model, "GraveCross", Vector3.new(1.8, 0.45, 0.45), lean * CFrame.new(0, 2.1, 0), colour, Enum.Material.Marble)
+	else
+		-- A tall slab with a stepped top.
+		kit.piece(model, "Headstone", Vector3.new(1.7, 2.8, 0.5), lean * CFrame.new(0, 0.9, 0), colour, Enum.Material.Slate)
+		kit.piece(model, "HeadstoneTop", Vector3.new(1.2, 0.5, 0.55), lean * CFrame.new(0, 2.5, 0), colour, Enum.Material.Slate)
+	end
+	-- The grave in front of it.
+	kit.piece(model, "GraveMound", Vector3.new(1.8, 0.4, 3.4), frame * CFrame.new(0, 0, -2), Color3.fromRGB(70, 58, 46), Enum.Material.Ground)
+end
+
+-- A bare, crooked dead tree with forked branches.
+local function deadTree(kit: Kit, parent: Instance, at: Vector3, height: number, random: Random)
+	local model = Instance.new("Model")
+	model.Name = "DeadTree"
+	model.Parent = parent
+	local lean = Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)) * height * 0.08
+	local middle = at + Vector3.new(0, height * 0.5, 0) + lean
+	local top = middle + Vector3.new(0, height * 0.45, 0) - lean * 0.6
+	local width = height * 0.07
+	kit.beam(model, "DeadTrunk", at - Vector3.new(0, 0.6, 0), middle, width, DEAD_WOOD, Enum.Material.Wood)
+	kit.beam(model, "DeadTrunk", middle, top, width * 0.7, DEAD_WOOD, Enum.Material.Wood)
+	local yaw = random:NextNumber(0, math.pi * 2)
+	for branch = 1, random:NextInteger(3, 5) do
+		local angle = yaw + branch * 2.3
+		local out = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local t = random:NextNumber(0.45, 0.95)
+		local from = if t < 0.5 then at + (middle - at) * (t * 2) else middle + (top - middle) * ((t - 0.5) * 2)
+		local length = height * random:NextNumber(0.22, 0.38)
+		local tip = from + out * length + Vector3.new(0, length * random:NextNumber(0.3, 0.8), 0)
+		kit.beam(model, "DeadBranch", from, tip, width * 0.4, DEAD_WOOD, Enum.Material.Wood)
+		-- Each branch forks into a twig or two.
+		for twig = 1, random:NextInteger(1, 2) do
+			local turn = angle + (if twig == 1 then 0.7 else -0.7)
+			local twigTip = tip + Vector3.new(math.cos(turn), 0, math.sin(turn)) * length * 0.45 + Vector3.new(0, length * random:NextNumber(0.1, 0.45), 0)
+			kit.beam(model, "DeadTwig", tip, twigTip, width * 0.22, DEAD_WOOD, Enum.Material.Wood)
+		end
+	end
+end
+
+-- A carved pumpkin with a candle-lit face, turned to `facing`.
+local function pumpkin(kit: Kit, parent: Instance, at: Vector3, facing: Vector3, size: number, lit: boolean)
+	local model = Instance.new("Model")
+	model.Name = "JackOLantern"
+	model.Parent = parent
+	local frame = CFrame.lookAt(at + Vector3.new(0, size * 0.42, 0), at + Vector3.new(facing.X, size * 0.42, facing.Z))
+	local body = kit.piece(model, "Pumpkin", Vector3.new(size, size, size), frame, PUMPKIN, Enum.Material.SmoothPlastic) :: Part
+	body.Shape = Enum.PartType.Ball
+	kit.piece(model, "PumpkinStem", Vector3.new(size * 0.14, size * 0.3, size * 0.14), frame * CFrame.new(0, size * 0.52, 0) * CFrame.Angles(0, 0, 0.25), Color3.fromRGB(86, 96, 46), Enum.Material.Wood)
+	-- Eyes, a nose and a jagged grin glowing from inside.
+	local depth = -size * 0.47
+	for _, x in { -0.2, 0.2 } do
+		kit.piece(model, "PumpkinEye", Vector3.new(size * 0.18, size * 0.16, 0.12), frame * CFrame.new(x * size, size * 0.1, depth) * CFrame.Angles(0, 0, x * 2), CANDLE, Enum.Material.Neon)
+	end
+	kit.piece(model, "PumpkinNose", Vector3.new(size * 0.1, size * 0.1, 0.12), frame * CFrame.new(0, -size * 0.03, depth - 0.02), CANDLE, Enum.Material.Neon)
+	kit.piece(model, "PumpkinGrin", Vector3.new(size * 0.5, size * 0.1, 0.12), frame * CFrame.new(0, -size * 0.18, depth + 0.05), CANDLE, Enum.Material.Neon)
+	for _, x in { -0.12, 0.12 } do
+		kit.piece(model, "PumpkinTooth", Vector3.new(size * 0.08, size * 0.06, 0.13), frame * CFrame.new(x * size, -size * 0.13, depth + 0.03), PUMPKIN, Enum.Material.SmoothPlastic)
+	end
+	if lit then light(body, Color3.fromRGB(255, 150, 60), 9, 1) end
+end
+
+-- The cemetery gate where the trail leaves the camp: stone pillars with ball
+-- finials, an iron arch with spikes and a green lantern, its two iron doors
+-- swung wide open beside the trail.
+local function gate(kit: Kit, parent: Instance, frame: CFrame, span: number)
+	local model = Instance.new("Model")
+	model.Name = "CemeteryGate"
+	model.Parent = parent
+	local pillar = 8
+	for _, side in { -1, 1 } do
+		local x = side * (span / 2 + 0.9)
+		local foot = frame * Vector3.new(x, 0, 0)
+		local low = kit.ground(foot.X, foot.Z).Y - frame.Position.Y
+		kit.solid(kit.piece(model, "GatePillar", Vector3.new(1.8, pillar - low + 0.5, 1.8), frame * CFrame.new(x, (pillar + low - 0.5) / 2, 0), DARK_STONE, Enum.Material.Cobblestone))
+		kit.piece(model, "PillarCap", Vector3.new(2.3, 0.5, 2.3), frame * CFrame.new(x, pillar + 0.25, 0), STONE, Enum.Material.Slate)
+		local finial = kit.piece(model, "PillarFinial", Vector3.new(1.3, 1.3, 1.3), frame * CFrame.new(x, pillar + 1.1, 0), STONE, Enum.Material.Slate) :: Part
+		finial.Shape = Enum.PartType.Ball
+		-- The doors, swung open towards the camp.
+		local hinge = frame * CFrame.new(side * span / 2, 0, 0) * CFrame.Angles(0, side * math.rad(-82), 0)
+		local door = span / 2 - 0.2
+		for bar = 0, 5 do
+			local bx = -side * (0.2 + bar * door / 5)
+			kit.piece(model, "GateBar", Vector3.new(0.14, 6.2, 0.14), hinge * CFrame.new(bx, 3.3, 0), IRON, Enum.Material.Metal)
+			kit.piece(model, "GateSpike", Vector3.new(0.3, 0.45, 0.3), hinge * CFrame.new(bx, 6.6, 0) * CFrame.Angles(0, math.pi / 4, 0), IRON, Enum.Material.Metal)
+		end
+		for _, y in { 1, 5.6 } do
+			kit.piece(model, "GateRail", Vector3.new(door, 0.16, 0.16), hinge * CFrame.new(-side * (0.2 + door / 2), y, 0), IRON, Enum.Material.Metal)
+		end
+	end
+	-- The arch: a curve of iron between the pillar tops, spiked along its crown.
+	local segments = 8
+	local radius = span / 2 + 0.9
+	local rise = 2.6
+	local previous: Vector3? = nil
+	for i = 0, segments do
+		local t = i / segments
+		local angle = math.pi * t
+		local point = frame * Vector3.new(-math.cos(angle) * radius, pillar + 1.6 + math.sin(angle) * rise, 0)
+		if previous then
+			kit.beam(model, "GateArch", previous, point, 0.22, IRON, Enum.Material.Metal)
+			kit.beam(model, "GateArch", previous - Vector3.new(0, 0.6, 0), point - Vector3.new(0, 0.6, 0), 0.14, IRON, Enum.Material.Metal)
+		end
+		if i > 0 and i < segments then
+			kit.piece(model, "ArchSpike", Vector3.new(0.12, 0.8, 0.12), CFrame.new(point + Vector3.new(0, 0.5, 0)), IRON, Enum.Material.Metal)
+		end
+		previous = point
+	end
+	-- The lantern hanging from the top of the arch.
+	local hang = frame * Vector3.new(0, pillar + 1.6 + rise, 0)
+	kit.piece(model, "LanternChain", Vector3.new(0.08, 1.2, 0.08), CFrame.new(hang - Vector3.new(0, 0.6, 0)), IRON, Enum.Material.Metal)
+	kit.piece(model, "LanternCage", Vector3.new(0.8, 0.12, 0.8), CFrame.new(hang - Vector3.new(0, 1.25, 0)), IRON, Enum.Material.Metal)
+	local lamp = kit.piece(model, "GhostLantern", Vector3.new(0.55, 0.8, 0.55), CFrame.new(hang - Vector3.new(0, 1.75, 0)), GHOST, Enum.Material.Neon)
+	lamp.CastShadow = false
+	light(lamp, GHOST, 14, 1.2)
+end
+
+-- A stretch of spiked iron fence from `a` to `b`, standing on the ground.
+local function fence(kit: Kit, parent: Instance, a: Vector3, b: Vector3)
+	local length = (b - a).Magnitude
+	local count = math.max(1, math.ceil(length / 2.4))
+	local tops: { Vector3 } = {}
+	for i = 0, count do
+		local at = a + (b - a) * (i / count)
+		local ground = kit.ground(at.X, at.Z)
+		kit.solid(kit.piece(parent, "FencePost", Vector3.new(0.22, 3.6, 0.22), CFrame.new(ground + Vector3.new(0, 1.5, 0)), IRON, Enum.Material.Metal))
+		kit.piece(parent, "FenceSpike", Vector3.new(0.34, 0.5, 0.34), CFrame.new(ground + Vector3.new(0, 3.5, 0)) * CFrame.Angles(0, math.pi / 4, 0), IRON, Enum.Material.Metal)
+		tops[i + 1] = ground
+	end
+	for i = 1, count do
+		local from, to = tops[i], tops[i + 1]
+		for _, y in { 0.7, 2.7 } do
+			local p, q = from + Vector3.new(0, y, 0), to + Vector3.new(0, y, 0)
+			kit.solid(kit.piece(parent, "FenceRail", Vector3.new(0.12, 0.12, (q - p).Magnitude + 0.1), CFrame.lookAt((p + q) / 2, q), IRON, Enum.Material.Metal))
+		end
+	end
+end
+
+function Haunted.build(kit: Kit): Folder
+	local folder = Instance.new("Folder")
+	folder.Name = "HauntedScenery"
+	-- Its own seed, so the alpine valley is laid out the same with or without it.
+	local random = Random.new(1031)
+	local placed: { Vector3 } = {}
+	local function roomy(at: Vector3, gap: number): boolean
+		for _, other in placed do
+			if (Vector3.new(at.X - other.X, 0, at.Z - other.Z)).Magnitude < gap then return false end
+		end
+		return true
+	end
+	local lit = 0
+	local function lantern(at: Vector3, facing: Vector3, size: number)
+		-- A few of them cast light; the rest just glow.
+		pumpkin(kit, folder, at, facing, size, lit < 3 and size > 1.6)
+		if size > 1.6 and lit < 3 then lit += 1 end
+		table.insert(placed, at)
+	end
+
+	-- The mausoleum and its graveyard first, so the dead trees stand round them.
+	local base, drop = nil, 0
+	for _, gap in { 12, 8, 5 } do
+		base, drop = cryptSite(kit, random, gap)
+		if base then break end
+	end
+	if base then
+		local frame = base :: CFrame
+		crypt(kit, folder, frame, drop)
+		table.insert(placed, frame.Position)
+		local w, d = Haunted.CRYPT.X + 2, Haunted.CRYPT.Z + 6
+		local toCamp = Vector3.new(kit.camp.X - frame.Position.X, 0, kit.camp.Z - frame.Position.Z).Unit
+		-- Somewhere open on the ground near the crypt, in its frame, or nil.
+		local function spot(x: number, z: number, margin: number): Vector3?
+			local at = frame * Vector3.new(x, 0, z)
+			local ground = kit.ground(at.X, at.Z)
+			if kit.clear(ground, margin) or not kit.spaced(ground, margin) or kit.steepness(at.X, at.Z) > 0.8 then return nil end
+			return ground
+		end
+		-- The graveyard beside it: rows of headstones facing the camp, behind
+		-- a spiked iron fence with an opening at the front.
+		local yard = Instance.new("Model")
+		yard.Name = "Graveyard"
+		yard.Parent = folder
+		local spacing = Haunted.GRAVES.spacing
+		local left = -(w / 2 + 3)
+		local right = left - Haunted.GRAVES.columns * spacing - 1
+		local front, back = -d / 2 + 1, -d / 2 + 1 + Haunted.GRAVES.rows * spacing + 1
+		for column = 0, Haunted.GRAVES.columns - 1 do
+			for row = 0, Haunted.GRAVES.rows - 1 do
+				local x = left - 0.5 - spacing / 2 - column * spacing + random:NextNumber(-0.4, 0.4)
+				local z = front + 3.4 + row * spacing + random:NextNumber(-0.3, 0.3)
+				local at = spot(x, z, 1.2)
+				if at then
+					local turn = random:NextNumber(-0.12, 0.12)
+					headstone(kit, yard, CFrame.new(at :: Vector3) * frame.Rotation * CFrame.Angles(0, turn, 0), random:NextInteger(1, 3), random)
+				end
+			end
+		end
+		-- The fence runs round the yard, open in the middle of its front.
+		local corners = { frame * Vector3.new(left, 0, front), frame * Vector3.new(right, 0, front), frame * Vector3.new(right, 0, back), frame * Vector3.new(left, 0, back) }
+		local gapAt = (left + right) / 2
+		fence(kit, yard, frame * Vector3.new(left, 0, front), frame * Vector3.new(gapAt + 1.6, 0, front))
+		fence(kit, yard, frame * Vector3.new(gapAt - 1.6, 0, front), corners[2])
+		fence(kit, yard, corners[2], corners[3])
+		fence(kit, yard, corners[3], corners[4])
+		fence(kit, yard, corners[4], corners[1])
+		-- Jack-o'-lanterns on the crypt steps and at the graveyard's opening.
+		for _, offset in { Vector3.new(-3.6, 0, -(d / 2 + 2)), Vector3.new(3.6, 0, -(d / 2 + 2)), Vector3.new(gapAt - 2.4, 0, front - 1), Vector3.new(gapAt + 2.6, 0, front - 1.2) } do
+			local at = spot(offset.X, offset.Z, 0.5)
+			if at then lantern(at :: Vector3, toCamp, if offset.Z < -(d / 2 + 1) then 1.8 else 1.4) end
+		end
+		-- Will-o'-wisps drifting over the graves.
+		for i = 1, 4 do
+			local at = frame * Vector3.new(random:NextNumber(right + 1, left - 1), 0, random:NextNumber(front + 2, back - 1))
+			local wisp = kit.piece(folder, "WillOWisp", Vector3.new(0.6, 0.6, 0.6), CFrame.new(kit.ground(at.X, at.Z) + Vector3.new(0, random:NextNumber(2.5, 4.5), 0)), WISP, Enum.Material.Neon) :: Part
+			wisp.Shape = Enum.PartType.Ball
+			wisp.Transparency = 0.2
+			if i == 1 then
+				local sparkle = Instance.new("ParticleEmitter")
+				sparkle.Name = "WispGlow"
+				sparkle.Rate = 6
+				sparkle.Lifetime = NumberRange.new(1, 2)
+				sparkle.Speed = NumberRange.new(0.2, 0.6)
+				sparkle.Color = ColorSequence.new(WISP)
+				sparkle.LightEmission = 1
+				sparkle.Size = NumberSequence.new(0.25, 0)
+				sparkle.Parent = wisp
+			end
+		end
+	else
+		warn("[DiamondRush] Haunted: no open ground for the mausoleum, so it is left out.")
+	end
+
+	-- Dead trees across the meadows and round the camp.
+	local trees = 0
+	for attempt = 1, 2400 do
+		if trees >= 32 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(kit.radius + 8, 220)
+		local at = kit.ground(math.cos(angle) * distance, math.sin(angle) * distance)
+		local farFromCrypt = base == nil or (Vector3.new(at.X, 0, at.Z) - Vector3.new((base :: CFrame).Position.X, 0, (base :: CFrame).Position.Z)).Magnitude > 34
+		if farFromCrypt and not kit.clear(at, 4) and at.Y < 36 and kit.steepness(at.X, at.Z) < 0.6 and kit.spaced(at, 5) and roomy(at, 10) then
+			deadTree(kit, folder, at, random:NextNumber(9, 16), random)
+			table.insert(placed, at)
+			trees += 1
+		end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	-- Wisps drifting over the lake.
+	for i = 1, 4 do
+		local angle = i * math.pi / 2 + random:NextNumber(-0.4, 0.4)
+		local at = kit.lake + Vector3.new(math.cos(angle) * random:NextNumber(6, 20), random:NextNumber(2, 4), math.sin(angle) * random:NextNumber(5, 15))
+		local wisp = kit.piece(folder, "WillOWisp", Vector3.new(0.6, 0.6, 0.6), CFrame.new(at), WISP, Enum.Material.Neon) :: Part
+		wisp.Shape = Enum.PartType.Ball
+		wisp.Transparency = 0.2
+	end
+	-- The gate stands just past the spawn, where the trail leaves the camp,
+	-- framing the mountain from the camp; its pillars stay beside the trail.
+	local gateZ = kit.camp.Z - 9
+	local gateAt = kit.ground(kit.pathCentre(gateZ), gateZ)
+	local span = 7
+	gate(kit, folder, CFrame.new(gateAt), span)
+	-- Jack-o'-lanterns outside the gate pillars and round the camp, looking at the spawn.
+	local spots = { gateAt + Vector3.new(-(span / 2 + 3), 0, 1.2), gateAt + Vector3.new(span / 2 + 3, 0, 1.2) }
+	for _, offset in { Vector3.new(-13, 0, -3.5), Vector3.new(13, 0, -4.5), Vector3.new(-11.6, 0, -4.4) } do
+		table.insert(spots, kit.camp + offset)
+	end
+	for index, spot in spots do
+		local at = kit.ground(spot.X, spot.Z)
+		lantern(at, Vector3.new(kit.camp.X - at.X, 0, kit.camp.Z + 2 - at.Z), if index == 3 or index == 4 then 1.8 else 1.4)
+	end
+	return folder
+end
+
+return Haunted
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="27">
         <Properties>
           <string name="Name">Leaderboards</string>
           <string name="Source"><![CDATA[--!strict
@@ -7213,7 +8083,7 @@ return Leaderboards
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="25">
+      <Item class="ModuleScript" referent="28">
         <Properties>
           <string name="Name">Lobby</string>
           <string name="Source"><![CDATA[--!strict
@@ -7522,7 +8392,7 @@ return Lobby
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="26">
+      <Item class="ModuleScript" referent="29">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
@@ -7841,7 +8711,7 @@ return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="27">
+      <Item class="ModuleScript" referent="30">
         <Properties>
           <string name="Name">Sakura</string>
           <string name="Source"><![CDATA[--!strict
@@ -8231,7 +9101,7 @@ return Sakura
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="28">
+      <Item class="ModuleScript" referent="31">
         <Properties>
           <string name="Name">ScenePack</string>
           <string name="Source"><![CDATA[--!strict
@@ -8385,7 +9255,7 @@ return ScenePack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="29">
+      <Item class="ModuleScript" referent="32">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -8399,21 +9269,28 @@ return ScenePack
 -- low-poly wedge trees. The look relies on the place's Future lighting and
 -- 2022 materials (see default.project.json).
 --
--- Three themes can be switched live (Scenery.setTheme): the alpine default;
+-- Five themes can be switched live (Scenery.setTheme): the alpine default;
 -- sakura, which adds blossoming cherry trees, a torii gate, stone lanterns and
--- a shrine (see Sakura) under a soft pink spring light; and farm, which fences
+-- a shrine (see Sakura) under a soft pink spring light; farm, which fences
 -- the arena in as a ranch corral with a gate on the trail and adds a barn,
--- silo, cornfield and cows (see Farm) under a warm harvest sun. The alpine
--- theme has a few things of its own, the camp's festoon lights and a
--- watchtower (see Watchtower), which make way for the others.
+-- silo, cornfield and cows (see Farm) under a warm harvest sun; desert, red
+-- sand and mesas with cacti, an oasis and a stepped pyramid (see Desert)
+-- under a hot sun; and haunted, a graveyard, a mausoleum and dead trees (see
+-- Haunted) in moonlit mist. The alpine theme has a few things of its own, the
+-- camp's festoon lights and a watchtower (see Watchtower), which make way for
+-- the others, and a theme can hide some of the valley's trees and plants
+-- (see SceneryThemes): the desert has no forest.
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local PartShapes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))
+local SceneryThemes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("SceneryThemes"))
 local ScenePack = require(script.Parent.ScenePack)
 local Sakura = require(script.Parent.Sakura)
 local Watchtower = require(script.Parent.Watchtower)
 local Farm = require(script.Parent.Farm)
+local Desert = require(script.Parent.Desert)
+local Haunted = require(script.Parent.Haunted)
 
 local Scenery = {}
 local random = Random.new(4207)
@@ -8490,7 +9367,7 @@ end
 
 -- A low-poly conifer: a trunk and stacked hexagonal cones, each cone six
 -- wedges sloping outward. Higher trees carry snow on their top tier.
-local function conifer(parent: Instance, at: Vector3, height: number, snowy: boolean)
+local function conifer(parent: Instance, at: Vector3, height: number, snowy: boolean): Model
 	local model = Instance.new("Model")
 	model.Name = "Conifer"
 	model.Parent = parent
@@ -8515,6 +9392,7 @@ local function conifer(parent: Instance, at: Vector3, height: number, snowy: boo
 				if top then Enum.Material.Snow else Enum.Material.LeafyGrass, "WedgePart")
 		end
 	end
+	return model
 end
 
 -- A faceted broadleaf canopy: a hexagonal cone over an inverted one.
@@ -8532,7 +9410,7 @@ local function canopy(parent: Instance, centre: Vector3, radius: number, colour:
 	end
 end
 
-local function birch(parent: Instance, at: Vector3, height: number)
+local function birch(parent: Instance, at: Vector3, height: number): Model
 	local model = Instance.new("Model")
 	model.Name = "Birch"
 	model.Parent = parent
@@ -8546,6 +9424,7 @@ local function birch(parent: Instance, at: Vector3, height: number)
 		local side = Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)).Unit * height * 0.18
 		canopy(model, top + side - Vector3.new(0, height * 0.12, 0), height * 0.2, shade(leaves, 1.06), random:NextNumber(0, math.pi))
 	end
+	return model
 end
 
 -- Terrain height (studs) at a point, before the arena, camp, lake and path are cut in.
@@ -8672,9 +9551,10 @@ export type Look = {
 	clouds: { cover: number, density: number, color: Color3 },
 	terrain: { [Enum.Material]: Color3 },
 	water: Color3,
+	moon: number?, -- the moon's size in the sky (degrees), for night themes
 }
 
-Scenery.THEMES = { "default", "sakura", "farm" }
+Scenery.THEMES = { "default", "sakura", "farm", "desert", "haunted" }
 Scenery.LOOKS = {
 	-- A clear late-afternoon alpine sun, soft sky light, aerial haze and a
 	-- gentle filmic grade.
@@ -8748,22 +9628,81 @@ Scenery.LOOKS = {
 		},
 		water = Color3.fromRGB(52, 96, 98),
 	},
+	-- A desert canyon at the hottest part of the day: a high white sun
+	-- through a dusty amber haze, red sand and sandstone, bleached peaks, a
+	-- turquoise oasis and an almost cloudless sky.
+	desert = {
+		clock = 13.9,
+		brightness = 3.1,
+		ambient = Color3.fromRGB(96, 82, 70),
+		outdoorAmbient = Color3.fromRGB(158, 138, 116),
+		colorShiftTop = Color3.fromRGB(64, 38, 12),
+		exposure = 0.04,
+		atmosphere = { density = 0.3, offset = 0.24, color = Color3.fromRGB(238, 212, 168), decay = Color3.fromRGB(190, 134, 92), glare = 0.6, haze = 2.2 },
+		grade = { contrast = 0.1, saturation = 0.1, tint = Color3.fromRGB(255, 240, 220) },
+		bloom = { intensity = 0.5, size = 24, threshold = 1.25 },
+		rays = 0.1,
+		clouds = { cover = 0.12, density = 0.3, color = Color3.fromRGB(255, 248, 236) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(212, 174, 120),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(202, 164, 112),
+			[Enum.Material.Ground] = Color3.fromRGB(186, 128, 84),
+			[Enum.Material.Mud] = Color3.fromRGB(150, 108, 74),
+			[Enum.Material.Rock] = Color3.fromRGB(176, 100, 68),
+			[Enum.Material.Snow] = Color3.fromRGB(228, 200, 152),
+		},
+		water = Color3.fromRGB(38, 128, 130),
+	},
+	-- A haunted night: a big full moon over cold blue mist, dark grass and
+	-- stone, grey clouds, and lanterns that glow through the fog. The ambient
+	-- light stays high enough to see the rock you dig.
+	haunted = {
+		clock = 0,
+		brightness = 2.2,
+		ambient = Color3.fromRGB(72, 76, 102),
+		outdoorAmbient = Color3.fromRGB(112, 118, 156),
+		colorShiftTop = Color3.fromRGB(20, 26, 46),
+		exposure = 0.35,
+		atmosphere = { density = 0.42, offset = 0.06, color = Color3.fromRGB(112, 122, 144), decay = Color3.fromRGB(58, 62, 86), glare = 0, haze = 2.6 },
+		grade = { contrast = 0.16, saturation = -0.22, tint = Color3.fromRGB(214, 224, 255) },
+		bloom = { intensity = 1, size = 30, threshold = 0.9 },
+		rays = 0,
+		clouds = { cover = 0.6, density = 0.55, color = Color3.fromRGB(92, 98, 118) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(60, 70, 50),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(50, 60, 44),
+			[Enum.Material.Ground] = Color3.fromRGB(68, 58, 48),
+			[Enum.Material.Mud] = Color3.fromRGB(46, 42, 38),
+			[Enum.Material.Rock] = Color3.fromRGB(86, 86, 94),
+			[Enum.Material.Snow] = Color3.fromRGB(178, 186, 204),
+		},
+		water = Color3.fromRGB(24, 36, 48),
+		moon = 28,
+	},
 } :: { [string]: Look }
 
 -- Scenery that belongs to one theme: shown with it, kept in ServerStorage otherwise.
-local themed: { alpine: Instance?, home: Instance?, sakura: Instance?, farm: Instance? } = {}
-local effects: { atmosphere: Atmosphere, grade: ColorCorrectionEffect, bloom: BloomEffect, rays: SunRaysEffect, clouds: Clouds }? = nil
+local themed: { alpine: Instance?, home: Instance? } = {}
+-- Each theme's own scenery folder, by theme name.
+local themeScenery: { [string]: Instance } = {}
+-- The valley's trees and plants, which some themes hide (see SceneryThemes).
+local vegetation: { Instance } = {}
+local effects: { atmosphere: Atmosphere, grade: ColorCorrectionEffect, bloom: BloomEffect, rays: SunRaysEffect, clouds: Clouds, sky: Sky }? = nil
 local current: string? = nil
 
--- Switches the valley to a theme ("default", "sakura" or "farm") straight away.
+-- Switches the valley to a theme (one of THEMES) straight away.
 -- Returns false for an unknown theme, or before the scenery is built.
 function Scenery.setTheme(name: string): boolean
 	local look = Scenery.LOOKS[name]
 	if look == nil or effects == nil then return false end
 	local fx = effects :: any
 	if themed.alpine then themed.alpine.Parent = if name == "default" then themed.home else ServerStorage end
-	if themed.sakura then themed.sakura.Parent = if name == "sakura" then workspace else ServerStorage end
-	if themed.farm then themed.farm.Parent = if name == "farm" then workspace else ServerStorage end
+	for theme, holder in themeScenery do
+		holder.Parent = if name == theme then workspace else ServerStorage
+	end
+	for _, plant in vegetation do
+		plant.Parent = if SceneryThemes.hides(name, plant.Name) then ServerStorage else themed.home
+	end
 	local terrain = workspace.Terrain
 	for material, colour in look.terrain do
 		terrain:SetMaterialColor(material, colour)
@@ -8791,6 +9730,7 @@ function Scenery.setTheme(name: string): boolean
 	fx.clouds.Cover = look.clouds.cover
 	fx.clouds.Density = look.clouds.density
 	fx.clouds.Color = look.clouds.color
+	fx.sky.MoonAngularSize = look.moon or 11
 	current = name
 	return true
 end
@@ -9184,6 +10124,11 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	lantern(folder, camp + Vector3.new(-9, 0, -8))
 	lantern(folder, camp + Vector3.new(9, 0, -8))
 
+	-- The valley's trees and plants that some theme hides (see SceneryThemes).
+	for _, child in folder:GetChildren() do
+		if SceneryThemes.themed(child.Name) then table.insert(vegetation, child) end
+	end
+
 	-- What the themes' own scenery may use, to stay off the arena, camp,
 	-- trail, lake and boards and clear of the valley's trees and rocks.
 	local kit: Sakura.Kit = {
@@ -9204,14 +10149,12 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	Watchtower.build(kit, alpine)
 	themed.alpine = alpine
 	themed.home = folder
-	-- The sakura theme's scenery, kept out of view until it is chosen.
-	local sakura = Sakura.build(kit)
-	sakura.Parent = ServerStorage
-	themed.sakura = sakura
-	-- The farm theme's ranch, likewise.
-	local farm = Farm.build(kit)
-	farm.Parent = ServerStorage
-	themed.farm = farm
+	-- Each theme's own scenery, kept out of view until it is chosen.
+	for theme, builder in { sakura = Sakura.build, farm = Farm.build, desert = Desert.build, haunted = Haunted.build } :: { [string]: (Sakura.Kit) -> Folder } do
+		local holder = builder(kit)
+		holder.Parent = ServerStorage
+		themeScenery[theme] = holder
+	end
 
 	-- Light that every theme shares; each theme sets the rest (see LOOKS).
 	-- Technology is Future (set in the place file).
@@ -9238,7 +10181,7 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	sky.SunAngularSize = 12
 	sky.CelestialBodiesShown = true
 	sky.Parent = Lighting
-	effects = { atmosphere = atmosphere, grade = grade, bloom = bloom, rays = rays, clouds = clouds }
+	effects = { atmosphere = atmosphere, grade = grade, bloom = bloom, rays = rays, clouds = clouds, sky = sky }
 	Scenery.setTheme(theme or "default")
 end
 
@@ -9246,7 +10189,7 @@ return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="30">
+      <Item class="ModuleScript" referent="33">
         <Properties>
           <string name="Name">Statue</string>
           <string name="Source"><![CDATA[--!strict
@@ -9379,7 +10322,7 @@ return Statue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="31">
+      <Item class="ModuleScript" referent="34">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -9465,7 +10408,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="32">
+      <Item class="ModuleScript" referent="35">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -9613,7 +10556,7 @@ return TikTokFeed
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="33">
+      <Item class="ModuleScript" referent="36">
         <Properties>
           <string name="Name">Watchtower</string>
           <string name="Source"><![CDATA[--!strict
@@ -9811,15 +10754,15 @@ return Watchtower
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="34">
+  <Item class="StarterPlayer" referent="37">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="35">
+    <Item class="StarterPlayerScripts" referent="38">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="36">
+      <Item class="LocalScript" referent="39">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -10627,15 +11570,22 @@ panelButtons({
 })
 
 panelLabel("MAP THEME (changes for everyone straight away)")
-local themeButtons = panelButtons({
-	{ "Alpine", function() send("setTheme", "default") end },
-	{ "Sakura", function() send("setTheme", "sakura") end },
-	{ "Farm", function() send("setTheme", "farm") end },
-})
+local THEME_BUTTONS = { { "Alpine", "default" }, { "Sakura", "sakura" }, { "Farm", "farm" }, { "Desert", "desert" }, { "Haunted", "haunted" } }
+local themeButtons: { TextButton } = {}
+-- Three to a row, so the names fit.
+for first = 1, #THEME_BUTTONS, 3 do
+	local row = {}
+	for i = first, math.min(first + 2, #THEME_BUTTONS) do
+		local name = THEME_BUTTONS[i][2]
+		table.insert(row, { THEME_BUTTONS[i][1], function() send("setTheme", name) end })
+	end
+	for _, button in panelButtons(row) do table.insert(themeButtons, button) end
+end
 -- The theme showing now is lit up.
 local function refreshTheme()
 	local theme = attr("Theme", "default")
-	for i, name in { "default", "sakura", "farm" } do
+	for i, entry in THEME_BUTTONS do
+		local name = entry[2]
 		themeButtons[i].BackgroundColor3 = if theme == name then SELECTED else BUTTON
 	end
 end
@@ -11260,7 +12210,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">BirdView</string>
             <string name="Source"><![CDATA[--!strict
@@ -11407,7 +12357,7 @@ return BirdView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="41">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -11892,7 +12842,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="39">
+        <Item class="ModuleScript" referent="42">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -13149,7 +14099,7 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="40">
+        <Item class="ModuleScript" referent="43">
           <Properties>
             <string name="Name">HowToPlay</string>
             <string name="Source"><![CDATA[--!strict
@@ -13427,7 +14377,7 @@ return HowToPlay
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="41">
+        <Item class="ModuleScript" referent="44">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
@@ -13840,7 +14790,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="42">
+        <Item class="ModuleScript" referent="45">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -14341,7 +15291,7 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="43">
+        <Item class="ModuleScript" referent="46">
           <Properties>
             <string name="Name">PetalView</string>
             <string name="Source"><![CDATA[--!strict
@@ -14443,7 +15393,7 @@ return PetalView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="44">
+        <Item class="ModuleScript" referent="47">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -14571,7 +15521,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="45">
+        <Item class="ModuleScript" referent="48">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -14579,11 +15529,14 @@ return RebuildEffects
 -- in game (see the server's ScenePack): each mesh is unpacked from
 -- ScenePackData once, built as an EditableMesh and shared by all of its copies.
 -- The work is spread over frames, smallest meshes first, so the game keeps
--- running smoothly while the valley fills in over a few seconds.
+-- running smoothly while the valley fills in over a few seconds. Trees and
+-- plants a map theme hides (see SceneryThemes) are taken out of view while
+-- that theme shows.
 local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local MeshPack = require(Shared:WaitForChild("MeshPack"))
+local SceneryThemes = require(Shared:WaitForChild("SceneryThemes"))
 
 local SceneryView = {}
 
@@ -14592,6 +15545,17 @@ local BUDGET = 0.004 -- seconds of building per frame
 
 -- Built meshes and their templates stay referenced while their copies show.
 local kept: { any } = {}
+-- Copies some theme may hide, and the theme showing now.
+local themed: { MeshPart } = {}
+local theme: string? = nil
+local folder: Folder? = nil
+
+-- Takes the copies the theme hides out of view and puts the rest back.
+local function applyTheme()
+	for _, copy in themed do
+		copy.Parent = if SceneryThemes.hides(theme, copy.Name) then nil else folder
+	end
+end
 
 local function build(data: { [string]: MeshPack.Entry }, placements: { MeshPack.Placement })
 	local byName: { [string]: { MeshPack.Placement } } = {}
@@ -14612,9 +15576,10 @@ local function build(data: { [string]: MeshPack.Entry }, placements: { MeshPack.
 	table.sort(names, function(a, b)
 		return data[a].triangles < data[b].triangles
 	end)
-	local folder = Instance.new("Folder")
-	folder.Name = "SceneryMeshes"
-	folder.Parent = workspace
+	local meshes = Instance.new("Folder")
+	meshes.Name = "SceneryMeshes"
+	meshes.Parent = workspace
+	folder = meshes
 	local started = os.clock()
 	local function pause()
 		if os.clock() - started > BUDGET then
@@ -14655,7 +15620,12 @@ local function build(data: { [string]: MeshPack.Entry }, placements: { MeshPack.
 				copy.Size = size
 				copy.CFrame = MeshPack.frame(placement.ground, size.Y, placement.yaw, placement.tilt, placement.sink)
 				MeshPack.dress(copy, placement.collide, placement.shadow)
-				copy.Parent = folder
+				if SceneryThemes.themed(name) then
+					table.insert(themed, copy)
+					copy.Parent = if SceneryThemes.hides(theme, name) then nil else meshes
+				else
+					copy.Parent = meshes
+				end
 				copies += 1
 				pause()
 			end
@@ -14676,6 +15646,17 @@ function SceneryView.start()
 		-- Only published when the server builds the pack in game.
 		local value = ReplicatedStorage:WaitForChild(PLACEMENTS, math.huge) :: StringValue
 		local data: { [string]: MeshPack.Entry } = require(Shared:WaitForChild("ScenePackData")) :: any
+		-- Follow the map theme (the server's State "Theme").
+		local state = ReplicatedStorage:FindFirstChild("DiamondRushState") or ReplicatedStorage:WaitForChild("DiamondRushState", 10)
+		if state then
+			local function refresh()
+				local value = state:GetAttribute("Theme")
+				theme = if type(value) == "string" then value else nil
+				applyTheme()
+			end
+			state:GetAttributeChangedSignal("Theme"):Connect(refresh)
+			refresh()
+		end
 		build(data, MeshPack.decodePlacements(value.Value))
 	end)
 end
@@ -14687,12 +15668,12 @@ return SceneryView
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="46">
+  <Item class="Workspace" referent="49">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="47">
+    <Item class="Terrain" referent="50">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>

@@ -3,11 +3,14 @@
 -- in game (see the server's ScenePack): each mesh is unpacked from
 -- ScenePackData once, built as an EditableMesh and shared by all of its copies.
 -- The work is spread over frames, smallest meshes first, so the game keeps
--- running smoothly while the valley fills in over a few seconds.
+-- running smoothly while the valley fills in over a few seconds. Trees and
+-- plants a map theme hides (see SceneryThemes) are taken out of view while
+-- that theme shows.
 local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local MeshPack = require(Shared:WaitForChild("MeshPack"))
+local SceneryThemes = require(Shared:WaitForChild("SceneryThemes"))
 
 local SceneryView = {}
 
@@ -16,6 +19,17 @@ local BUDGET = 0.004 -- seconds of building per frame
 
 -- Built meshes and their templates stay referenced while their copies show.
 local kept: { any } = {}
+-- Copies some theme may hide, and the theme showing now.
+local themed: { MeshPart } = {}
+local theme: string? = nil
+local folder: Folder? = nil
+
+-- Takes the copies the theme hides out of view and puts the rest back.
+local function applyTheme()
+	for _, copy in themed do
+		copy.Parent = if SceneryThemes.hides(theme, copy.Name) then nil else folder
+	end
+end
 
 local function build(data: { [string]: MeshPack.Entry }, placements: { MeshPack.Placement })
 	local byName: { [string]: { MeshPack.Placement } } = {}
@@ -36,9 +50,10 @@ local function build(data: { [string]: MeshPack.Entry }, placements: { MeshPack.
 	table.sort(names, function(a, b)
 		return data[a].triangles < data[b].triangles
 	end)
-	local folder = Instance.new("Folder")
-	folder.Name = "SceneryMeshes"
-	folder.Parent = workspace
+	local meshes = Instance.new("Folder")
+	meshes.Name = "SceneryMeshes"
+	meshes.Parent = workspace
+	folder = meshes
 	local started = os.clock()
 	local function pause()
 		if os.clock() - started > BUDGET then
@@ -79,7 +94,12 @@ local function build(data: { [string]: MeshPack.Entry }, placements: { MeshPack.
 				copy.Size = size
 				copy.CFrame = MeshPack.frame(placement.ground, size.Y, placement.yaw, placement.tilt, placement.sink)
 				MeshPack.dress(copy, placement.collide, placement.shadow)
-				copy.Parent = folder
+				if SceneryThemes.themed(name) then
+					table.insert(themed, copy)
+					copy.Parent = if SceneryThemes.hides(theme, name) then nil else meshes
+				else
+					copy.Parent = meshes
+				end
 				copies += 1
 				pause()
 			end
@@ -100,6 +120,17 @@ function SceneryView.start()
 		-- Only published when the server builds the pack in game.
 		local value = ReplicatedStorage:WaitForChild(PLACEMENTS, math.huge) :: StringValue
 		local data: { [string]: MeshPack.Entry } = require(Shared:WaitForChild("ScenePackData")) :: any
+		-- Follow the map theme (the server's State "Theme").
+		local state = ReplicatedStorage:FindFirstChild("DiamondRushState") or ReplicatedStorage:WaitForChild("DiamondRushState", 10)
+		if state then
+			local function refresh()
+				local value = state:GetAttribute("Theme")
+				theme = if type(value) == "string" then value else nil
+				applyTheme()
+			end
+			state:GetAttributeChangedSignal("Theme"):Connect(refresh)
+			refresh()
+		end
 		build(data, MeshPack.decodePlacements(value.Value))
 	end)
 end

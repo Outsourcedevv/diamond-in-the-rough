@@ -803,15 +803,22 @@ panelButtons({
 })
 
 panelLabel("MAP THEME (changes for everyone straight away)")
-local themeButtons = panelButtons({
-	{ "Alpine", function() send("setTheme", "default") end },
-	{ "Sakura", function() send("setTheme", "sakura") end },
-	{ "Farm", function() send("setTheme", "farm") end },
-})
+local THEME_BUTTONS = { { "Alpine", "default" }, { "Sakura", "sakura" }, { "Farm", "farm" }, { "Desert", "desert" }, { "Haunted", "haunted" } }
+local themeButtons: { TextButton } = {}
+-- Three to a row, so the names fit.
+for first = 1, #THEME_BUTTONS, 3 do
+	local row = {}
+	for i = first, math.min(first + 2, #THEME_BUTTONS) do
+		local name = THEME_BUTTONS[i][2]
+		table.insert(row, { THEME_BUTTONS[i][1], function() send("setTheme", name) end })
+	end
+	for _, button in panelButtons(row) do table.insert(themeButtons, button) end
+end
 -- The theme showing now is lit up.
 local function refreshTheme()
 	local theme = attr("Theme", "default")
-	for i, name in { "default", "sakura", "farm" } do
+	for i, entry in THEME_BUTTONS do
+		local name = entry[2]
 		themeButtons[i].BackgroundColor3 = if theme == name then SELECTED else BUTTON
 	end
 end
