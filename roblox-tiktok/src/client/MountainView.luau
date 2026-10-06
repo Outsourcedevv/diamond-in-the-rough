@@ -30,9 +30,13 @@ local DEBRIS_LIMIT = 24
 local REBUILD_LAYERS = 16
 local REBUILD_STEP = 0.15 -- seconds between rebuild layers, matching the server
 
-local MATERIALS: { Enum.Material } = {}
-for index, layer in RockStyle.LAYERS do
-	MATERIALS[index] = (Enum.Material :: any)[layer.material]
+-- Materials per layer for each skin (stone, or hay: see Skin).
+local MATERIALS: { [string]: { Enum.Material } } = {}
+for skin, palette in RockStyle.SKINS do
+	MATERIALS[skin] = {}
+	for index, layer in palette.layers do
+		MATERIALS[skin][index] = (Enum.Material :: any)[layer.material]
+	end
 end
 
 -- Rotation for every shape code, so a wedge slopes down towards open air and a
@@ -63,6 +67,7 @@ export type View = typeof(setmetatable({} :: {
 	round: number,
 	height: number,
 	blockSize: number,
+	skin: string,
 	ready: boolean,
 	meta: any,
 	sliceStart: number,
@@ -89,6 +94,7 @@ function MountainView.new(): View
 		round = 0,
 		height = 1,
 		blockSize = 0.4,
+		skin = "stone",
 		ready = false,
 		meta = nil,
 		sliceStart = os.clock(),
@@ -183,6 +189,30 @@ function MountainView._handle(self: View, kind: string, payload: any)
 		self:_finishSnapshot()
 	elseif kind == "diff" and self.grid and self.ready and payload.round == self.round then
 		self:_applyDiff(payload)
+	elseif kind == "skin" then
+		self:_repaint(payload)
+	end
+end
+
+-- Reskins the mountain (stone or hay, see Skin), in order with the changes
+-- from the server.
+function MountainView.setSkin(self: View, skin: string)
+	if RockStyle.SKINS[skin] == nil then return end
+	self:push("skin", skin)
+end
+
+-- Every drawn cell keeps its shape and layer and takes the new skin's look.
+function MountainView._repaint(self: View, skin: string)
+	if skin == self.skin then return end
+	self.skin = skin
+	local materials = MATERIALS[skin]
+	local count = 0
+	for key, part in self.parts do
+		local layer, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height, skin)
+		part.Material = materials[layer]
+		part.Color = Color3.fromRGB(r, g, b)
+		count += 1
+		if count % 512 == 0 then self:_pace() end
 	end
 end
 
@@ -237,7 +267,7 @@ function MountainView._finishSnapshot(self: View)
 			for i = 1, math.min(5, #keys) do
 				local key = keys[math.max(1, math.floor(i * #keys / 5))]
 				local shape = RockStyle.shape(grid, key)
-				local _, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height)
+				local _, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height, self.skin)
 				table.insert(samples, {
 					frame = CFrame.new(self:keyPosition(key)) * (self.rotations[shape] or CFrame.identity),
 					size = self.templates[1].Size,
@@ -301,7 +331,7 @@ function MountainView._refresh(self: View, key: number): BasePart?
 		return nil
 	end
 	local shape = RockStyle.shape(grid, key)
-	local layer, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height)
+	local layer, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height, self.skin)
 	local code = shape + layer * 16
 	if code == old then return nil end
 	local kind = RockStyle.kind(shape)
@@ -319,7 +349,7 @@ function MountainView._refresh(self: View, key: number): BasePart?
 	end
 	local stone = part :: BasePart
 	stone.CFrame = CFrame.new(self:keyPosition(key)) * self.rotations[shape]
-	stone.Material = MATERIALS[layer]
+	stone.Material = MATERIALS[self.skin][layer]
 	stone.Color = Color3.fromRGB(r, g, b)
 	if fresh then stone.Parent = self.folder end
 	self.codes[key] = code

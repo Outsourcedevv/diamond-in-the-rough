@@ -21,6 +21,9 @@ def module(path: str) -> str:
     source = (root / path).read_text(encoding="utf-8")
     source = source.replace('require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))', "PartShapes")
     source = source.replace("require(script.Parent.ScenePack)", "ScenePack")
+    source = source.replace("require(script.Parent.Sakura)", "Sakura")
+    source = source.replace("require(script.Parent.Watchtower)", "Watchtower")
+    source = source.replace("require(script.Parent.Farm)", "Farm")
     source = source.replace('require(script.Parent:WaitForChild("Inflate"))', "Inflate")
     source = source.replace('local Shared = ReplicatedStorage:WaitForChild("DiamondRush")\n', "")
     source = source.replace('require(Shared:WaitForChild("MeshPack"))', "MeshPack")
@@ -86,7 +89,8 @@ local DUMP = os.getenv and os.getenv("SCENERY_DUMP") ~= nil or false
 local surface = {}
 local terrain = Instance.new("Terrain")
 local fills, balls, chunks, snow, rockSteep, water, air = 0, 0, 0, 0, 0, 0, 0
-terrain.SetMaterialColor = function() end
+local materialColours = {}
+terrain.SetMaterialColor = function(_, material, colour) materialColours[material] = colour end
 terrain.FillBlock = function() fills += 1 end
 terrain.FillBall = function(_, centre, radius, material)
 	balls += 1
@@ -163,6 +167,222 @@ if PACK_MODE == "studs" or PACK_MODE == "tiny-zup" then
 	end
 end
 Scenery.build(26.4, Vector3.new(0, 0.5, 56.4), reserved)
+
+-- Themes: the alpine default, and sakura switched on and off live.
+local sceneryFolder = workspace:FindFirstChild("Scenery")
+local alpineOnly = sceneryFolder:FindFirstChild("AlpineOnly")
+local festoon = alpineOnly:FindFirstChild("Festoon")
+local tower = alpineOnly:FindFirstChild("Watchtower")
+local sakura = ServerStorage:FindFirstChild("SakuraScenery")
+assert(Scenery.theme() == "default" and festoon ~= nil and alpineOnly.Parent == sceneryFolder, "the valley starts alpine, festoon lights up")
+-- The watchtower: beside the mountain, off the arena, camp and boards, facing
+-- the camp, every leg in the ground and its lookout high above it.
+assert(tower ~= nil, "the alpine theme has a watchtower")
+local legs, rungs, towerParts, towerLights = {}, 0, 0, 0
+local floor = tower:FindFirstChild("TowerFloor")
+for _, p in tower:GetDescendants() do
+	if p.Name == "TowerLeg" then table.insert(legs, p) end
+	if p.Name == "TowerRung" then rungs += 1 end
+	if p.ClassName == "Part" or p.ClassName == "WedgePart" then
+		towerParts += 1
+		assert(p.Anchored and p.CanQuery == false and p.CanTouch == false, "the tower must not interfere with mining/physics: " .. p.Name)
+	end
+	if p.ClassName == "PointLight" then towerLights += 1 end
+end
+assert(#legs == 4 and rungs >= 15 and floor ~= nil and towerLights == 1, "legs, a ladder, a floor and a lamp: " .. #legs .. " " .. rungs)
+assert(towerParts < 160, "the tower stays light: " .. towerParts)
+local towerAt = Vector3.new(floor.CFrame.Position.X, 0, floor.CFrame.Position.Z)
+assert(towerAt.Magnitude > 55 + 6 and (towerAt - Vector3.new(0, 0, 56.4)).Magnitude > 25 + 6 and not inReserved(towerAt), "the tower stands clear of the arena, camp and boards")
+assert(towerAt.X < 0, "it stands to the left of the mountain from the spawn, away from the sakura shrine")
+local look = floor.CFrame.LookVector
+local toward = (Vector3.new(0, 0, 56.4) - towerAt).Unit
+assert(look.X * toward.X + look.Z * toward.Z > 0.99, "the lookout faces the camp")
+for _, p in legs do
+	-- A leg is a cylinder along X: its two ends.
+	local axis = p.CFrame.RightVector * (p.Size.X / 2)
+	local a, b = p.CFrame.Position - axis, p.CFrame.Position + axis
+	local low = if a.Y < b.Y then a else b
+	assert(workspace:Raycast(Vector3.new(low.X, 300, low.Z)).Position.Y > low.Y, "every leg reaches into the ground")
+end
+local groundHere = workspace:Raycast(Vector3.new(towerAt.X, 300, towerAt.Z)).Position.Y
+assert(floor.CFrame.Position.Y - groundHere > 12, "the lookout is high above the ground")
+assert(sakura ~= nil, "the sakura scenery waits out of view")
+local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+local grade = Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+local bloom = Lighting:FindFirstChildOfClass("BloomEffect")
+local rays = Lighting:FindFirstChildOfClass("SunRaysEffect")
+local clouds = terrain:FindFirstChildOfClass("Clouds")
+local function look()
+	return {
+		Lighting.ClockTime, Lighting.Brightness, Lighting.Ambient, Lighting.OutdoorAmbient, Lighting.ColorShift_Top, Lighting.ExposureCompensation,
+		atmosphere.Density, atmosphere.Offset, atmosphere.Color, atmosphere.Decay, atmosphere.Glare, atmosphere.Haze,
+		grade.Contrast, grade.Saturation, grade.TintColor, bloom.Intensity, bloom.Size, bloom.Threshold, rays.Intensity,
+		clouds.Cover, clouds.Density, clouds.Color, terrain.WaterColor,
+		materialColours["Material.Grass"], materialColours["Material.LeafyGrass"], materialColours["Material.Ground"],
+		materialColours["Material.Mud"], materialColours["Material.Rock"], materialColours["Material.Snow"],
+	}
+end
+local alpine = look()
+-- The alpine look is the one the valley always had.
+assert(Lighting.ClockTime == 15.6 and atmosphere.Density == 0.3 and atmosphere.Haze == 1.6 and grade.TintColor == Color3.fromRGB(255, 249, 240)
+	and bloom.Threshold == 1.3 and clouds.Cover == 0.42 and terrain.WaterColor == Color3.fromRGB(46, 92, 96)
+	and materialColours["Material.Grass"] == Color3.fromRGB(102, 126, 64) and materialColours["Material.Snow"] == Color3.fromRGB(238, 242, 247),
+	"the alpine look is unchanged")
+for i = 1, 29 do assert(alpine[i] ~= nil, "every themed setting is set: " .. i) end
+-- What the sakura theme brings.
+local camp = Vector3.new(0, 0, 56.4)
+local trees, blossoms, carpets, torii, lanterns, sakuraParts = 0, 0, 0, 0, 0, 0
+for _, p in sakura:GetDescendants() do
+	if p.Name == "SakuraTree" then trees += 1 end
+	if p.Name == "Blossom" then
+		blossoms += 1
+		assert(p.Shape == "PartType.Ball" and p.Size.X > 3, "blossoms are round puffs")
+	end
+	if p.Name == "Torii" then torii += 1 end
+	if p.Name == "StoneLantern" then lanterns += 1 end
+	if p.Name == "SakuraTrunk" or p.Name == "FallenPetals" then
+		local flat = Vector3.new(p.CFrame.Position.X, 0, p.CFrame.Position.Z)
+		assert(flat.Magnitude > 55 and (flat - camp).Magnitude > 25 and not inReserved(flat), "cherry trees stay off the arena, camp and boards")
+		if p.Name == "FallenPetals" then carpets += 1 end
+	end
+	if p.Name == "ToriiPillar" and (Vector3.new(p.CFrame.Position.X, 0, p.CFrame.Position.Z) - camp).Magnitude < 20 then
+		local at = p.CFrame.Position
+		assert(at.Z < 56.4 - 7 and at.Z > 56.4 - 11, "the torii stands just past the spawn pad: " .. at.Z)
+	end
+	if p.ClassName == "Part" then
+		sakuraParts += 1
+		assert(p.Anchored and p.CanQuery == false and p.CanTouch == false, "sakura scenery must not interfere with mining/physics: " .. tostring(p.Name))
+		assert(p.Size.X > 0 and p.Size.Y > 0 and p.Size.Z > 0, "positive size: " .. tostring(p.Name))
+	end
+	assert(p.ClassName ~= "PointLight", "the sakura theme adds no lights")
+end
+assert(trees >= 40 and trees <= 48 and carpets == trees and blossoms >= trees * 4, "cherry groves: " .. trees)
+assert(torii == 2 and lanterns == 5, "two torii (camp and shrine) and five stone lanterns")
+assert(sakuraParts < 850, "the sakura scenery stays light: " .. sakuraParts)
+-- The shrine: on a flat meadow off the arena, camp and boards, facing the camp,
+-- with no cherry tree inside its grounds and its plinth reaching the ground.
+local shrines = {}
+for _, p in sakura:GetDescendants() do if p.Name == "Shrine" then table.insert(shrines, p) end end
+assert(#shrines == 1, "one shrine")
+local plinth = shrines[1]:FindFirstChild("ShrinePlinth")
+local roof, pillars = 0, 0
+for _, p in shrines[1]:GetDescendants() do
+	if p.Name == "ShrineRoof" then roof += 1 end
+	if p.Name == "ShrinePillar" then pillars += 1 end
+end
+assert(plinth ~= nil and roof == 4 and pillars == 10, "plinth, curved roof and pillars")
+local centre = plinth.CFrame.Position
+local flatCentre = Vector3.new(centre.X, 0, centre.Z)
+assert(flatCentre.Magnitude > 55 + 12 and (flatCentre - camp).Magnitude > 25 + 12 and not inReserved(flatCentre), "the shrine stands clear of the arena, camp and boards")
+local facing = plinth.CFrame.LookVector
+local toCamp = (camp - flatCentre).Unit
+assert(facing.X * toCamp.X + facing.Z * toCamp.Z > 0.99, "the shrine faces the camp")
+local bottom = centre.Y - plinth.Size.Y / 2
+for _, offset in { Vector3.new(-8.5, 0, -7), Vector3.new(8.5, 0, -7), Vector3.new(-8.5, 0, 7), Vector3.new(8.5, 0, 7) } do
+	local corner = plinth.CFrame * offset
+	assert(workspace:Raycast(Vector3.new(corner.X, 300, corner.Z)).Position.Y > bottom, "the plinth reaches the ground at every corner")
+end
+for _, p in sakura:GetDescendants() do
+	if p.Name == "SakuraTrunk" then
+		local at = p.CFrame.Position
+		assert((Vector3.new(at.X, 0, at.Z) - flatCentre).Magnitude > 17, "no cherry tree grows inside the shrine grounds")
+	end
+end
+-- The farm theme: a ranch fence round the arena, open only where the trail
+-- comes in under the gate, and a barn with its yard beyond it.
+local farm = ServerStorage:FindFirstChild("FarmScenery")
+assert(farm ~= nil, "the farm scenery waits out of view")
+local ranch = farm:FindFirstChild("RanchFence")
+local posts, gateposts, farmParts, farmLights, signs = {}, {}, 0, 0, 0
+for _, p in farm:GetDescendants() do
+	if p.ClassName == "Part" or p.ClassName == "WedgePart" then
+		farmParts += 1
+		assert(p.Anchored and p.CanQuery == false and p.CanTouch == false, "farm scenery must not interfere with mining/physics: " .. tostring(p.Name))
+		if p.Name == "FencePost" then table.insert(posts, p.CFrame.Position) end
+		if p.Name == "GatePost" then table.insert(gateposts, p.CFrame.Position) end
+		if p.Name == "FencePost" or p.Name == "FenceRail" or p.Name == "GatePost" then assert(p.CanCollide, "the fence can be bumped into") end
+		local flat = Vector3.new(p.CFrame.Position.X, 0, p.CFrame.Position.Z)
+		if p.Parent ~= ranch then assert(flat.Magnitude > 55, "only the fence stands in the arena: " .. tostring(p.Name)) end
+	end
+	if p.ClassName == "PointLight" then farmLights += 1 end
+	if p.Name == "RanchSign" then signs += 1 end
+end
+assert(#gateposts == 2 and signs == 1, "a gate arch with its sign")
+assert(#posts > 40, "posts all the way round: " .. #posts)
+local ring = {}
+for _, at in posts do table.insert(ring, at) end
+for _, at in gateposts do table.insert(ring, at) end
+for _, at in ring do
+	local r = Vector3.new(at.X, 0, at.Z).Magnitude
+	assert(math.abs(r - 52) < 0.5, "the fence circles the arena inside its edge: " .. r)
+end
+table.sort(ring, function(a, b) return math.atan2(a.X, a.Z) < math.atan2(b.X, b.Z) end)
+local wide = 0
+for i, at in ring do
+	local nextAt = ring[i % #ring + 1]
+	local gap = (Vector3.new(at.X, 0, at.Z) - Vector3.new(nextAt.X, 0, nextAt.Z)).Magnitude
+	if gap > 7.5 then
+		wide += 1
+		assert(math.abs(gap - 9) < 0.6, "the one opening is the gate: " .. gap)
+	end
+end
+assert(wide == 1, "the fence is closed but for the gate: " .. wide)
+-- The trail runs through the gate, and the spawn is outside it.
+local g1, g2 = gateposts[1], gateposts[2]
+local middle = (g1 + g2) / 2
+local trailX = math.sin(math.clamp((56.4 - middle.Z) / (56.4 - 26), 0, 1) * math.pi) * 4
+assert(math.abs(middle.X - trailX) < 0.6 and middle.Z > 50, "the gate is on the trail, in front of the spawn")
+assert(Vector3.new(0, 0, 56.4).Magnitude > 52, "players spawn outside the corral and walk in")
+-- The barn: clear of the arena, camp and boards, facing the camp, its
+-- foundation reaching the ground, with a silo, corn, cows and a light.
+local barns = {}
+for _, p in farm:GetDescendants() do if p.Name == "Barn" then table.insert(barns, p) end end
+assert(#barns == 1, "one barn")
+local foundation = barns[1]:FindFirstChild("BarnFoundation")
+assert(foundation ~= nil and barns[1]:FindFirstChild("Silo") ~= nil and barns[1]:FindFirstChild("SiloDome") ~= nil, "a barn with a silo")
+local barnAt = foundation.CFrame.Position
+local barnFlat = Vector3.new(barnAt.X, 0, barnAt.Z)
+assert(barnFlat.Magnitude > 55 + 15 and (barnFlat - camp).Magnitude > 25 + 15 and not inReserved(barnFlat), "the barn stands clear of the arena, camp and boards")
+local barnLook = foundation.CFrame.LookVector
+local barnToCamp = (camp - barnFlat).Unit
+assert(barnLook.X * barnToCamp.X + barnLook.Z * barnToCamp.Z > 0.99, "the barn faces the camp")
+assert(math.atan2(math.abs(barnFlat.X - camp.X), camp.Z - barnFlat.Z) > math.rad(30), "the barn stands to one side, where the mountain does not hide it from the spawn")
+local barnBottom = barnAt.Y - foundation.Size.Y / 2
+for _, offset in { Vector3.new(-7.5, 0, -10.5), Vector3.new(7.5, 0, -10.5), Vector3.new(-7.5, 0, 10.5), Vector3.new(7.5, 0, 10.5) } do
+	local corner = foundation.CFrame * offset
+	assert(workspace:Raycast(Vector3.new(corner.X, 300, corner.Z)).Position.Y > barnBottom, "the barn's foundation reaches the ground at every corner")
+end
+local corn, cows = 0, 0
+for _, p in farm:GetDescendants() do
+	if p.Name == "Corn" then corn += 1 end
+	if p.Name == "Cow" then cows += 1 end
+end
+assert(corn >= 6 and cows >= 2, "a cornfield and cows: " .. corn .. " " .. cows)
+assert(farmLights == 1, "one warm lamp over the barn doors")
+assert(farmParts < 900, "the farm scenery stays light: " .. farmParts)
+assert(Scenery.setTheme("farm") and Scenery.theme() == "farm", "farm can be chosen")
+assert(farm.Parent == workspace and sakura.Parent == ServerStorage and alpineOnly.Parent == ServerStorage, "the ranch shows; the festoon and watchtower make way")
+assert(Lighting.ClockTime == Scenery.LOOKS.farm.clock and atmosphere.Color == Scenery.LOOKS.farm.atmosphere.color
+	and materialColours["Material.Grass"] == Scenery.LOOKS.farm.terrain["Material.Grass"], "the farm light and colours apply")
+-- Switching to sakura and back is instant and exact.
+assert(Scenery.setTheme("sakura") and Scenery.theme() == "sakura", "sakura can be chosen")
+assert(sakura.Parent == workspace and alpineOnly.Parent == ServerStorage and farm.Parent == ServerStorage, "the blossoms show; the ranch, festoon and watchtower make way")
+assert(Lighting.ClockTime == Scenery.LOOKS.sakura.clock and atmosphere.Color == Scenery.LOOKS.sakura.atmosphere.color
+	and materialColours["Material.Grass"] == Scenery.LOOKS.sakura.terrain["Material.Grass"], "the sakura light and colours apply")
+assert(not Scenery.setTheme("winter") and Scenery.theme() == "sakura", "unknown themes are refused")
+assert(Scenery.setTheme("default") and Scenery.theme() == "default", "alpine can be chosen again")
+assert(sakura.Parent == ServerStorage and alpineOnly.Parent == sceneryFolder, "the sakura scenery goes back out of view; the watchtower returns")
+local back = look()
+for i = 1, 29 do assert(back[i] == alpine[i], "the alpine look comes back exactly: " .. i) end
+-- Petals stay in the box round the camera, wherever it is and however long they fall.
+for _, centre in { Vector3.new(0, 6, 56), Vector3.new(-300, 80, 120) } do
+	for _, t in { 0, 1.5, 60, 4000.25 } do
+		local petal = { seed = Vector3.new(12, 30, 70), fall = 2.4, sway = 1, phase = 0.5, spin = Vector3.new(1, 1, 1) }
+		local at = PetalView.frame(petal, t, centre).Position - centre
+		assert(math.abs(at.X) <= 40 and math.abs(at.Y) <= 20 and math.abs(at.Z) <= 40, "petals stay round the camera")
+	end
+end
+print(string.format("themes: %d cherry trees, %d blossoms, %d sakura parts; farm: %d fence posts, %d corn rows, %d cows, %d farm parts", trees, blossoms, sakuraParts, #posts, corn, cows, farmParts))
 local published = Replicated:FindFirstChild("DiamondRushSceneryPlacements")
 if PACK_MODE == "generated" then
 	-- The server only lays the pack out; each player's game builds it.
@@ -310,6 +530,10 @@ try:
             + "\nlocal ScenePackData = " + module("src/shared/ScenePackData.luau")
             + "\nlocal ScenePack = " + module("src/server/ScenePack.luau")
             + "\nlocal SceneryView = " + module("src/client/SceneryView.luau")
+            + "\nlocal Sakura = " + module("src/server/Sakura.luau")
+            + "\nlocal Watchtower = " + module("src/server/Watchtower.luau")
+            + "\nlocal Farm = " + module("src/server/Farm.luau")
+            + "\nlocal PetalView = " + module("src/client/PetalView.luau")
             + "\nlocal Scenery = " + module("src/server/Scenery.luau")
             + "\n" + checks
         )

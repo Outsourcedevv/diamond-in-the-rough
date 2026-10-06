@@ -12,6 +12,7 @@ local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Format = require(Shared:WaitForChild("Format"))
+local Skin = require(Shared:WaitForChild("Skin"))
 
 local LobbyView = {}
 
@@ -62,12 +63,15 @@ local function text(parent: Instance, properties: { [string]: any }): TextLabel
 	return label
 end
 
--- What the Diamond in the Rough card says about the round going on now.
-function LobbyView.status(phase: string, stone: number): string
-	if phase == "Won" then return "🏆 Diamond found! A new round starts soon" end
-	if phase == "Rebuilding" then return "⛰ The mountain is being rebuilt" end
-	if phase == "Holding" then return "💎 Someone is holding the diamond!" end
-	return "🔴 LIVE · " .. Format.commas(stone) .. " stone left"
+-- What the Diamond in the Rough card says about the round going on now, in
+-- the mountain's skin ("stone" by default, or "hay": see Skin).
+function LobbyView.status(phase: string, stone: number, skin: string?): string
+	local words = Skin.words(skin)
+	local gem = words.gem
+	if phase == "Won" then return "🏆 " .. string.upper(string.sub(gem, 1, 1)) .. string.sub(gem, 2) .. " found! A new round starts soon" end
+	if phase == "Rebuilding" then return "⛰ The " .. words.heap .. " is being rebuilt" end
+	if phase == "Holding" then return words.icon .. " Someone is holding the " .. gem .. "!" end
+	return "🔴 LIVE · " .. Format.commas(stone) .. " " .. words.material .. " left"
 end
 
 -- `request` sends joinGame / leaveGame; `onChange(inGame)` runs whenever the
@@ -305,10 +309,11 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	end)
 
 	local function refreshLive()
-		live.Text = LobbyView.status(tostring(state:GetAttribute("Phase") or "Digging"), tonumber(state:GetAttribute("Stone")) or 0)
+		live.Text = LobbyView.status(tostring(state:GetAttribute("Phase") or "Digging"), tonumber(state:GetAttribute("Stone")) or 0, state:GetAttribute("Skin"))
 	end
 	state:GetAttributeChangedSignal("Phase"):Connect(refreshLive)
 	state:GetAttributeChangedSignal("Stone"):Connect(refreshLive)
+	state:GetAttributeChangedSignal("Skin"):Connect(refreshLive)
 	refreshLive()
 
 	local inGame: boolean? = nil

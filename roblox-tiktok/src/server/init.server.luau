@@ -14,6 +14,7 @@ local TextChatService = game:GetService("TextChatService")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
+local Skin = require(Shared:WaitForChild("Skin"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
@@ -57,6 +58,8 @@ local settings = {
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	leaderboards = { gifts = {}, likes = {} } :: { gifts: { any }, likes: { any } },
 	statues = {} :: { any },
+	theme = "default", -- the map's look: "default" (alpine), "sakura" or "farm"
+	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 }
 local saved = Store.load()
 if saved then
@@ -103,6 +106,8 @@ local function publishSettings()
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
+	State:SetAttribute("Theme", settings.theme)
+	State:SetAttribute("Skin", settings.skin)
 end
 
 local function saveSettings()
@@ -142,8 +147,19 @@ local boardSpots = Leaderboards.spots(arenaRadius, mountainRadius, spawn.Positio
 local reserved = {}
 for _, spot in boardSpots do table.insert(reserved, { at = spot.at, radius = 30 }) end
 
--- Hills, distant peaks, a lake, a pine forest, boulders and a campfire.
-require(script.Scenery).build(mountainRadius, spawn.Position, reserved)
+-- Hills, distant peaks, a lake, a pine forest, boulders and a campfire, in the
+-- saved theme (alpine, sakura or farm).
+local Scenery = require(script.Scenery)
+if Scenery.LOOKS[settings.theme] == nil then settings.theme = "default" end
+Scenery.build(mountainRadius, spawn.Position, reserved, settings.theme)
+
+-- Switches the map's theme live for everyone and remembers it.
+local function setTheme(name: string): boolean
+	if name == settings.theme or not Scenery.setTheme(name) then return false end
+	settings.theme = name
+	saveSettings()
+	return true
+end
 
 -- Every player carries a pickaxe to chip at the rock themselves.
 local function makePickaxe(): Tool
@@ -197,6 +213,9 @@ diamond.CanCollide = false
 diamond.CanTouch = false
 diamond.CanQuery = false
 diamond.Parent = workspace
+if Skin.WORDS[settings.skin] == nil then settings.skin = "stone" end
+-- In the haystack skin the gem is a needle (see Skin).
+diamond:SetAttribute("GemKind", Skin.gem(settings.skin))
 DiamondShape.attach(diamond)
 local glow = Instance.new("PointLight")
 glow.Color = Color3.fromRGB(140, 230, 255)
@@ -236,6 +255,16 @@ click.MaxActivationDistance = 0
 click.Parent = diamond
 
 local DIAMOND_TILT = CFrame.Angles(0, math.rad(22.5), 0)
+
+-- Reskins the mountain live for everyone (stone and a diamond, or hay and a
+-- needle) and remembers it. Each player's game repaints its own rock.
+local function setSkin(name: string): boolean
+	if name == settings.skin or Skin.WORDS[name] == nil then return false end
+	settings.skin = name
+	DiamondShape.setKind(diamond, Skin.gem(name))
+	saveSettings()
+	return true
+end
 
 -- Round state -------------------------------------------------------------------
 local mountain: Mountain.Mountain? = nil
@@ -884,6 +913,15 @@ local giftQueue: { TikTokFeed.Event } = {}
 local giftHead = 1
 local giftWorkerRunning = false
 local function onTikTok(event: TikTokFeed.Event)
+	if event.type == "theme" then
+		-- From the bridge control page's theme buttons: it changes the
+		-- scenery straight away, without waiting behind queued gifts.
+		if event.theme then setTheme(event.theme) end
+		return
+	elseif event.type == "skin" then
+		if event.skin then setSkin(event.skin) end
+		return
+	end
 	-- While the diamond bird's bonus runs, a gift counts as if it were sent
 	-- twice: double the stone blasted or added, the effect and the leaderboard
 	-- coins. It is decided on arrival, so gifts still queued keep their bonus.
@@ -1063,7 +1101,7 @@ end
 local function setInGame(player: Player, joining: boolean)
 	if (player:GetAttribute("InGame") == true) == joining then return end
 	if not joining and holder == player then
-		notice(player, "You're holding the diamond! Win or lose it first, then go back to the lobby.")
+		notice(player, "You're holding the " .. Skin.words(settings.skin).gem .. "! Win or lose it first, then go back to the lobby.")
 		return
 	end
 	local now = os.clock()
@@ -1174,6 +1212,12 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
+		return
+	elseif action == "setTheme" and type(value) == "string" then
+		setTheme(value)
+		return
+	elseif action == "setSkin" and type(value) == "string" then
+		setSkin(value)
 		return
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1

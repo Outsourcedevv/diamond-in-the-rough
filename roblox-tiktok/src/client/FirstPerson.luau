@@ -118,7 +118,9 @@ function FirstPerson.start()
 	end
 
 	-- The held gem: anchored facets moved in one call each frame (no welds).
-	local gem = DiamondShape.build(GEM_SIZE, "HeldDiamond")
+	-- In the haystack skin it is a needle (see Skin).
+	local gemKind = if State:GetAttribute("Skin") == "hay" then "needle" else "diamond"
+	local gem = DiamondShape.build(GEM_SIZE, "HeldDiamond", gemKind)
 	local core = part("Core", Vector3.new(0.1, 0.1, 0.1), Color3.new(1, 1, 1))
 	core.Transparency = 1
 	core.Parent = gem.model
@@ -146,6 +148,18 @@ function FirstPerson.start()
 	outline.OutlineTransparency = 0.35
 	outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	outline.Parent = gem.model
+	-- A reskin rebuilds the held gem, carrying its light, sparkles and outline over.
+	State:GetAttributeChangedSignal("Skin"):Connect(function()
+		local kind = if State:GetAttribute("Skin") == "hay" then "needle" else "diamond"
+		if kind == gemKind then return end
+		gemKind = kind
+		local old = gem
+		gem = DiamondShape.build(GEM_SIZE, "HeldDiamond", kind)
+		core.Parent = gem.model
+		outline.Parent = gem.model
+		gem.model.Parent = old.model.Parent
+		old.model:Destroy()
+	end)
 
 	local hiddenArms: { [BasePart]: number } = {}
 	local armNames = { RightHand = true, RightLowerArm = true, RightUpperArm = true, LeftHand = true, LeftLowerArm = true, LeftUpperArm = true, ["Right Arm"] = true, ["Left Arm"] = true }

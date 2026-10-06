@@ -32,6 +32,26 @@ export function rebuildTestEvent(blocks) {
   return { type: 'gift', user: 'tester', name: 'Test viewer', gift: 'Rebuild test', coins: 1, count: 1, rocks: -blocks };
 }
 
+// The map themes the game can show: the alpine valley, sakura in blossom, or a ranch.
+export const THEMES = { default: 'Alpine', sakura: 'Sakura', farm: 'Farm' };
+
+export function themeEvent(theme) {
+  if (!Object.hasOwn(THEMES, theme)) {
+    throw new Error('Choose the alpine, sakura or farm theme.');
+  }
+  return { type: 'theme', name: 'Control page', theme };
+}
+
+// The mountain's skins: stone with a diamond, or a haystack with a needle.
+export const SKINS = { stone: 'Stone & diamond', hay: 'Hay & needle' };
+
+export function skinEvent(skin) {
+  if (!Object.hasOwn(SKINS, skin)) {
+    throw new Error('Choose stone and diamond, or hay and needle.');
+  }
+  return { type: 'skin', name: 'Control page', skin };
+}
+
 function who(user) {
   return {
     user: String(user?.uniqueId ?? user?.userId ?? 'someone').slice(0, 40),
