@@ -22,6 +22,7 @@ def module(path: str) -> str:
     source = source.replace('require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))', "PartShapes")
     source = source.replace("require(script.Parent.ScenePack)", "ScenePack")
     source = source.replace("require(script.Parent.Sakura)", "Sakura")
+    source = source.replace("require(script.Parent.Watchtower)", "Watchtower")
     source = source.replace('require(script.Parent:WaitForChild("Inflate"))', "Inflate")
     source = source.replace('local Shared = ReplicatedStorage:WaitForChild("DiamondRush")\n', "")
     source = source.replace('require(Shared:WaitForChild("MeshPack"))', "MeshPack")
@@ -168,9 +169,42 @@ Scenery.build(26.4, Vector3.new(0, 0.5, 56.4), reserved)
 
 -- Themes: the alpine default, and sakura switched on and off live.
 local sceneryFolder = workspace:FindFirstChild("Scenery")
-local festoon = sceneryFolder:FindFirstChild("Festoon")
+local alpineOnly = sceneryFolder:FindFirstChild("AlpineOnly")
+local festoon = alpineOnly:FindFirstChild("Festoon")
+local tower = alpineOnly:FindFirstChild("Watchtower")
 local sakura = ServerStorage:FindFirstChild("SakuraScenery")
-assert(Scenery.theme() == "default" and festoon ~= nil and festoon.Parent == sceneryFolder, "the valley starts alpine, festoon lights up")
+assert(Scenery.theme() == "default" and festoon ~= nil and alpineOnly.Parent == sceneryFolder, "the valley starts alpine, festoon lights up")
+-- The watchtower: beside the mountain, off the arena, camp and boards, facing
+-- the camp, every leg in the ground and its lookout high above it.
+assert(tower ~= nil, "the alpine theme has a watchtower")
+local legs, rungs, towerParts, towerLights = {}, 0, 0, 0
+local floor = tower:FindFirstChild("TowerFloor")
+for _, p in tower:GetDescendants() do
+	if p.Name == "TowerLeg" then table.insert(legs, p) end
+	if p.Name == "TowerRung" then rungs += 1 end
+	if p.ClassName == "Part" or p.ClassName == "WedgePart" then
+		towerParts += 1
+		assert(p.Anchored and p.CanQuery == false and p.CanTouch == false, "the tower must not interfere with mining/physics: " .. p.Name)
+	end
+	if p.ClassName == "PointLight" then towerLights += 1 end
+end
+assert(#legs == 4 and rungs >= 15 and floor ~= nil and towerLights == 1, "legs, a ladder, a floor and a lamp: " .. #legs .. " " .. rungs)
+assert(towerParts < 160, "the tower stays light: " .. towerParts)
+local towerAt = Vector3.new(floor.CFrame.Position.X, 0, floor.CFrame.Position.Z)
+assert(towerAt.Magnitude > 55 + 6 and (towerAt - Vector3.new(0, 0, 56.4)).Magnitude > 25 + 6 and not inReserved(towerAt), "the tower stands clear of the arena, camp and boards")
+assert(towerAt.X < 0, "it stands to the left of the mountain from the spawn, away from the sakura shrine")
+local look = floor.CFrame.LookVector
+local toward = (Vector3.new(0, 0, 56.4) - towerAt).Unit
+assert(look.X * toward.X + look.Z * toward.Z > 0.99, "the lookout faces the camp")
+for _, p in legs do
+	-- A leg is a cylinder along X: its two ends.
+	local axis = p.CFrame.RightVector * (p.Size.X / 2)
+	local a, b = p.CFrame.Position - axis, p.CFrame.Position + axis
+	local low = if a.Y < b.Y then a else b
+	assert(workspace:Raycast(Vector3.new(low.X, 300, low.Z)).Position.Y > low.Y, "every leg reaches into the ground")
+end
+local groundHere = workspace:Raycast(Vector3.new(towerAt.X, 300, towerAt.Z)).Position.Y
+assert(floor.CFrame.Position.Y - groundHere > 12, "the lookout is high above the ground")
 assert(sakura ~= nil, "the sakura scenery waits out of view")
 local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
 local grade = Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
@@ -255,12 +289,12 @@ for _, p in sakura:GetDescendants() do
 end
 -- Switching to sakura and back is instant and exact.
 assert(Scenery.setTheme("sakura") and Scenery.theme() == "sakura", "sakura can be chosen")
-assert(sakura.Parent == workspace and festoon.Parent == ServerStorage, "the blossoms show and the festoon gives way to the torii")
+assert(sakura.Parent == workspace and alpineOnly.Parent == ServerStorage, "the blossoms show; the festoon and watchtower make way")
 assert(Lighting.ClockTime == Scenery.LOOKS.sakura.clock and atmosphere.Color == Scenery.LOOKS.sakura.atmosphere.color
 	and materialColours["Material.Grass"] == Scenery.LOOKS.sakura.terrain["Material.Grass"], "the sakura light and colours apply")
 assert(not Scenery.setTheme("winter") and Scenery.theme() == "sakura", "unknown themes are refused")
 assert(Scenery.setTheme("default") and Scenery.theme() == "default", "alpine can be chosen again")
-assert(sakura.Parent == ServerStorage and festoon.Parent == sceneryFolder, "the sakura scenery goes back out of view")
+assert(sakura.Parent == ServerStorage and alpineOnly.Parent == sceneryFolder, "the sakura scenery goes back out of view; the watchtower returns")
 local back = look()
 for i = 1, 29 do assert(back[i] == alpine[i], "the alpine look comes back exactly: " .. i) end
 -- Petals stay in the box round the camera, wherever it is and however long they fall.
@@ -420,6 +454,7 @@ try:
             + "\nlocal ScenePack = " + module("src/server/ScenePack.luau")
             + "\nlocal SceneryView = " + module("src/client/SceneryView.luau")
             + "\nlocal Sakura = " + module("src/server/Sakura.luau")
+            + "\nlocal Watchtower = " + module("src/server/Watchtower.luau")
             + "\nlocal PetalView = " + module("src/client/PetalView.luau")
             + "\nlocal Scenery = " + module("src/server/Scenery.luau")
             + "\n" + checks

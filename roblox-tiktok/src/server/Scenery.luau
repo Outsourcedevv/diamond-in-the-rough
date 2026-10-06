@@ -11,13 +11,16 @@
 --
 -- Two themes can be switched live (Scenery.setTheme): the alpine default, and
 -- sakura, which adds blossoming cherry trees, a torii gate and stone lanterns
--- (see Sakura) under a soft pink spring light.
+-- (see Sakura) under a soft pink spring light. The alpine theme has a few
+-- things of its own, the camp's festoon lights and a watchtower (see
+-- Watchtower), which make way for sakura.
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local PartShapes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))
 local ScenePack = require(script.Parent.ScenePack)
 local Sakura = require(script.Parent.Sakura)
+local Watchtower = require(script.Parent.Watchtower)
 
 local Scenery = {}
 local random = Random.new(4207)
@@ -706,11 +709,15 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	text.Text = "⛏  DIAMOND MOUNTAIN"
 	text.Parent = gui
 
+	-- What only the alpine theme shows.
+	local alpine = Instance.new("Folder")
+	alpine.Name = "AlpineOnly"
+	alpine.Parent = folder
 	-- Festoon lights over the camp, without a light per bulb. The sakura theme's
 	-- torii takes their place.
 	local festoon = Instance.new("Folder")
 	festoon.Name = "Festoon"
-	festoon.Parent = folder
+	festoon.Parent = alpine
 	for i = 0, 14 do
 		local t = i / 14
 		local at = camp + Vector3.new(-10 + t * 20, 7 - 1.4 * math.sin(t * math.pi), -6)
@@ -759,10 +766,9 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	lantern(folder, camp + Vector3.new(-9, 0, -8))
 	lantern(folder, camp + Vector3.new(9, 0, -8))
 
-	-- The sakura theme's scenery, kept out of view until it is chosen.
-	themed.alpine = festoon
-	themed.home = folder
-	local sakura = Sakura.build({
+	-- What the themes' own scenery may use, to stay off the arena, camp,
+	-- trail, lake and boards and clear of the valley's trees and rocks.
+	local kit: Sakura.Kit = {
 		piece = piece,
 		beam = beam,
 		solid = solid,
@@ -774,7 +780,13 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 		camp = camp,
 		lake = lake,
 		radius = clearRadius,
-	})
+	}
+	-- A timber watchtower on a hillside beside the mountain (alpine only).
+	Watchtower.build(kit, alpine)
+	themed.alpine = alpine
+	themed.home = folder
+	-- The sakura theme's scenery, kept out of view until it is chosen.
+	local sakura = Sakura.build(kit)
 	sakura.Parent = ServerStorage
 	themed.sakura = sakura
 
