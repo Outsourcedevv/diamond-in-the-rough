@@ -4354,7 +4354,8 @@ local settings = {
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
-	leaderboards = { gifts = {}, likes = {} } :: { gifts: { any }, likes: { any } },
+	-- Helpers gave coins to break the mountain, griefers to add stone to it.
+	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
 	statues = {} :: { any },
 }
 local saved = Store.load()
@@ -4371,8 +4372,9 @@ if saved then
 		end
 	end
 	settings.giftRules = rules
-	if type(settings.leaderboards.gifts) ~= "table" or type(settings.leaderboards.likes) ~= "table" then
-		settings.leaderboards = { gifts = {}, likes = {} }
+	-- Older saves kept gifters and likers; those totals cannot be split by side.
+	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
+		settings.leaderboards = { helpers = {}, griefers = {} }
 	end
 	local statues = {}
 	for _, statue in settings.statues do
@@ -5000,28 +5002,28 @@ local function groundAt(position: Vector3): number
 end
 -- Raised so both boards show over the summit as seen from the camp.
 local boardLift = math.max(14, mountainRadius * 0.55)
-local giftBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1].facing, boardLift, {
-	title = "🎁 TOP GIFTERS",
+local helperBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1].facing, boardLift, {
+	title = "⛏️ TOP HELPERS",
 	unit = "coins",
 	trim = Color3.fromRGB(36, 92, 204),
-	valueColour = Color3.fromRGB(255, 214, 120),
-	emblem = "gift",
-	empty = "Send a gift to get on the board!",
+	valueColour = Color3.fromRGB(160, 214, 255),
+	emblem = "pickaxe",
+	empty = "Send a gift to help break the mountain!",
 }, groundAt)
-local likeBoard = Leaderboards.build(showcase, boardSpots[2].at, boardSpots[2].facing, boardLift, {
-	title = "❤️ TOP LIKERS",
-	unit = "likes",
+local grieferBoard = Leaderboards.build(showcase, boardSpots[2].at, boardSpots[2].facing, boardLift, {
+	title = "🧱 TOP GRIEFERS",
+	unit = "coins",
 	trim = Color3.fromRGB(196, 36, 44),
 	valueColour = Color3.fromRGB(255, 178, 188),
-	emblem = "heart",
-	empty = "Tap the screen to like the live!",
+	emblem = "boulders",
+	empty = "Nobody has added stone... yet!",
 }, groundAt)
-local giftTally = Leaderboards.tally(settings.leaderboards.gifts)
-local likeTally = Leaderboards.tally(settings.leaderboards.likes)
-local SAMPLE_GIFTS: { { any } } = { { "DiamondDave", 34999 }, { "LunaStreams", 12500 }, { "rocky_road", 5000 }, { "GemHunter99", 2999 }, { "Pixel Pam", 1000 },
+local helperTally = Leaderboards.tally(settings.leaderboards.helpers)
+local grieferTally = Leaderboards.tally(settings.leaderboards.griefers)
+local SAMPLE_HELPERS: { { any } } = { { "DiamondDave", 34999 }, { "LunaStreams", 12500 }, { "rocky_road", 5000 }, { "GemHunter99", 2999 }, { "Pixel Pam", 1000 },
 	{ "tiktok_tom", 520 }, { "MinerMia", 300 }, { "Sir Digs-a-Lot", 150 }, { "glitterbug", 99 }, { "rose_rain", 30 } }
-local SAMPLE_LIKES: { { any } } = { { "TapQueen", 48210 }, { "likeitlikeit", 23005 }, { "Pebble", 15400 }, { "Mo", 9870 }, { "skyler.digs", 6120 },
-	{ "heart_spammer", 4400 }, { "Ava", 2950 }, { "quarry_kid", 1200 }, { "bubbles", 640 }, { "newviewer22", 75 } }
+local SAMPLE_GRIEFERS: { { any } } = { { "StoneLord", 29999 }, { "BrickByBrick", 10000 }, { "Pebble", 4500 }, { "mason.mo", 2999 }, { "RockSolid", 1500 },
+	{ "boulder_bro", 699 }, { "Ava", 299 }, { "quarry_kid", 100 }, { "cement_sam", 55 }, { "newviewer22", 5 } }
 
 -- Viewer names come from TikTok, so they are filtered like any other text
 -- shown to players. Results are cached; a name that cannot be checked shows as "Viewer".
@@ -5069,27 +5071,29 @@ local function refreshBoards()
 		end
 		board.show(entries)
 	end
-	draw(giftBoard, giftTally, SAMPLE_GIFTS)
-	draw(likeBoard, likeTally, SAMPLE_LIKES)
-	settings.leaderboards = { gifts = giftTally.serialize(100), likes = likeTally.serialize(100) }
+	draw(helperBoard, helperTally, SAMPLE_HELPERS)
+	draw(grieferBoard, grieferTally, SAMPLE_GRIEFERS)
+	settings.leaderboards = { helpers = helperTally.serialize(100), griefers = grieferTally.serialize(100) }
 	if boardsDirty and os.clock() - lastBoardSave >= 20 then
 		boardsDirty = false
 		lastBoardSave = os.clock()
 		saveSettings()
 	end
 end
--- Coalesces bursts of likes and gifts into one refresh a second.
+-- Coalesces bursts of gifts into one refresh a second.
 local function scheduleBoards()
 	if boardsScheduled then return end
 	boardsScheduled = true
 	task.delay(1, refreshBoards)
 end
-local function recordViewer(event: TikTokFeed.Event, kind: string, amount: number)
-	-- Test gifts and likes (from the settings panel or the bridge page) never count.
+-- `rocks` is the gift's effect: positive breaks the mountain, negative adds stone.
+local function recordGifter(event: TikTokFeed.Event, rocks: number, coins: number)
+	-- Test gifts (from the settings panel or the bridge page) never count.
 	if event.user == "tester" or string.sub(event.id, 1, 5) == "test-" then return end
+	if rocks == 0 then return end
 	local key = string.lower(event.user or event.name or "")
 	local name = event.name or event.user or "Viewer"
-	if kind == "gift" then giftTally.add(key, name, amount) else likeTally.add(key, name, amount) end
+	if rocks > 0 then helperTally.add(key, name, coins) else grieferTally.add(key, name, coins) end
 	boardsDirty = true
 	scheduleBoards()
 end
@@ -5127,12 +5131,11 @@ local function processTikTok(event: TikTokFeed.Event)
 		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
 		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
-		recordViewer(event, "gift", coins * count)
+		recordGifter(event, amount, coins * count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
 		amount = likes * settings.perLike
 		text = string.format("%s liked x%d", who, likes)
-		recordViewer(event, "like", likes)
 	elseif event.type == "follow" then
 		amount = settings.perFollow
 		text = who .. " followed"
@@ -5424,8 +5427,8 @@ local function applySetting(player: Player, action: string, value: any)
 		saveSettings()
 		notice(player, "All statues removed.")
 		return
-	elseif action == "resetBoard" and (value == "gifts" or value == "likes") then
-		if value == "gifts" then giftTally.reset() else likeTally.reset() end
+	elseif action == "resetBoard" and (value == "helpers" or value == "griefers") then
+		if value == "helpers" then helperTally.reset() else grieferTally.reset() end
 		boardsDirty = true
 		lastBoardSave = 0
 		scheduleBoards()
@@ -5613,9 +5616,10 @@ newRound()
         <Properties>
           <string name="Name">Leaderboards</string>
           <string name="Source"><![CDATA[--!strict
--- Two giant wooden leaderboards behind the mountain: top gifters (blue trim,
--- gift box on the roof) and top likers (red trim, heart on the roof). Totals
--- are tallied per TikTok viewer and saved with the streamer's settings.
+-- Two giant wooden leaderboards behind the mountain: top helpers (blue trim,
+-- pickaxe on the roof) rank the coins viewers gave to break the mountain, and
+-- top griefers (red trim, boulders on the roof) the coins they gave to add
+-- stone. Totals are tallied per TikTok viewer and saved with the streamer's settings.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
@@ -5700,7 +5704,7 @@ export type Style = {
 	unit: string,
 	trim: Color3,
 	valueColour: Color3,
-	emblem: string, -- "gift" or "heart"
+	emblem: string, -- "gift", "heart", "pickaxe" or "boulders"
 	empty: string,
 }
 export type Board = { model: Model, show: (entries: { Entry }) -> () }
@@ -5770,6 +5774,30 @@ local function emblem(parent: Instance, kind: string, at: CFrame, colour: Color3
 		piece(parent, "Ribbon", Vector3.new(0.9, 4.8, 4.8), at, GOLD, Enum.Material.Metal)
 		for _, side in { -1, 1 } do
 			piece(parent, "Bow", Vector3.new(1.8, 0.9, 1.1), at * CFrame.new(side * 0.8, 2.75, 0) * CFrame.Angles(0, 0, side * math.rad(35)), GOLD, Enum.Material.Metal)
+		end
+	elseif kind == "pickaxe" then
+		-- Handle on the diagonal, a steel head across its top end, a painted collar.
+		local tilt = at * CFrame.Angles(0, 0, math.rad(40))
+		local handle = piece(parent, "PickaxeHandle", Vector3.new(7, 0.8, 0.8), tilt, WOOD, Enum.Material.Wood) :: Part
+		handle.Shape = Enum.PartType.Cylinder
+		local top = tilt * CFrame.new(3, 0, 0)
+		piece(parent, "PickaxeCollar", Vector3.new(1.3, 1.3, 1.3), top, colour, Enum.Material.Wood)
+		for _, side in { -1, 1 } do
+			-- Each half of the head bends slightly back towards the handle.
+			local half = top * CFrame.Angles(0, 0, side * math.rad(90 + 12)) * CFrame.new(1.6, 0, 0)
+			piece(parent, "PickaxeHead", Vector3.new(3.2, 0.9, 0.9), half, Color3.fromRGB(150, 156, 166), Enum.Material.Metal)
+			piece(parent, "PickaxeTip", Vector3.new(0.9, 0.6, 0.6), half * CFrame.new(1.9, 0, 0), Color3.fromRGB(196, 202, 210), Enum.Material.Metal)
+		end
+	elseif kind == "boulders" then
+		-- A heap of grey rocks on a slab painted in the board's colour.
+		piece(parent, "BoulderBase", Vector3.new(6, 0.8, 3.4), at * CFrame.new(0, -2, 0), colour, Enum.Material.Wood)
+		local rocks = {
+			{ Vector3.new(3.4, 3, 3), CFrame.new(-1.2, -0.2, 0) * CFrame.Angles(0.2, 0.4, 0.15) },
+			{ Vector3.new(2.6, 2.4, 2.4), CFrame.new(1.5, -0.5, 0.2) * CFrame.Angles(-0.3, 0.7, -0.2) },
+			{ Vector3.new(2.2, 2, 2), CFrame.new(0.2, 1.8, -0.1) * CFrame.Angles(0.5, 0.2, 0.4) },
+		}
+		for _, rock in rocks do
+			piece(parent, "Boulder", rock[1], at * rock[2], Color3.fromRGB(112, 108, 104), Enum.Material.Slate)
 		end
 	else
 		local size = 3.6
@@ -8345,12 +8373,13 @@ local function panelButton(text: string): TextButton
 end
 
 panelLabel("LEADERBOARDS (behind the mountain)")
-panelLabel("Test gifts and likes never count.")
+panelLabel("Blue: helpers. Red: griefers who add stone.")
+panelLabel("Test gifts never count.")
 panelButtons({
 	{ "Preview with sample names", function() send("previewBoards") end },
 })
-confirmed(panelButton("Reset top gifters"), "Reset top gifters", function() send("resetBoard", "gifts") end)
-confirmed(panelButton("Reset top likers"), "Reset top likers", function() send("resetBoard", "likes") end)
+confirmed(panelButton("Reset top helpers"), "Reset top helpers", function() send("resetBoard", "helpers") end)
+confirmed(panelButton("Reset top griefers"), "Reset top griefers", function() send("resetBoard", "griefers") end)
 
 panelLabel("GOLD STATUES (saved in your game)")
 local statueName = panelBox("", function() end)

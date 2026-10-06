@@ -55,7 +55,8 @@ local settings = {
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
-	leaderboards = { gifts = {}, likes = {} } :: { gifts: { any }, likes: { any } },
+	-- Helpers gave coins to break the mountain, griefers to add stone to it.
+	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
 	statues = {} :: { any },
 }
 local saved = Store.load()
@@ -72,8 +73,9 @@ if saved then
 		end
 	end
 	settings.giftRules = rules
-	if type(settings.leaderboards.gifts) ~= "table" or type(settings.leaderboards.likes) ~= "table" then
-		settings.leaderboards = { gifts = {}, likes = {} }
+	-- Older saves kept gifters and likers; those totals cannot be split by side.
+	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
+		settings.leaderboards = { helpers = {}, griefers = {} }
 	end
 	local statues = {}
 	for _, statue in settings.statues do
@@ -701,28 +703,28 @@ local function groundAt(position: Vector3): number
 end
 -- Raised so both boards show over the summit as seen from the camp.
 local boardLift = math.max(14, mountainRadius * 0.55)
-local giftBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1].facing, boardLift, {
-	title = "🎁 TOP GIFTERS",
+local helperBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1].facing, boardLift, {
+	title = "⛏️ TOP HELPERS",
 	unit = "coins",
 	trim = Color3.fromRGB(36, 92, 204),
-	valueColour = Color3.fromRGB(255, 214, 120),
-	emblem = "gift",
-	empty = "Send a gift to get on the board!",
+	valueColour = Color3.fromRGB(160, 214, 255),
+	emblem = "pickaxe",
+	empty = "Send a gift to help break the mountain!",
 }, groundAt)
-local likeBoard = Leaderboards.build(showcase, boardSpots[2].at, boardSpots[2].facing, boardLift, {
-	title = "❤️ TOP LIKERS",
-	unit = "likes",
+local grieferBoard = Leaderboards.build(showcase, boardSpots[2].at, boardSpots[2].facing, boardLift, {
+	title = "🧱 TOP GRIEFERS",
+	unit = "coins",
 	trim = Color3.fromRGB(196, 36, 44),
 	valueColour = Color3.fromRGB(255, 178, 188),
-	emblem = "heart",
-	empty = "Tap the screen to like the live!",
+	emblem = "boulders",
+	empty = "Nobody has added stone... yet!",
 }, groundAt)
-local giftTally = Leaderboards.tally(settings.leaderboards.gifts)
-local likeTally = Leaderboards.tally(settings.leaderboards.likes)
-local SAMPLE_GIFTS: { { any } } = { { "DiamondDave", 34999 }, { "LunaStreams", 12500 }, { "rocky_road", 5000 }, { "GemHunter99", 2999 }, { "Pixel Pam", 1000 },
+local helperTally = Leaderboards.tally(settings.leaderboards.helpers)
+local grieferTally = Leaderboards.tally(settings.leaderboards.griefers)
+local SAMPLE_HELPERS: { { any } } = { { "DiamondDave", 34999 }, { "LunaStreams", 12500 }, { "rocky_road", 5000 }, { "GemHunter99", 2999 }, { "Pixel Pam", 1000 },
 	{ "tiktok_tom", 520 }, { "MinerMia", 300 }, { "Sir Digs-a-Lot", 150 }, { "glitterbug", 99 }, { "rose_rain", 30 } }
-local SAMPLE_LIKES: { { any } } = { { "TapQueen", 48210 }, { "likeitlikeit", 23005 }, { "Pebble", 15400 }, { "Mo", 9870 }, { "skyler.digs", 6120 },
-	{ "heart_spammer", 4400 }, { "Ava", 2950 }, { "quarry_kid", 1200 }, { "bubbles", 640 }, { "newviewer22", 75 } }
+local SAMPLE_GRIEFERS: { { any } } = { { "StoneLord", 29999 }, { "BrickByBrick", 10000 }, { "Pebble", 4500 }, { "mason.mo", 2999 }, { "RockSolid", 1500 },
+	{ "boulder_bro", 699 }, { "Ava", 299 }, { "quarry_kid", 100 }, { "cement_sam", 55 }, { "newviewer22", 5 } }
 
 -- Viewer names come from TikTok, so they are filtered like any other text
 -- shown to players. Results are cached; a name that cannot be checked shows as "Viewer".
@@ -770,27 +772,29 @@ local function refreshBoards()
 		end
 		board.show(entries)
 	end
-	draw(giftBoard, giftTally, SAMPLE_GIFTS)
-	draw(likeBoard, likeTally, SAMPLE_LIKES)
-	settings.leaderboards = { gifts = giftTally.serialize(100), likes = likeTally.serialize(100) }
+	draw(helperBoard, helperTally, SAMPLE_HELPERS)
+	draw(grieferBoard, grieferTally, SAMPLE_GRIEFERS)
+	settings.leaderboards = { helpers = helperTally.serialize(100), griefers = grieferTally.serialize(100) }
 	if boardsDirty and os.clock() - lastBoardSave >= 20 then
 		boardsDirty = false
 		lastBoardSave = os.clock()
 		saveSettings()
 	end
 end
--- Coalesces bursts of likes and gifts into one refresh a second.
+-- Coalesces bursts of gifts into one refresh a second.
 local function scheduleBoards()
 	if boardsScheduled then return end
 	boardsScheduled = true
 	task.delay(1, refreshBoards)
 end
-local function recordViewer(event: TikTokFeed.Event, kind: string, amount: number)
-	-- Test gifts and likes (from the settings panel or the bridge page) never count.
+-- `rocks` is the gift's effect: positive breaks the mountain, negative adds stone.
+local function recordGifter(event: TikTokFeed.Event, rocks: number, coins: number)
+	-- Test gifts (from the settings panel or the bridge page) never count.
 	if event.user == "tester" or string.sub(event.id, 1, 5) == "test-" then return end
+	if rocks == 0 then return end
 	local key = string.lower(event.user or event.name or "")
 	local name = event.name or event.user or "Viewer"
-	if kind == "gift" then giftTally.add(key, name, amount) else likeTally.add(key, name, amount) end
+	if rocks > 0 then helperTally.add(key, name, coins) else grieferTally.add(key, name, coins) end
 	boardsDirty = true
 	scheduleBoards()
 end
@@ -828,12 +832,11 @@ local function processTikTok(event: TikTokFeed.Event)
 		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
 		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
-		recordViewer(event, "gift", coins * count)
+		recordGifter(event, amount, coins * count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
 		amount = likes * settings.perLike
 		text = string.format("%s liked x%d", who, likes)
-		recordViewer(event, "like", likes)
 	elseif event.type == "follow" then
 		amount = settings.perFollow
 		text = who .. " followed"
@@ -1125,8 +1128,8 @@ local function applySetting(player: Player, action: string, value: any)
 		saveSettings()
 		notice(player, "All statues removed.")
 		return
-	elseif action == "resetBoard" and (value == "gifts" or value == "likes") then
-		if value == "gifts" then giftTally.reset() else likeTally.reset() end
+	elseif action == "resetBoard" and (value == "helpers" or value == "griefers") then
+		if value == "helpers" then helperTally.reset() else grieferTally.reset() end
 		boardsDirty = true
 		lastBoardSave = 0
 		scheduleBoards()
