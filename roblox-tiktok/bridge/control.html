@@ -1222,7 +1222,7 @@ function build(renderer) {
     for (let y = 0, k = 0; y < S; y++) {
       for (let x = 0; x < S; x++, k++) {
         const f = at(fine, x, y), b = at(broad, x >> 1, y >> 1), m = at(mid, x >> 1, y >> 1);
-        const earth = Math.min(1, Math.max(0, (0.36 - b) * 8));
+        const earth = Math.min(0.6, Math.max(0, (0.32 - b) * 6));
         const v = 0.78 + (f - 0.5) * 0.5;
         const gr = [78 + 34 * m, 106 + 22 * m, 46 + 14 * m];
         data.set([(gr[0] * (1 - earth) + 106 * earth) * v, (gr[1] * (1 - earth) + 90 * earth) * v, (gr[2] * (1 - earth) + 68 * earth) * v, 255], k * 4);
@@ -2138,7 +2138,7 @@ function build(renderer) {
     camera.aspect = aspect;
     camera.fov = aspect < 0.8 ? 56 : aspect < 1.25 ? 48 : 40;
     const across = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * aspect);
-    from.position.z = Math.max(29, 11 / Math.tan(across));
+    from.position.z = Math.max(29, 9.2 / Math.tan(across));
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight, false);
     renderer.getDrawingBufferSize(drawn);
@@ -2174,6 +2174,19 @@ function build(renderer) {
   addEventListener('scroll', () => { if (reduced.matches) draw(0); }, { passive: true });
 
   let clock = 0, last = performance.now(), skip = false, saved = 0;
+  // If the computer can't keep up, draw fewer pixels rather than drop frames.
+  let pixels = renderer.getPixelRatio(), counted = 0, slow = 0;
+  function pace(dt) {
+    counted++;
+    if (dt > 1 / 40) slow++;
+    if (counted < 90) return;
+    if (slow > 45 && pixels > 0.75) {
+      pixels = Math.max(0.75, pixels - 0.25);
+      renderer.setPixelRatio(pixels);
+      fit();
+    }
+    counted = slow = 0;
+  }
   function draw(dt) {
     clock += dt;
     place(clock);
@@ -2218,6 +2231,7 @@ function build(renderer) {
       if (skip) { saved = dt; return; }
     }
     draw(Math.min(0.08, dt + saved));
+    if (!saved) pace(dt);
     saved = 0;
   }
   draw(0);
