@@ -84,7 +84,9 @@ function RebuildEffects.restore(data: any)
 	folder.Parent = workspace
 	local hidden = {}
 	local function cleanup()
-		for _, part in hidden do if part.Parent then part.LocalTransparencyModifier = 0 end end
+		-- Also for rocks a gift has blasted meanwhile: they wait in the mountain's
+		-- reuse pool and must not come back as invisible (but solid) rock.
+		for _, part in hidden do part.LocalTransparencyModifier = 0 end
 		table.clear(hidden)
 		folder:Destroy()
 	end

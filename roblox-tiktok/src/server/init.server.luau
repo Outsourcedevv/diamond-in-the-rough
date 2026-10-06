@@ -249,7 +249,11 @@ local holdWeld: WeldConstraint? = nil
 local mineCooldown: { [Player]: number } = {}
 local admins: { [Player]: boolean } = {}
 local settling: Tween? = nil
+-- Gift and rebuild work runs one job at a time (stoneBusy). Players keep
+-- digging and can grab an uncovered diamond while a gift blasts; only a
+-- rebuild refilling rock (stoneWork == "restore") holds the grab back.
 local stoneBusy = false
+local stoneWork: string? = nil
 local requestedRound: boolean? = nil
 
 local function stopSettling()
@@ -368,7 +372,9 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 		local capacity = growthCapacity()
 		local interrupted = if current:remaining() < capacity then cancelHoldForRebuild() else nil
 		local checkpoint = workCheckpoint(function() interruptRebuildHold(0, interrupted) end, "restore")
+		stoneWork = "restore"
 		local restored, at = current:restore(-amount, capacity, checkpoint)
+		stoneWork = nil
 		flushMountain("restore", at)
 		if restored > 0 then interruptRebuildHold(restored, interrupted) end
 		refreshStone()
@@ -379,7 +385,9 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 		return at, -restored
 	end
 	local count = math.min(amount, current:remaining())
+	stoneWork = "blast"
 	local centre = current:blast(count, workCheckpoint(nil, "blast"), centreKey)
+	stoneWork = nil
 	flushMountain("blast", centre)
 	-- Gift spectacle is rendered by GiftEffects on each client. Never create a
 	-- physics Explosion: blasts may remove grid stones, never the diamond or rigs.
@@ -514,16 +522,25 @@ local function newRound(animated: boolean?)
 	setPhase("Digging")
 	roundStart = workspace:GetServerTimeNow()
 	State:SetAttribute("RoundStart", roundStart)
+	-- Gifts sent during the win screen apply now, one job at a time: a gift
+	-- that started meanwhile finishes first, so the two never overlap.
+	while stoneBusy do task.wait() end
 	local carried = pendingChanges
 	pendingChanges = {}
 	stoneBusy = true
-	for _, change in carried do applyStone(change) end
+	for _, change in carried do
+		local ok, problem = pcall(function() applyStone(change) end)
+		if not ok then warn("[DiamondRush] queued gift failed: " .. tostring(problem)) end
+	end
+	stoneWork = nil
 	stoneBusy = false
 end
 
 -- Holding the diamond -----------------------------------------------------------
 local function grab(player: Player)
-	if stoneBusy or phase ~= "Revealed" then
+	-- A blasting gift may still be running: the diamond can be taken as soon
+	-- as it shows. Not while a rebuild is refilling the rock around it.
+	if stoneWork == "restore" or phase ~= "Revealed" then
 		return
 	end
 	local character = player.Character
@@ -865,12 +882,16 @@ local function onTikTok(event: TikTokFeed.Event)
 			stoneBusy = true
 			State:SetAttribute("GiftProcessing", true)
 			local ok, problem = pcall(processTikTok, nextEvent)
+			stoneWork = nil
 			stoneBusy = false
 			if not ok then warn("[DiamondRush] gift failed: " .. tostring(problem)) end
+			-- Digs made during the gift reach the players now if no gift change carried them.
+			if mountain and mountain:hasChanges() then flushMountain() end
 			if requestedRound ~= nil then
 				local animated = requestedRound
 				requestedRound = nil
-				newRound(animated)
+				local roundOk, roundProblem = pcall(newRound, animated)
+				if not roundOk then warn("[DiamondRush] new round failed: " .. tostring(roundProblem)) end
 			end
 			State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
 			if os.clock() - workerFrameStart >= 0.003 then
@@ -1145,8 +1166,9 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
 		-- The client names the rock cell it is aiming at (rock parts are local).
+		-- Digging carries on while a gift blasts or rebuilds the mountain.
 		local current = mountain
-		if stoneBusy or current == nil or phase == "Won" or phase == "Rebuilding" or holder == player
+		if current == nil or phase == "Won" or phase == "Rebuilding" or holder == player
 			or type(value) ~= "number" or value ~= math.floor(value) or value < 0 or value >= 2 ^ 32 then
 			return
 		end
@@ -1168,7 +1190,8 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		mineCooldown[player] = now
 		if current:dig(key, allowed) > 0 then
-			flushMountain("dig", at)
+			-- During a gift its own updates (every 0.05 s) carry the dig too.
+			if not stoneBusy then flushMountain("dig", at) end
 			refreshStone()
 			settleDiamond()
 		end

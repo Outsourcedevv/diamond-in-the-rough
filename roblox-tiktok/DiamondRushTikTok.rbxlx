@@ -625,10 +625,14 @@ end
 function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?, z: number, radius: number? }?, checkpoint: (() -> ())?, onAdded: ((number) -> ())?): { number }
 	-- Bucket integer squared distances so large refills avoid sorting every
 	-- missing rock. Pop nearest buckets first, leaving the gem cell reserved.
+	-- Sorting yields, and players may dig meanwhile: cells dug after this point
+	-- are added back to the refill order once it is rebuilt.
+	local source, sourceCount = self.removedOrder, #self.removedOrder
 	if focus and focus.y ~= nil then
 		local buckets = {}
 		local distances = {}
-		for index, key in self.removedOrder do
+		for index = 1, sourceCount do
+			local key = source[index]
 			local x, y, z = Grid.coords(key)
 			local distance = (x - focus.x)^2 + (y - focus.y)^2 + (z - focus.z)^2
 			if buckets[distance] == nil then
@@ -646,10 +650,12 @@ function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?,
 				if checkpoint and #ordered % 256 == 0 then checkpoint() end
 			end
 		end
+		for index = sourceCount + 1, #source do table.insert(ordered, source[index]) end
 		self.removedOrder = ordered
 	elseif focus then
 		local distant, nearby = {}, {}
-		for index, key in self.removedOrder do
+		for index = 1, sourceCount do
+			local key = source[index]
 			if checkpoint and index % 256 == 0 then checkpoint() end
 			local x, y, z = Grid.coords(key)
 			local distance = (x - focus.x) ^ 2 + (z - focus.z) ^ 2
@@ -666,6 +672,7 @@ function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?,
 			return a.key > b.key
 		end)
 		for _, cell in nearby do table.insert(distant, cell.key) end
+		for index = sourceCount + 1, #source do table.insert(distant, source[index]) end
 		self.removedOrder = distant
 	end
 	local restored = {}
@@ -684,10 +691,12 @@ function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?,
 		end
 	end
 	local processed = 0
+	local pages = self.solidPages
 	for key in affected do
 		processed += 1
 		if checkpoint and processed % 256 == 0 then checkpoint() end
-		if self:isExposed(key) then self:_expose(key) else self:_unexpose(key) end
+		-- A player may have dug this cell again while the refill was working.
+		if hasBit(pages, key) and self:isExposed(key) then self:_expose(key) else self:_unexpose(key) end
 	end
 	if #restored > 0 then self.growthHeap = nil; self.growthScores = nil; self.growthQueued = nil end
 	return restored
@@ -4539,7 +4548,11 @@ local holdWeld: WeldConstraint? = nil
 local mineCooldown: { [Player]: number } = {}
 local admins: { [Player]: boolean } = {}
 local settling: Tween? = nil
+-- Gift and rebuild work runs one job at a time (stoneBusy). Players keep
+-- digging and can grab an uncovered diamond while a gift blasts; only a
+-- rebuild refilling rock (stoneWork == "restore") holds the grab back.
 local stoneBusy = false
+local stoneWork: string? = nil
 local requestedRound: boolean? = nil
 
 local function stopSettling()
@@ -4658,7 +4671,9 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 		local capacity = growthCapacity()
 		local interrupted = if current:remaining() < capacity then cancelHoldForRebuild() else nil
 		local checkpoint = workCheckpoint(function() interruptRebuildHold(0, interrupted) end, "restore")
+		stoneWork = "restore"
 		local restored, at = current:restore(-amount, capacity, checkpoint)
+		stoneWork = nil
 		flushMountain("restore", at)
 		if restored > 0 then interruptRebuildHold(restored, interrupted) end
 		refreshStone()
@@ -4669,7 +4684,9 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 		return at, -restored
 	end
 	local count = math.min(amount, current:remaining())
+	stoneWork = "blast"
 	local centre = current:blast(count, workCheckpoint(nil, "blast"), centreKey)
+	stoneWork = nil
 	flushMountain("blast", centre)
 	-- Gift spectacle is rendered by GiftEffects on each client. Never create a
 	-- physics Explosion: blasts may remove grid stones, never the diamond or rigs.
@@ -4804,16 +4821,25 @@ local function newRound(animated: boolean?)
 	setPhase("Digging")
 	roundStart = workspace:GetServerTimeNow()
 	State:SetAttribute("RoundStart", roundStart)
+	-- Gifts sent during the win screen apply now, one job at a time: a gift
+	-- that started meanwhile finishes first, so the two never overlap.
+	while stoneBusy do task.wait() end
 	local carried = pendingChanges
 	pendingChanges = {}
 	stoneBusy = true
-	for _, change in carried do applyStone(change) end
+	for _, change in carried do
+		local ok, problem = pcall(function() applyStone(change) end)
+		if not ok then warn("[DiamondRush] queued gift failed: " .. tostring(problem)) end
+	end
+	stoneWork = nil
 	stoneBusy = false
 end
 
 -- Holding the diamond -----------------------------------------------------------
 local function grab(player: Player)
-	if stoneBusy or phase ~= "Revealed" then
+	-- A blasting gift may still be running: the diamond can be taken as soon
+	-- as it shows. Not while a rebuild is refilling the rock around it.
+	if stoneWork == "restore" or phase ~= "Revealed" then
 		return
 	end
 	local character = player.Character
@@ -5155,12 +5181,16 @@ local function onTikTok(event: TikTokFeed.Event)
 			stoneBusy = true
 			State:SetAttribute("GiftProcessing", true)
 			local ok, problem = pcall(processTikTok, nextEvent)
+			stoneWork = nil
 			stoneBusy = false
 			if not ok then warn("[DiamondRush] gift failed: " .. tostring(problem)) end
+			-- Digs made during the gift reach the players now if no gift change carried them.
+			if mountain and mountain:hasChanges() then flushMountain() end
 			if requestedRound ~= nil then
 				local animated = requestedRound
 				requestedRound = nil
-				newRound(animated)
+				local roundOk, roundProblem = pcall(newRound, animated)
+				if not roundOk then warn("[DiamondRush] new round failed: " .. tostring(roundProblem)) end
 			end
 			State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
 			if os.clock() - workerFrameStart >= 0.003 then
@@ -5435,8 +5465,9 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
 		-- The client names the rock cell it is aiming at (rock parts are local).
+		-- Digging carries on while a gift blasts or rebuilds the mountain.
 		local current = mountain
-		if stoneBusy or current == nil or phase == "Won" or phase == "Rebuilding" or holder == player
+		if current == nil or phase == "Won" or phase == "Rebuilding" or holder == player
 			or type(value) ~= "number" or value ~= math.floor(value) or value < 0 or value >= 2 ^ 32 then
 			return
 		end
@@ -5458,7 +5489,8 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		mineCooldown[player] = now
 		if current:dig(key, allowed) > 0 then
-			flushMountain("dig", at)
+			-- During a gift its own updates (every 0.05 s) carry the dig too.
+			if not stoneBusy then flushMountain("dig", at) end
 			refreshStone()
 			settleDiamond()
 		end
@@ -6266,21 +6298,49 @@ function Mountain.snapshot(self: Mountain, animated: boolean?, start: number?): 
 	return messages
 end
 
+-- The net change since the last flush. When work overlaps (a gift blasting
+-- rock a rebuild has only just added, or a player digging during a gift), a
+-- cell can change both ways in one batch. Clients apply removals before
+-- additions, so each cell is sent once, by what it is now: otherwise a rock
+-- added and blasted again would reach them as removed-then-added and stay on
+-- screen after the server destroyed it.
+local function netChanges(grid: Grid.Grid, removedKeys: { number }, addedKeys: { number }): ({ number }, { number })
+	-- One-way batches need no filtering: a cell is only removed while solid
+	-- and only added while empty, so without the other list nothing repeats.
+	if #removedKeys == 0 or #addedKeys == 0 then return removedKeys, addedKeys end
+	local pages = grid.solidPages
+	local seen, seenPages = Grid.cellMap()
+	local removed, added = {}, {}
+	for _, key in removedKeys do
+		if not Grid.hasBit(seenPages, key) and not Grid.hasBit(pages, key) then
+			seen[key] = true
+			table.insert(removed, key)
+		end
+	end
+	for _, key in addedKeys do
+		if not Grid.hasBit(seenPages, key) and Grid.hasBit(pages, key) then
+			seen[key] = true
+			table.insert(added, key)
+		end
+	end
+	return removed, added
+end
+
 -- Change lists since the last flush, at most one encoded chunk each, or an
 -- empty list when nothing changed.
 function Mountain.flush(self: Mountain, effect: string?, at: Vector3?): { any }
 	local diffs: { any } = {}
-	if #self.removedKeys > 0 then
-		for _, chunk in Codec.encode(self.removedKeys) do
+	local removed, added = netChanges(self.grid, self.removedKeys, self.addedKeys)
+	self.removedKeys, self.addedKeys = {}, {}
+	if #removed > 0 then
+		for _, chunk in Codec.encode(removed) do
 			table.insert(diffs, { round = self.round, removed = { chunk }, effect = effect, at = at })
 		end
-		self.removedKeys = {}
 	end
-	if #self.addedKeys > 0 then
-		for _, chunk in Codec.encode(self.addedKeys) do
+	if #added > 0 then
+		for _, chunk in Codec.encode(added) do
 			table.insert(diffs, { round = self.round, added = { chunk }, effect = effect, at = at })
 		end
-		self.addedKeys = {}
 	end
 	return diffs
 end
@@ -6301,7 +6361,17 @@ end
 
 -- Refills dug cells from the diamond outward, then grows new rock up to
 -- `capacity`. Returns how many rocks were added and where the refill started.
+-- Long work checks the diamond as it goes, so it shows the moment a gift
+-- uncovers it (and hides again when a rebuild covers it), not only at the end.
+function Mountain._watching(self: Mountain, checkpoint: (() -> ())?): () -> ()
+	return function()
+		self:_syncDiamond()
+		if checkpoint then checkpoint() end
+	end
+end
+
 function Mountain.restore(self: Mountain, count: number, capacity: number?, checkpoint: (() -> ())?): (number, Vector3?)
+	checkpoint = self:_watching(checkpoint)
 	local dx, dy, dz = Grid.coords(self.diamondKey)
 	-- Look the list up on every call: a flush during the work replaces it.
 	local function record(key: number) table.insert(self.addedKeys, key) end
@@ -6341,7 +6411,7 @@ function Mountain.blast(self: Mountain, count: number, checkpoint: (() -> ())?, 
 		return nil
 	end
 	-- Look the list up on every call: a flush during the work replaces it.
-	local _, actualCentre = self.grid:blast(count, centreKey, checkpoint, function(key) table.insert(self.removedKeys, key) end)
+	local _, actualCentre = self.grid:blast(count, centreKey, self:_watching(checkpoint), function(key) table.insert(self.removedKeys, key) end)
 	self.grid:takeFresh()
 	self:_syncDiamond()
 	return if actualCentre then self:keyPosition(actualCentre) else nil
@@ -10219,7 +10289,9 @@ function RebuildEffects.restore(data: any)
 	folder.Parent = workspace
 	local hidden = {}
 	local function cleanup()
-		for _, part in hidden do if part.Parent then part.LocalTransparencyModifier = 0 end end
+		-- Also for rocks a gift has blasted meanwhile: they wait in the mountain's
+		-- reuse pool and must not come back as invisible (but solid) rock.
+		for _, part in hidden do part.LocalTransparencyModifier = 0 end
 		table.clear(hidden)
 		folder:Destroy()
 	end
