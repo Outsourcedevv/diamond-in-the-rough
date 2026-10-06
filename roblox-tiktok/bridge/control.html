@@ -981,8 +981,8 @@ function build(renderer) {
         const f = 0.9 + (at(fine, x, y) - 0.5) * 0.2;
         if (d < 1) {
           const round = Math.sqrt(1 - d * d) * f;
-          data.set([118 * round, 44 * round, 34 * round, 255], k * 4);
-        } else data.set([58 * f, 46 * f, 40 * f, 255], k * 4);
+          data.set([160 * round, 66 * round, 50 * round, 255], k * 4);
+        } else data.set([96 * f, 78 * f, 66 * f, 255], k * 4);
       }
     }
     return texture(data, S, S);
@@ -1468,7 +1468,7 @@ function build(renderer) {
   scene.environment = pmrem.fromScene(skyScene, 0.04).texture;
   scene.environmentIntensity = 0.55;
 
-  scene.add(new THREE.HemisphereLight(0xc6d5ec, 0x6e6452, 0.5));
+  scene.add(new THREE.HemisphereLight(0xc6d5ec, 0x8a7d68, 0.7));
   const sun = new THREE.DirectionalLight(0xffeedc, 3.2);
   sun.position.copy(SUN).multiplyScalar(40).add(V(0, 4, 0));
   sun.target.position.set(0, 4, 0);
@@ -1642,7 +1642,7 @@ function build(renderer) {
     cap.rotateX(Math.PI / 2);
     const capMesh = new THREE.InstancedMesh(cap, mat.tiles, caps.length);
     caps.forEach(({ p, out }, k) => {
-      holder.position.copy(p).add(V(0, 0.08, 0)).addScaledVector(out, 0.02);
+      holder.position.copy(p).add(V(0, 0.04, 0)).addScaledVector(out, 0.02);
       holder.quaternion.setFromUnitVectors(Zaxis, out.clone().add(V(0, -0.25, 0)).normalize());
       holder.scale.setScalar(1);
       holder.updateMatrix();
