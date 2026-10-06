@@ -1,7 +1,7 @@
 --!strict
--- The How to Play guide: a card in the lobby's white and gold with four
--- pages (connecting TikTok, testing without TikTok, the controls and how to
--- win). It opens from the board beside the lobby spawn, the games menu's
+-- The How to Play guide: a card in the lobby's white and gold with five
+-- pages (connecting TikTok, testing without TikTok, the controls, how to
+-- win and Diamond Climb). It opens from the board beside the lobby spawn, the games menu's
 -- How to play button, or H anywhere, and frees the mouse while it is open.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -78,6 +78,22 @@ HowToPlay.PAGES = {
 			"<b>Diamond bird</b>: every 5 to 7 and a half minutes a diamond bird circles the mountain. Aim at it until the dot turns gold and click: every gift counts double for 30 seconds.",
 			"",
 			"The leaderboards behind the mountain show the top helpers (gifts that break the mountain) and the top griefers (gifts that add stone).",
+		}, "\n"),
+	},
+	{
+		title = "Diamond Climb",
+		text = table.concat({
+			"Press <b>G</b> and <b>JOIN</b> Diamond Climb. Jump up <b>1,000 platforms</b> round the crystal tower to the diamond at the top.",
+			"",
+			"Every platform you land on is a <b>checkpoint</b>. Fall off and you are put straight back on it. Each platform is a little higher than the last, but every jump is a short hop.",
+			"",
+			"<b>MOVEMENT</b> (bottom right): drag <b>Speed</b> and <b>Jump height</b> to suit you. Reset puts them back.",
+			"",
+			"<b>Gifts</b> send you up the tower, more platforms for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Gifts set to add stone send you <b>down</b> instead. From 100 coins the rides take over the camera, and every tier is crazier than the last. Follows and shares lift you one platform.",
+			"",
+			"Reach the top to win a climb. The next one starts from the bottom.",
+			"",
+			"In the streamer panel (<b>Y</b>), <b>DIAMOND CLIMB</b> restarts the climb and sets the gift strength. TEST GIFTS send you up and REBUILD TEST GIFTS send you down.",
 		}, "\n"),
 	},
 }

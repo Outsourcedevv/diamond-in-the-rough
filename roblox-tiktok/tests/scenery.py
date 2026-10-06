@@ -24,6 +24,10 @@ def module(path: str) -> str:
     source = source.replace("require(script.Parent.Sakura)", "Sakura")
     source = source.replace("require(script.Parent.Watchtower)", "Watchtower")
     source = source.replace("require(script.Parent.Farm)", "Farm")
+    source = source.replace("require(script.Parent.Desert)", "Desert")
+    source = source.replace("require(script.Parent.Haunted)", "Haunted")
+    source = source.replace('require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("SceneryThemes"))', "SceneryThemes")
+    source = source.replace('require(Shared:WaitForChild("SceneryThemes"))', "SceneryThemes")
     source = source.replace('require(script.Parent:WaitForChild("Inflate"))', "Inflate")
     source = source.replace('local Shared = ReplicatedStorage:WaitForChild("DiamondRush")\n', "")
     source = source.replace('require(Shared:WaitForChild("MeshPack"))', "MeshPack")
@@ -176,7 +180,7 @@ local tower = alpineOnly:FindFirstChild("Watchtower")
 local sakura = ServerStorage:FindFirstChild("SakuraScenery")
 -- No lettered signs anywhere in the scenery: their text renders badly (the
 -- leaderboards are built elsewhere and keep theirs).
-for _, holder in { sceneryFolder, sakura, ServerStorage:FindFirstChild("FarmScenery") } do
+for _, holder in { sceneryFolder, sakura, ServerStorage:FindFirstChild("FarmScenery"), ServerStorage:FindFirstChild("DesertScenery"), ServerStorage:FindFirstChild("HauntedScenery") } do
 	for _, object in holder:GetDescendants() do
 		assert(object.ClassName ~= "TextLabel", "no lettered signs in the scenery: " .. tostring(object.Parent and object.Parent.Parent and object.Parent.Parent.Name))
 	end
@@ -391,6 +395,163 @@ assert(Scenery.setTheme("default") and Scenery.theme() == "default", "alpine can
 assert(sakura.Parent == ServerStorage and alpineOnly.Parent == sceneryFolder, "the sakura scenery goes back out of view; the watchtower returns")
 local back = look()
 for i = 1, 29 do assert(back[i] == alpine[i], "the alpine look comes back exactly: " .. i) end
+
+-- Checks every part of a theme's scenery, and counts parts, lights and names.
+local function survey(holder, label)
+	local count, lights, names = 0, 0, {}
+	for _, p in holder:GetDescendants() do
+		if p.Name then names[p.Name] = (names[p.Name] or 0) + 1 end
+		if p.ClassName == "Part" or p.ClassName == "WedgePart" then
+			count += 1
+			assert(p.Anchored and p.CanQuery == false and p.CanTouch == false, label .. " scenery must not interfere with mining/physics: " .. tostring(p.Name))
+			assert(p.Size.X > 0 and p.Size.Y > 0 and p.Size.Z > 0, label .. " parts have a positive size: " .. tostring(p.Name))
+			assert(p.Size.Magnitude >= 3 or not p.CastShadow, label .. " small props cast no shadow: " .. p.Name)
+			local flat = Vector3.new(p.CFrame.Position.X, 0, p.CFrame.Position.Z)
+			assert(flat.Magnitude > 40, label .. " scenery stays off the mountain: " .. p.Name)
+			assert(not inReserved(flat), label .. " scenery stays off the leaderboards: " .. p.Name)
+		elseif p.ClassName == "PointLight" then
+			lights += 1
+			assert(not p.Shadows, "point lights skip shadows")
+		end
+	end
+	return count, lights, names
+end
+-- A building's frame faces the camp and stands to one side of the mountain.
+local function facesCamp(frame, label)
+	local flat = Vector3.new(frame.Position.X, 0, frame.Position.Z)
+	local toCamp = (camp - flat).Unit
+	assert(frame.LookVector.X * toCamp.X + frame.LookVector.Z * toCamp.Z > 0.99, label .. " faces the camp")
+	assert(flat.Magnitude > 55 + 12 and (flat - camp).Magnitude > 25 + 12, label .. " stands clear of the arena and camp")
+	assert(math.atan2(math.abs(flat.X - camp.X), camp.Z - flat.Z) > math.rad(25), label .. " stands to one side, where the mountain does not hide it")
+end
+-- The gate where the trail leaves the camp: its two sides either side of the trail.
+local function besideTrail(holder, gateName, sideName, label)
+	local gateModel = holder:FindFirstChild(gateName)
+	assert(gateModel ~= nil, label .. " has its gate")
+	local xs = {}
+	for _, p in gateModel:GetChildren() do
+		if p.Name == sideName then
+			local at = p.CFrame.Position
+			local trailX = math.sin(math.clamp((56.4 - at.Z) / (56.4 - 26), 0, 1) * math.pi) * 4
+			assert(math.abs(at.X - trailX) - p.Size.X / 2 > 3.4, label .. " gate keeps the trail open")
+			xs[if at.X < trailX then 1 else 2] = true
+		end
+	end
+	assert(xs[1] and xs[2], label .. " gate stands either side of the trail")
+end
+
+-- The desert theme: mesas, cacti, an oasis and a stepped pyramid.
+local desert = ServerStorage:FindFirstChild("DesertScenery")
+assert(desert ~= nil, "the desert scenery waits out of view")
+local desertParts, desertLights, desertNames = survey(desert, "desert")
+assert((desertNames.Mesa or 0) >= 6, "mesas round the valley: " .. tostring(desertNames.Mesa))
+assert((desertNames.Saguaro or 0) >= 25 and (desertNames.BarrelCactus or 0) >= 15, "saguaros and barrel cacti: " .. tostring(desertNames.Saguaro) .. " " .. tostring(desertNames.BarrelCactus))
+assert((desertNames.Palm or 0) >= 5, "palms round the oasis: " .. tostring(desertNames.Palm))
+assert((desertNames.Tumbleweed or 0) >= 8 and (desertNames.ClayPot or 0) == 3, "tumbleweeds and clay pots")
+assert(desertLights == 0 and desertParts < 1100, "the desert stays light: " .. desertParts .. " parts, " .. desertLights .. " lights")
+besideTrail(desert, "CanyonGate", "GatePylon", "the desert")
+local pyramid = desert:FindFirstChild("Pyramid")
+assert(pyramid ~= nil, "a pyramid")
+local steps, stairs, lowest, highestStair = {}, {}, nil, -math.huge
+for _, p in pyramid:GetChildren() do
+	if p.Name == "PyramidStep" then table.insert(steps, p) end
+	if p.Name == "PyramidStair" then
+		table.insert(stairs, p)
+		highestStair = math.max(highestStair, p.CFrame.Position.Y + p.Size.Y / 2)
+		assert(p.CanCollide, "the stair can be climbed")
+	end
+end
+assert(#steps == Desert.STEPS and #stairs == Desert.STEPS * 4, "eight steps and a stair up the front")
+table.sort(steps, function(a, b) return a.Size.X > b.Size.X end)
+lowest = steps[1]
+assert(lowest.Size.X == Desert.PYRAMID and lowest.CanCollide, "the pyramid can be climbed: " .. lowest.Size.X)
+facesCamp(lowest.CFrame, "the pyramid")
+local pyramidBottom = lowest.CFrame.Position.Y - lowest.Size.Y / 2
+local half = Desert.PYRAMID / 2
+for _, offset in { Vector3.new(-half, 0, -half), Vector3.new(half, 0, -half), Vector3.new(-half, 0, half), Vector3.new(half, 0, half) } do
+	local corner = lowest.CFrame * offset
+	assert(workspace:Raycast(Vector3.new(corner.X, 300, corner.Z)).Position.Y >= pyramidBottom - 1e-6, "the pyramid reaches the ground at every corner")
+end
+local summitY = lowest.CFrame.Position.Y + lowest.Size.Y / 2 + (Desert.STEPS - 1) * Desert.STEP_HEIGHT
+assert(math.abs(highestStair - summitY) < 1e-6, "the stair reaches the temple: " .. highestStair .. " " .. summitY)
+for _, p in stairs do
+	local foot = p.CFrame.Position - Vector3.new(0, p.Size.Y / 2, 0)
+	assert(workspace:Raycast(Vector3.new(foot.X, 300, foot.Z)).Position.Y >= foot.Y - 1e-6, "every tread is solid down to the ground")
+end
+assert(pyramid:FindFirstChild("Temple") ~= nil and pyramid:FindFirstChild("Capstone") ~= nil and #pyramid:GetChildren() > 40, "a temple and gold capstone on top")
+-- Palms stand on dry ground round the lake.
+for _, p in desert:GetDescendants() do
+	if p.Name == "Palm" then
+		local trunk = p:FindFirstChild("PalmTrunk")
+		local distance = (Vector3.new(trunk.CFrame.Position.X, 0, trunk.CFrame.Position.Z) - Vector3.new(26.4 + 14 + 72 + 0.6, 0, 56.4 + 15)).Magnitude
+		assert(distance < 70, "palms ring the lake: " .. distance)
+	end
+end
+
+-- The haunted theme: a mausoleum and graveyard, dead trees, jack-o'-lanterns.
+local haunted = ServerStorage:FindFirstChild("HauntedScenery")
+assert(haunted ~= nil, "the haunted scenery waits out of view")
+local hauntedParts, hauntedLights, hauntedNames = survey(haunted, "haunted")
+assert((hauntedNames.DeadTree or 0) >= 20, "dead trees: " .. tostring(hauntedNames.DeadTree))
+assert((hauntedNames.Grave or 0) >= 10, "a graveyard: " .. tostring(hauntedNames.Grave))
+assert((hauntedNames.JackOLantern or 0) >= 7, "jack-o'-lanterns: " .. tostring(hauntedNames.JackOLantern))
+assert((hauntedNames.WillOWisp or 0) == 8, "will-o'-wisps over the graves and the lake")
+assert(hauntedLights >= 3 and hauntedLights <= 6, "a few local lights: " .. hauntedLights)
+assert(hauntedParts < 1300, "the haunted scenery stays light: " .. hauntedParts)
+besideTrail(haunted, "CemeteryGate", "GatePillar", "the haunted")
+local mausoleum = haunted:FindFirstChild("Mausoleum")
+assert(mausoleum ~= nil and mausoleum:FindFirstChild("CryptDoor") ~= nil and mausoleum:FindFirstChild("CryptGlow") ~= nil, "a mausoleum with a glowing door")
+local plinth = mausoleum:FindFirstChild("CryptPlinth")
+assert(plinth.CanCollide, "the mausoleum can be bumped into")
+local walls = mausoleum:FindFirstChild("CryptWalls")
+facesCamp(walls.CFrame, "the mausoleum")
+local plinthBottom = plinth.CFrame.Position.Y - plinth.Size.Y / 2
+for _, offset in { Vector3.new(-1, 0, -1), Vector3.new(1, 0, -1), Vector3.new(-1, 0, 1), Vector3.new(1, 0, 1) } do
+	local corner = plinth.CFrame * Vector3.new(offset.X * plinth.Size.X / 2, 0, offset.Z * plinth.Size.Z / 2)
+	assert(workspace:Raycast(Vector3.new(corner.X, 300, corner.Z)).Position.Y > plinthBottom, "the mausoleum's plinth reaches the ground at every corner")
+end
+local fencePosts = 0
+for _, p in haunted:GetDescendants() do
+	if p.Name == "FencePost" then
+		fencePosts += 1
+		assert(p.CanCollide, "the graveyard fence can be bumped into")
+	end
+end
+assert(fencePosts >= 20, "a fence round the graveyard: " .. fencePosts)
+
+-- The forest makes way in the desert, the flowers at night, and both come back.
+local function shown(kind)
+	local count = 0
+	for _, p in instances do
+		if p.Parent ~= nil and p.Parent == sceneryFolder and SceneryThemes.kind(p.Name) == kind then count += 1 end
+	end
+	return count
+end
+local treeKind = if PACK_MODE == "none" then "Conifer" elseif PACK_MODE == "generated" then nil else "Pine"
+local treesBefore = if treeKind then shown(treeKind) else 0
+local flowersBefore = shown("Flowers")
+local rocksBefore = shown("Rock")
+assert(Scenery.setTheme("desert") and Scenery.theme() == "desert", "the desert can be chosen")
+assert(desert.Parent == workspace and haunted.Parent == ServerStorage and farm.Parent == ServerStorage and sakura.Parent == ServerStorage and alpineOnly.Parent == ServerStorage,
+	"the desert shows; the other themes, the festoon and watchtower make way")
+assert(Lighting.ClockTime == Scenery.LOOKS.desert.clock and materialColours["Material.Grass"] == Scenery.LOOKS.desert.terrain["Material.Grass"], "the desert light and sand apply")
+if treeKind then
+	assert(treesBefore > 0 and shown(treeKind) == 0 and shown("Flowers") == 0, "no forest or flowers in the desert")
+	assert(shown("Rock") == rocksBefore, "the rocks stay")
+	if PACK_MODE == "none" then assert(shown("Birch") == 0, "the birches make way too") end
+end
+assert(Scenery.setTheme("haunted") and Scenery.theme() == "haunted", "the haunted night can be chosen")
+assert(haunted.Parent == workspace and desert.Parent == ServerStorage and alpineOnly.Parent == ServerStorage, "the graveyard shows")
+assert(Lighting.ClockTime == 0 and Lighting:FindFirstChildOfClass("Sky").MoonAngularSize == Scenery.LOOKS.haunted.moon, "a full moon at midnight")
+if treeKind then
+	assert(shown(treeKind) == treesBefore and shown("Flowers") == 0 and shown("Birch") == 0 and shown("Oak") == 0, "the dark pines stay at night; the flowers and leafy trees make way")
+end
+assert(Scenery.setTheme("default"), "alpine again")
+assert(desert.Parent == ServerStorage and haunted.Parent == ServerStorage and alpineOnly.Parent == sceneryFolder, "the new themes go back out of view")
+if treeKind then assert(shown(treeKind) == treesBefore and shown("Flowers") == flowersBefore and shown("Birch") > 0, "every tree and flower comes back") end
+assert(Lighting:FindFirstChildOfClass("Sky").MoonAngularSize == 11, "the moon goes back to its usual size")
+local again = look()
+for i = 1, 29 do assert(again[i] == alpine[i], "the alpine look comes back exactly after the new themes: " .. i) end
 -- Petals stay in the box round the camera, wherever it is and however long they fall.
 for _, centre in { Vector3.new(0, 6, 56), Vector3.new(-300, 80, 120) } do
 	for _, t in { 0, 1.5, 60, 4000.25 } do
@@ -400,6 +561,8 @@ for _, centre in { Vector3.new(0, 6, 56), Vector3.new(-300, 80, 120) } do
 	end
 end
 print(string.format("themes: %d cherry trees, %d blossoms, %d sakura parts; farm: %d fence posts, %d corn rows, %d cows, %d farm parts", trees, blossoms, sakuraParts, #posts, corn, cows, farmParts))
+print(string.format("desert: %d mesas, %d saguaros, %d palms, %d parts; haunted: %d graves, %d dead trees, %d lanterns, %d parts, %d lights",
+	desertNames.Mesa, desertNames.Saguaro, desertNames.Palm, desertParts, hauntedNames.Grave, hauntedNames.DeadTree, hauntedNames.JackOLantern, hauntedParts, hauntedLights))
 local published = Replicated:FindFirstChild("DiamondRushSceneryPlacements")
 if PACK_MODE == "generated" then
 	-- The server only lays the pack out; each player's game builds it.
@@ -407,8 +570,29 @@ if PACK_MODE == "generated" then
 	for _, p in instances do
 		assert(p.ClassName ~= "MeshPart", "the server builds no meshes itself")
 	end
+	-- The client follows the theme: start in the desert, then go back to alpine.
+	local stateObject = Instance.new("Configuration")
+	stateObject.Name = "DiamondRushState"
+	stateObject.Parent = Replicated
+	stateObject:SetAttribute("Theme", "desert")
+	local themeChanged = nil
+	stateObject.GetAttributeChangedSignal = function(_, key)
+		assert(key == "Theme")
+		return { Connect = function(_, handler) themeChanged = handler end }
+	end
 	local started = os.clock()
 	SceneryView.start()
+	local function clientShown(kind)
+		local count = 0
+		for _, p in instances do
+			if p.ClassName == "MeshPart" and p.Parent ~= nil and p.Parent.Name == "SceneryMeshes" and SceneryThemes.kind(p.Name) == kind then count += 1 end
+		end
+		return count
+	end
+	assert(themeChanged ~= nil and clientShown("Pine") == 0 and clientShown("Flowers") == 0 and clientShown("Rock") >= 30, "the client builds the desert without its forest")
+	stateObject:SetAttribute("Theme", "default")
+	themeChanged()
+	assert(clientShown("Pine") >= 150 and clientShown("Flowers") >= 120, "the forest comes back with the alpine theme")
 	-- One EditableMesh is the server's check that they can be used here.
 	assert(editableMeshes == 1 + 25 and meshParts == 25, "each mesh is built once and shared by its copies: " .. editableMeshes .. " " .. meshParts)
 	print(string.format("client built the pack in %.0f ms", (os.clock() - started) * 1000))
@@ -474,13 +658,14 @@ for _, p in instances do
 	if p.Name == "Birch" then birches += 1 end
 	if p.Name == "Trunk" then assert(not inReserved(p.CFrame.Position), "trees stay off the leaderboard sites") end
 	if p.ClassName == "Part" or p.ClassName == "WedgePart" or p.ClassName == "CornerWedgePart" then
-		if p.Parent ~= nil then
+		-- The themes' own scenery waits in ServerStorage, counted on its own above.
+		if p.Parent ~= nil and not p:IsDescendantOf(ServerStorage) then
 			parts += 1
 			assert(p.Anchored and p.CanQuery == false and p.CanTouch == false, "scenery must not interfere with mining/physics: " .. tostring(p.Name))
 			assert(p.Size.X > 0 and p.Size.Y > 0 and p.Size.Z > 0, "positive size: " .. tostring(p.Name))
 		end
 	elseif p.ClassName == "PointLight" then
-		lights += 1
+		if not p:IsDescendantOf(ServerStorage) then lights += 1 end
 		assert(not p.Shadows, "point lights skip shadows")
 	end
 	-- Conifer wedges slope down away from their (upright) trunk.
@@ -554,11 +739,14 @@ try:
             + "\nlocal Inflate = " + module("src/shared/Inflate.luau")
             + "\nlocal MeshPack = " + module("src/shared/MeshPack.luau")
             + "\nlocal ScenePackData = " + module("src/shared/ScenePackData.luau")
+            + "\nlocal SceneryThemes = " + module("src/shared/SceneryThemes.luau")
             + "\nlocal ScenePack = " + module("src/server/ScenePack.luau")
             + "\nlocal SceneryView = " + module("src/client/SceneryView.luau")
             + "\nlocal Sakura = " + module("src/server/Sakura.luau")
             + "\nlocal Watchtower = " + module("src/server/Watchtower.luau")
             + "\nlocal Farm = " + module("src/server/Farm.luau")
+            + "\nlocal Desert = " + module("src/server/Desert.luau")
+            + "\nlocal Haunted = " + module("src/server/Haunted.luau")
             + "\nlocal PetalView = " + module("src/client/PetalView.luau")
             + "\nlocal Scenery = " + module("src/server/Scenery.luau")
             + "\n" + checks

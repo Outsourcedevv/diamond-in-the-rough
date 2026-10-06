@@ -1,7 +1,8 @@
 --!strict
 -- The games menu on the left of the screen, in the lobby's royal white and
--- gold: Diamond in the Rough with its live status and a Join button, more
--- slots marked Coming soon, How to play, and Back to lobby while playing. The
+-- gold: Diamond in the Rough with its live status and a Join button, Diamond
+-- Climb with the climber's platform and a Join button, more slots marked
+-- Coming soon, How to play, and Back to lobby while playing. The
 -- Hide button hides it to a small tab; the tab (or G) shows it again. The tab
 -- itself can be hidden from the settings (G still works). Also turns the
 -- lobby's giant diamond on this computer.
@@ -102,10 +103,25 @@ function LobbyView.status(phase: string, stone: number, skin: string?): string
 	return "LIVE · " .. Format.commas(stone) .. " " .. words.material .. " left"
 end
 
--- `request` sends joinGame / leaveGame; `onChange(inGame)` runs whenever the
--- player moves between the lobby and the game (and once at the start);
--- `onHelp` opens the How to Play guide.
-function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boolean) -> (), onHelp: (() -> ())?)
+-- What the Diamond Climb card says about the climb.
+function LobbyView.climbStatus(checkpoint: number, wins: number): string
+	local text = "Platform " .. Format.commas(checkpoint) .. " of 1,000"
+	if wins > 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " climb" else " climbs") end
+	return text
+end
+
+-- Where the player is: "climb" (Diamond Climb), "rough" (Diamond in the
+-- Rough) or "lobby", from their InClimb and InGame attributes.
+function LobbyView.place(player: Player): string
+	if player:GetAttribute("InClimb") == true then return "climb" end
+	return if player:GetAttribute("InGame") == true then "rough" else "lobby"
+end
+
+-- `request` sends joinGame (with the game's name) / leaveGame;
+-- `onChange(place)` runs whenever the player moves between the lobby and the
+-- games ("lobby", "rough" or "climb"; once at the start too); `onHelp`
+-- opens the How to Play guide.
+function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (string) -> (), onHelp: (() -> ())?)
 	local player = Players.LocalPlayer
 	local gui = make("ScreenGui", {
 		Name = "GamesMenu",
@@ -231,8 +247,49 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	}, card)
 	rounded(join, 10)
 
+	-- Diamond Climb.
+	local climbCard = make("Frame", {
+		LayoutOrder = 2,
+		Size = UDim2.new(1, 0, 0, 96),
+		BackgroundTransparency = 1,
+	}, list)
+	rounded(climbCard, 14)
+	stroke(climbCard, GOLD, 2)
+	local climbFill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 1 }, climbCard)
+	rounded(climbFill, 14)
+	make("UIGradient", { Color = ColorSequence.new(Color3.fromRGB(92, 52, 160), Color3.fromRGB(40, 22, 96)), Rotation = 35 }, climbFill)
+	gemMark(climbCard, Color3.fromRGB(255, 150, 220), 0)
+	text(climbCard, {
+		Position = UDim2.fromOffset(72, 10),
+		Size = UDim2.new(1, -80, 0, 26),
+		Font = TITLE_FONT,
+		TextSize = 20,
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = "Diamond Climb",
+	})
+	local climbLive = text(climbCard, {
+		Position = UDim2.fromOffset(72, 38),
+		Size = UDim2.new(1, -80, 0, 18),
+		Font = Enum.Font.GothamMedium,
+		TextSize = 13,
+		TextColor3 = Color3.fromRGB(230, 210, 255),
+		Text = "",
+	})
+	local climbJoin = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -10, 1, -10),
+		Size = UDim2.fromOffset(120, 30),
+		BackgroundColor3 = GOLD,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 16,
+		TextColor3 = ROYAL_DEEP,
+		Text = "JOIN",
+		ZIndex = 2,
+	}, climbCard)
+	rounded(climbJoin, 10)
+
 	-- More games to come.
-	for index = 2, 4 do
+	for index = 3, 4 do
 		local soon = make("Frame", {
 			LayoutOrder = index,
 			Size = UDim2.new(1, 0, 0, 84),
@@ -347,28 +404,54 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	state:GetAttributeChangedSignal("Stone"):Connect(refreshLive)
 	state:GetAttributeChangedSignal("Skin"):Connect(refreshLive)
 	refreshLive()
+	local function refreshClimb()
+		climbLive.Text = LobbyView.climbStatus(tonumber(state:GetAttribute("ClimbCheckpoint")) or 0, tonumber(state:GetAttribute("ClimbWins")) or 0)
+	end
+	state:GetAttributeChangedSignal("ClimbCheckpoint"):Connect(refreshClimb)
+	state:GetAttributeChangedSignal("ClimbWins"):Connect(refreshClimb)
+	refreshClimb()
 
-	local inGame: boolean? = nil
+	local place: string? = nil
+	local function playing(button: TextButton, on: boolean)
+		button.Text = if on then "PLAYING" else "JOIN"
+		button.BackgroundColor3 = if on then Color3.new(1, 1, 1) else GOLD
+		button.AutoButtonColor = not on
+	end
+	local refreshQueued = false
 	local function refreshPlace()
-		local now = player:GetAttribute("InGame") == true
-		if now == inGame then return end
-		inGame = now
-		join.Text = if now then "PLAYING" else "JOIN"
-		join.BackgroundColor3 = if now then Color3.new(1, 1, 1) else GOLD
-		join.AutoButtonColor = not now
-		back.Visible = now
-		-- Arriving in the lobby opens the menu; joining the game tucks it away.
-		setOpen(not now)
+		refreshQueued = false
+		local now = LobbyView.place(player)
+		if now == place then return end
+		place = now
+		playing(join, now == "rough")
+		playing(climbJoin, now == "climb")
+		back.Visible = now ~= "lobby"
+		-- Arriving in the lobby opens the menu; joining a game tucks it away.
+		setOpen(now == "lobby")
 		onChange(now)
 	end
-	player:GetAttributeChangedSignal("InGame"):Connect(refreshPlace)
+	-- Moving between games changes two attributes; look once both have arrived.
+	local function queueRefresh()
+		if refreshQueued then return end
+		refreshQueued = true
+		task.defer(refreshPlace)
+	end
+	player:GetAttributeChangedSignal("InGame"):Connect(queueRefresh)
+	player:GetAttributeChangedSignal("InClimb"):Connect(queueRefresh)
 	refreshPlace()
 
 	join.Activated:Connect(function()
-		if inGame then
+		if place == "rough" then
 			setOpen(false)
 		else
 			request:FireServer("joinGame", "DiamondInTheRough")
+		end
+	end)
+	climbJoin.Activated:Connect(function()
+		if place == "climb" then
+			setOpen(false)
+		else
+			request:FireServer("joinGame", "DiamondClimb")
 		end
 	end)
 	back.Activated:Connect(function()
