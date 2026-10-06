@@ -1,13 +1,13 @@
 --!strict
 -- Flies the diamond bird (see the server's DiamondBird) smoothly on this
 -- client from the times the server gives, beats its wings, and shows the
--- "click the bird" call and the double-gifts countdown on the display.
+-- "click the bird" call on the display. The 2X card beside the stone count
+-- (in the client's display) shows while the bonus runs.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local BirdBonus = require(Shared:WaitForChild("BirdBonus"))
-local Format = require(Shared:WaitForChild("Format"))
 
 local BirdView = {}
 
@@ -81,7 +81,7 @@ function BirdView.start(gui: ScreenGui, State: Instance)
 	local call = Instance.new("TextLabel")
 	call.Name = "DiamondBird"
 	call.AnchorPoint = Vector2.new(0.5, 0)
-	call.Position = UDim2.new(0.5, 0, 0, 194)
+	call.Position = UDim2.new(0.5, 0, 0, 244)
 	call.Size = UDim2.fromOffset(0, 40)
 	call.AutomaticSize = Enum.AutomaticSize.X
 	call.BackgroundColor3 = Color3.fromRGB(16, 18, 26)
@@ -125,15 +125,9 @@ function BirdView.start(gui: ScreenGui, State: Instance)
 		end
 		local boostUntil = tonumber(State:GetAttribute("BirdBoostUntil")) or 0
 		local text = ""
-		if now < boostUntil then
-			text = string.format("2X GIFTS  ·  %s", Format.duration(boostUntil - now))
-			call.TextColor3 = Color3.fromRGB(246, 200, 92)
-			stroke.Color = Color3.fromRGB(246, 200, 92)
-			call.TextTransparency = 0
-		elseif waiting then
+		-- No call while a bonus runs: the 2X card beside the stone count shows it.
+		if waiting and now >= boostUntil then
 			text = "DIAMOND BIRD  ·  CLICK IT FOR 2X GIFTS"
-			call.TextColor3 = Color3.fromRGB(132, 212, 255)
-			stroke.Color = Color3.fromRGB(132, 212, 255)
 			call.TextTransparency = 0.2 + 0.2 * math.sin(now * 6)
 		end
 		if text ~= shown then

@@ -1,8 +1,7 @@
 --!strict
 -- The farm theme's own scenery: the mountain stands in a ranch corral, a
 -- timber board fence all the way round the arena except for the opening
--- where the trail comes in from the camp, under a log arch with a hanging
--- DIAMOND RANCH sign. Beyond the fence, in view of the spawn, is a red
+-- where the trail comes in from the camp, under a log arch. Beyond the fence, in view of the spawn, is a red
 -- gambrel-roofed barn with a silo, a cornfield with a scarecrow, a windpump,
 -- a tractor, hay bales and cows grazing by a water trough. Scenery builds it
 -- once, alongside the alpine valley, and keeps it out of view until the theme
@@ -70,9 +69,8 @@ local function fence(kit: Kit, parent: Instance, random: Random)
 			end
 		end
 	end
-	-- The gate: two tall log posts at the ends of the fence, a log beam
-	-- across them with knee braces, and the ranch's sign hanging under it,
-	-- lettered on both faces.
+	-- The gate: two tall log posts at the ends of the fence and a log beam
+	-- across them with knee braces.
 	local left, right = posts[1], posts[#posts]
 	local across = Vector3.new(right.X - left.X, 0, right.Z - left.Z).Unit
 	for _, at in { left, right } do
@@ -84,29 +82,6 @@ local function fence(kit: Kit, parent: Instance, random: Random)
 	kit.beam(model, "GateBeam", a, b, 0.75, LOG, Enum.Material.Wood)
 	kit.beam(model, "GateBrace", Vector3.new(left.X, top - 2.2, left.Z), Vector3.new(left.X, top - 0.2, left.Z) + across * 2, 0.35, LOG, Enum.Material.Wood)
 	kit.beam(model, "GateBrace", Vector3.new(right.X, top - 2.2, right.Z), Vector3.new(right.X, top - 0.2, right.Z) - across * 2, 0.35, LOG, Enum.Material.Wood)
-	local middle = (Vector3.new(left.X, top, left.Z) + Vector3.new(right.X, top, right.Z)) / 2 - Vector3.new(0, 2.1, 0)
-	local outward = Vector3.new(middle.X, 0, middle.Z).Unit
-	local frame = CFrame.lookAt(middle, middle + outward)
-	local sign = kit.piece(model, "RanchSign", Vector3.new(6.6, 1.7, 0.25), frame, Color3.fromRGB(138, 100, 64), Enum.Material.WoodPlanks)
-	for _, side in { -2.7, 2.7 } do
-		kit.piece(model, "SignChain", Vector3.new(0.1, 1.3, 0.1), frame * CFrame.new(side, 1.45, 0), Color3.fromRGB(56, 56, 58), Enum.Material.Metal)
-	end
-	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
-		local gui = Instance.new("SurfaceGui")
-		gui.Face = face
-		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-		gui.PixelsPerStud = 50
-		gui.LightInfluence = 1
-		gui.Parent = sign
-		local text = Instance.new("TextLabel")
-		text.Size = UDim2.fromScale(1, 1)
-		text.BackgroundTransparency = 1
-		text.Font = Enum.Font.FredokaOne
-		text.TextScaled = true
-		text.TextColor3 = Color3.fromRGB(252, 238, 206)
-		text.Text = "DIAMOND RANCH"
-		text.Parent = gui
-	end
 end
 
 -- Where the barn goes: open, fairly flat ground in view of the spawn (to one

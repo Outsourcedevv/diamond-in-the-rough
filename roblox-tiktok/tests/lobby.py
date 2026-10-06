@@ -1,5 +1,5 @@
 """Checks the royal lobby under the Luau CLI with a Roblox stand-in: where it
-floats, the spawn, the court's columns, banners, dais, diamond and crest, the
+floats, the spawn, the court's columns, banners, dais and diamond, the
 walls that stop players falling off, and the games menu's status line.
 
     python3 tests/lobby.py [path/to/luau]
@@ -46,7 +46,7 @@ local toCentre = (Vector3.new(O.X, 0, O.Z) - Vector3.new(spawn.CFrame.Position.X
 check(spawn.CFrame.LookVector:Dot(toCentre) > 0.999, "players arrive facing the dais")
 
 local counts, walls, floor = {}, 0, nil
-local banners, crest = 0, nil
+local banners = 0
 for i = before + 1, #instances do
 	local p = instances[i]
 	if p.ClassName == "Part" or p.ClassName == "SpawnLocation" then
@@ -67,7 +67,6 @@ for i = before + 1, #instances do
 			check(gui ~= nil and gui.Face == "NormalId.Front", "banners carry the crown emblem")
 			check(p.CFrame.LookVector:Dot(Vector3.new(-offset.X, 0, -offset.Z).Unit) > 0.99, "banners face into the court")
 		end
-		if p.Name == "Crest" then crest = p end
 	end
 end
 check(floor ~= nil and floor.CanCollide and floor.Shape == "PartType.Cylinder" and floor.Size.Y >= 120, "a solid round marble floor")
@@ -132,20 +131,12 @@ DiamondShape.setKind(root, "diamond")
 count, visible = shown()
 check(count == 64 and visible == 64, "and back to a diamond")
 
--- The welcome crest faces the spawn and can be seen over the diamond from the
--- third-person camera behind a player standing on the spawn.
-check(crest ~= nil and crest.CFrame.LookVector:Dot(Vector3.new(0, 0, 1)) > 0.999, "the crest faces the spawn")
-local eye = spawn.CFrame.Position + Vector3.new(0, 9, 12)
-local crestBottom = crest.CFrame.Position - Vector3.new(0, crest.Size.Y / 2, 0)
-local diamondTop = centre.Y + Lobby.DIAMOND_SIZE / 2 + 0.5 -- with its bob
-local t = (eye.Z - centre.Z) / (eye.Z - crestBottom.Z)
-local sightAtDiamond = eye.Y + (crestBottom.Y - eye.Y) * t
-check(sightAtDiamond > diamondTop + 1, "the crest shows above the diamond: " .. sightAtDiamond .. " vs " .. diamondTop)
-local texts = {}
+-- No lettered signs: their text renders badly, so the court carries none.
+local lettered = 0
 for _, object in instances do
-	if object.ClassName == "TextLabel" and object:IsDescendantOf(built.model) then texts[object.Text] = true end
+	if object.ClassName == "TextLabel" and object:IsDescendantOf(built.model) then lettered += 1 end
 end
-check(texts["WELCOME"] and texts["Open  GAMES  on the left to play"], "the crest and banners are lettered")
+check(lettered == 0 and counts.Crest == nil, "no lettered signs in the lobby")
 
 -- The games menu's status line for Diamond in the Rough.
 check(LobbyView.status("Digging", 123456) == "LIVE · 123,456 stone left", "live stone count")

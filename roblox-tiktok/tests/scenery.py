@@ -174,6 +174,13 @@ local alpineOnly = sceneryFolder:FindFirstChild("AlpineOnly")
 local festoon = alpineOnly:FindFirstChild("Festoon")
 local tower = alpineOnly:FindFirstChild("Watchtower")
 local sakura = ServerStorage:FindFirstChild("SakuraScenery")
+-- No lettered signs anywhere in the scenery: their text renders badly (the
+-- leaderboards are built elsewhere and keep theirs).
+for _, holder in { sceneryFolder, sakura, ServerStorage:FindFirstChild("FarmScenery") } do
+	for _, object in holder:GetDescendants() do
+		assert(object.ClassName ~= "TextLabel", "no lettered signs in the scenery: " .. tostring(object.Parent and object.Parent.Parent and object.Parent.Parent.Name))
+	end
+end
 assert(Scenery.theme() == "default" and festoon ~= nil and alpineOnly.Parent == sceneryFolder, "the valley starts alpine, festoon lights up")
 -- The watchtower: beside the mountain, off the arena, camp and boards, facing
 -- the camp, every leg in the ground and its lookout high above it.
@@ -307,7 +314,7 @@ for _, p in farm:GetDescendants() do
 	if p.ClassName == "PointLight" then farmLights += 1 end
 	if p.Name == "RanchSign" then signs += 1 end
 end
-assert(#gateposts == 2 and signs == 1, "a gate arch with its sign")
+assert(#gateposts == 2 and signs == 0, "a gate arch with no sign (sign text renders badly)")
 assert(#posts > 40, "posts all the way round: " .. #posts)
 local ring = {}
 for _, at in posts do table.insert(ring, at) end

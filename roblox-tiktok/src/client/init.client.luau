@@ -170,10 +170,58 @@ rounded(bar, 2)
 local barFill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, bar)
 rounded(barFill, 2)
 
--- Round time, in a small pill under the stone count.
+-- Diamond bird bonus: a gold 2X card beside the stone count while it runs.
+local boostTag = make("Frame", {
+	Position = UDim2.new(0.5, 158, 0, 10),
+	Size = UDim2.fromOffset(84, 84),
+	Visible = false,
+}, gui)
+glass(boostTag, 14)
+local boostStroke = boostTag:FindFirstChildOfClass("UIStroke")
+if boostStroke then
+	boostStroke.Color = GOLD
+	boostStroke.Thickness = 2
+	boostStroke.Transparency = 0
+end
+local boostScale = make("UIScale", { Scale = 1 }, boostTag)
+make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 40),
+	Position = UDim2.fromOffset(0, 12),
+	BackgroundTransparency = 1,
+	Font = FONT_HEAVY,
+	TextSize = 38,
+	TextColor3 = GOLD,
+	Text = "2X",
+}, boostTag)
+local boostTime = make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 18),
+	Position = UDim2.fromOffset(0, 54),
+	BackgroundTransparency = 1,
+	Font = FONT,
+	TextSize = 14,
+	TextColor3 = WHITE,
+	Text = "",
+}, boostTag)
+
+-- Win counter, under the stone count ------------------------------------------------
+local WINS_Y, WINS_Y_HOLDING = 102, 158 -- moves below the hold countdown while it shows
+local winsBox = make("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, WINS_Y),
+	Size = UDim2.fromOffset(0, 44),
+	AutomaticSize = Enum.AutomaticSize.X,
+	Font = FONT_HEAVY,
+	TextSize = 26,
+	Text = "WINS: 0",
+}, gui)
+rounded(winsBox, 14)
+make("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, winsBox)
+local winsStroke = make("UIStroke", { Thickness = 2, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
+
+-- Round time, in a small pill under the wins.
 local timerLabel = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 102),
+	Position = UDim2.new(0.5, 0, 0, 154),
 	Size = UDim2.fromOffset(0, 26),
 	AutomaticSize = Enum.AutomaticSize.X,
 	Font = FONT,
@@ -185,25 +233,10 @@ local timerLabel = make("TextLabel", {
 glass(timerLabel, 13)
 make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, timerLabel)
 
--- Win counter (top right) -----------------------------------------------------------
-local winsBox = make("TextLabel", {
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -12, 0, 10),
-	Size = UDim2.fromOffset(0, 56),
-	AutomaticSize = Enum.AutomaticSize.X,
-	Font = FONT_HEAVY,
-	TextSize = 32,
-	Text = "WINS: 0",
-}, gui)
-rounded(winsBox, 14)
-make("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, winsBox)
-local winsStroke = make("UIStroke", { Thickness = 2, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
-
-
 -- Banner, hold countdown and status ----------------------------------------------------
 local banner = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 140),
+	Position = UDim2.new(0.5, 0, 0, 192),
 	Size = UDim2.fromOffset(0, 44),
 	AutomaticSize = Enum.AutomaticSize.X,
 	Font = FONT,
@@ -1009,7 +1042,19 @@ RunService.RenderStepped:Connect(function(dt: number)
 	-- The hold counter takes the top-centre slot; the hand and gem stay unobscured.
 	stoneBox.Visible = phase ~= "Holding"
 	timerLabel.Visible = phase ~= "Holding"
+	winsBox.Position = UDim2.new(0.5, 0, 0, if phase == "Holding" then WINS_Y_HOLDING else WINS_Y)
+	-- The time takes the wins' place when the counter is hidden.
+	timerLabel.Position = UDim2.new(0.5, 0, 0, if winsBox.Visible then 154 else WINS_Y)
 	local now = workspace:GetServerTimeNow()
+	-- The 2X card shows while a caught diamond bird's bonus runs, and pops in.
+	local boostLeft = attr("BirdBoostUntil", 0) - now
+	local boosted = boostLeft > 0 and phase ~= "Holding"
+	if boosted and not boostTag.Visible then
+		boostScale.Scale = 1.4
+		TweenService:Create(boostScale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end
+	boostTag.Visible = boosted
+	if boosted then setText(boostTime, Format.duration(boostLeft)) end
 	local roundStart = attr("RoundStart", now)
 	setText(timerLabel, '<font color="#A8AEBE">TIME</font>   ' .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart))
 	setText(status, "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else ""))

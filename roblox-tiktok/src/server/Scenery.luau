@@ -717,26 +717,6 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	beam(folder, "PickaxeHandle", leanAt, leanAt + Vector3.new(0.4, 2.6, 0.5), 0.16, Color3.fromRGB(122, 84, 52), Enum.Material.Wood)
 	piece(folder, "PickaxeHead", Vector3.new(1.5, 0.22, 0.22), CFrame.new(leanAt + Vector3.new(0.4, 2.55, 0.5)) * CFrame.Angles(0, 0.9, 0.25), Color3.fromRGB(150, 154, 158), Enum.Material.Metal)
 
-	-- A trail sign points the way to the mountain.
-	local signAt = camp + Vector3.new(4.5, 0, -11)
-	beam(folder, "SignPost", signAt, signAt + Vector3.new(0, 4.2, 0), 0.35, Color3.fromRGB(92, 68, 46), Enum.Material.Wood)
-	-- The lettered face looks back towards the camp, where players spawn.
-	local board = piece(folder, "SignBoard", Vector3.new(4.4, 1.1, 0.2), CFrame.lookAt(signAt + Vector3.new(0, 3.5, 0), signAt + Vector3.new(0, 3.5, 1)), Color3.fromRGB(132, 100, 66), Enum.Material.WoodPlanks)
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 50
-	gui.LightInfluence = 1
-	gui.Parent = board
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.Font = Enum.Font.FredokaOne
-	text.TextScaled = true
-	text.TextColor3 = Color3.fromRGB(250, 236, 206)
-	text.Text = "DIAMOND MOUNTAIN"
-	text.Parent = gui
-
 	-- What only the alpine theme shows.
 	local alpine = Instance.new("Folder")
 	alpine.Name = "AlpineOnly"

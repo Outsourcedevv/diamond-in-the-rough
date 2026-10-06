@@ -6129,8 +6129,7 @@ return DiamondBird
           <string name="Source"><![CDATA[--!strict
 -- The farm theme's own scenery: the mountain stands in a ranch corral, a
 -- timber board fence all the way round the arena except for the opening
--- where the trail comes in from the camp, under a log arch with a hanging
--- DIAMOND RANCH sign. Beyond the fence, in view of the spawn, is a red
+-- where the trail comes in from the camp, under a log arch. Beyond the fence, in view of the spawn, is a red
 -- gambrel-roofed barn with a silo, a cornfield with a scarecrow, a windpump,
 -- a tractor, hay bales and cows grazing by a water trough. Scenery builds it
 -- once, alongside the alpine valley, and keeps it out of view until the theme
@@ -6198,9 +6197,8 @@ local function fence(kit: Kit, parent: Instance, random: Random)
 			end
 		end
 	end
-	-- The gate: two tall log posts at the ends of the fence, a log beam
-	-- across them with knee braces, and the ranch's sign hanging under it,
-	-- lettered on both faces.
+	-- The gate: two tall log posts at the ends of the fence and a log beam
+	-- across them with knee braces.
 	local left, right = posts[1], posts[#posts]
 	local across = Vector3.new(right.X - left.X, 0, right.Z - left.Z).Unit
 	for _, at in { left, right } do
@@ -6212,29 +6210,6 @@ local function fence(kit: Kit, parent: Instance, random: Random)
 	kit.beam(model, "GateBeam", a, b, 0.75, LOG, Enum.Material.Wood)
 	kit.beam(model, "GateBrace", Vector3.new(left.X, top - 2.2, left.Z), Vector3.new(left.X, top - 0.2, left.Z) + across * 2, 0.35, LOG, Enum.Material.Wood)
 	kit.beam(model, "GateBrace", Vector3.new(right.X, top - 2.2, right.Z), Vector3.new(right.X, top - 0.2, right.Z) - across * 2, 0.35, LOG, Enum.Material.Wood)
-	local middle = (Vector3.new(left.X, top, left.Z) + Vector3.new(right.X, top, right.Z)) / 2 - Vector3.new(0, 2.1, 0)
-	local outward = Vector3.new(middle.X, 0, middle.Z).Unit
-	local frame = CFrame.lookAt(middle, middle + outward)
-	local sign = kit.piece(model, "RanchSign", Vector3.new(6.6, 1.7, 0.25), frame, Color3.fromRGB(138, 100, 64), Enum.Material.WoodPlanks)
-	for _, side in { -2.7, 2.7 } do
-		kit.piece(model, "SignChain", Vector3.new(0.1, 1.3, 0.1), frame * CFrame.new(side, 1.45, 0), Color3.fromRGB(56, 56, 58), Enum.Material.Metal)
-	end
-	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
-		local gui = Instance.new("SurfaceGui")
-		gui.Face = face
-		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-		gui.PixelsPerStud = 50
-		gui.LightInfluence = 1
-		gui.Parent = sign
-		local text = Instance.new("TextLabel")
-		text.Size = UDim2.fromScale(1, 1)
-		text.BackgroundTransparency = 1
-		text.Font = Enum.Font.FredokaOne
-		text.TextScaled = true
-		text.TextColor3 = Color3.fromRGB(252, 238, 206)
-		text.Text = "DIAMOND RANCH"
-		text.Parent = gui
-	end
 end
 
 -- Where the barn goes: open, fairly flat ground in view of the spawn (to one
@@ -6993,8 +6968,7 @@ return Leaderboards
 -- mountain valley, where every player arrives. A ring of marble columns with
 -- gold capitals carries royal blue banners; a royal blue carpet leads from the
 -- spawn to a stepped dais where a giant diamond turns slowly (each client
--- spins it, see GamesMenu), and a crest above the far colonnade welcomes
--- players. Games are joined from the games menu on the side of the screen.
+-- spins it, see GamesMenu). Games are joined from the games menu on the side of the screen.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
@@ -7043,18 +7017,6 @@ end
 local function beam(parent: Instance, name: string, a: Vector3, b: Vector3, width: number, height: number, colour: Color3, material: Enum.Material, solid: boolean?): Part
 	local length = (b - a).Magnitude
 	return piece(parent, name, Vector3.new(width, height, length), CFrame.lookAt((a + b) / 2, b), colour, material, solid)
-end
-
-local function label(parent: Instance, text: string, position: UDim2, size: UDim2, colour: Color3, font: Enum.Font)
-	local line = Instance.new("TextLabel")
-	line.BackgroundTransparency = 1
-	line.Position = position
-	line.Size = size
-	line.Font = font
-	line.TextScaled = true
-	line.TextColor3 = colour
-	line.Text = text
-	line.Parent = parent
 end
 
 function Lobby.build(parent: Instance): Built
@@ -7217,23 +7179,6 @@ function Lobby.build(parent: Instance): Built
 			end
 		end
 	end
-
-	-- The welcome crest stands on the far colonnade, facing the spawn above the diamond.
-	local crestAt = O + Vector3.new(0, entablature + 2.8 - O.Y + 5.5, -radius)
-	local crestFrame = CFrame.lookAt(crestAt, crestAt + Vector3.new(0, 0, 1))
-	local crest = piece(model, "Crest", Vector3.new(34, 11, 1), crestFrame, MARBLE, Enum.Material.Marble)
-	for _, edge in { { 0, 5.7, 35.2, 0.6 }, { 0, -5.7, 35.2, 0.6 }, { 17.3, 0, 0.6, 11.8 }, { -17.3, 0, 0.6, 11.8 } } do
-		piece(model, "CrestFrame", Vector3.new(edge[3], edge[4], 1.2), crestFrame * CFrame.new(edge[1], edge[2], 0), GOLD, Enum.Material.Metal)
-	end
-	piece(model, "CrestCrown", Vector3.new(6, 3, 1.2), crestFrame * CFrame.new(0, 7.4, 0), GOLD, Enum.Material.Metal)
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 24
-	gui.LightInfluence = 0.7
-	gui.Parent = crest
-	label(gui, "WELCOME", UDim2.fromScale(0.05, 0.08), UDim2.fromScale(0.9, 0.52), ROYAL, Enum.Font.Merriweather)
-	label(gui, "Open  GAMES  on the left to play", UDim2.fromScale(0.08, 0.64), UDim2.fromScale(0.84, 0.24), Color3.fromRGB(150, 112, 30), Enum.Font.GothamBold)
 
 	-- A marble balustrade with a gold rail rings the edge; an invisible wall
 	-- behind it stops anyone jumping off.
@@ -8840,26 +8785,6 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	beam(folder, "PickaxeHandle", leanAt, leanAt + Vector3.new(0.4, 2.6, 0.5), 0.16, Color3.fromRGB(122, 84, 52), Enum.Material.Wood)
 	piece(folder, "PickaxeHead", Vector3.new(1.5, 0.22, 0.22), CFrame.new(leanAt + Vector3.new(0.4, 2.55, 0.5)) * CFrame.Angles(0, 0.9, 0.25), Color3.fromRGB(150, 154, 158), Enum.Material.Metal)
 
-	-- A trail sign points the way to the mountain.
-	local signAt = camp + Vector3.new(4.5, 0, -11)
-	beam(folder, "SignPost", signAt, signAt + Vector3.new(0, 4.2, 0), 0.35, Color3.fromRGB(92, 68, 46), Enum.Material.Wood)
-	-- The lettered face looks back towards the camp, where players spawn.
-	local board = piece(folder, "SignBoard", Vector3.new(4.4, 1.1, 0.2), CFrame.lookAt(signAt + Vector3.new(0, 3.5, 0), signAt + Vector3.new(0, 3.5, 1)), Color3.fromRGB(132, 100, 66), Enum.Material.WoodPlanks)
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 50
-	gui.LightInfluence = 1
-	gui.Parent = board
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.Font = Enum.Font.FredokaOne
-	text.TextScaled = true
-	text.TextColor3 = Color3.fromRGB(250, 236, 206)
-	text.Text = "DIAMOND MOUNTAIN"
-	text.Parent = gui
-
 	-- What only the alpine theme shows.
 	local alpine = Instance.new("Folder")
 	alpine.Name = "AlpineOnly"
@@ -9707,10 +9632,58 @@ rounded(bar, 2)
 local barFill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, bar)
 rounded(barFill, 2)
 
--- Round time, in a small pill under the stone count.
+-- Diamond bird bonus: a gold 2X card beside the stone count while it runs.
+local boostTag = make("Frame", {
+	Position = UDim2.new(0.5, 158, 0, 10),
+	Size = UDim2.fromOffset(84, 84),
+	Visible = false,
+}, gui)
+glass(boostTag, 14)
+local boostStroke = boostTag:FindFirstChildOfClass("UIStroke")
+if boostStroke then
+	boostStroke.Color = GOLD
+	boostStroke.Thickness = 2
+	boostStroke.Transparency = 0
+end
+local boostScale = make("UIScale", { Scale = 1 }, boostTag)
+make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 40),
+	Position = UDim2.fromOffset(0, 12),
+	BackgroundTransparency = 1,
+	Font = FONT_HEAVY,
+	TextSize = 38,
+	TextColor3 = GOLD,
+	Text = "2X",
+}, boostTag)
+local boostTime = make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 18),
+	Position = UDim2.fromOffset(0, 54),
+	BackgroundTransparency = 1,
+	Font = FONT,
+	TextSize = 14,
+	TextColor3 = WHITE,
+	Text = "",
+}, boostTag)
+
+-- Win counter, under the stone count ------------------------------------------------
+local WINS_Y, WINS_Y_HOLDING = 102, 158 -- moves below the hold countdown while it shows
+local winsBox = make("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, WINS_Y),
+	Size = UDim2.fromOffset(0, 44),
+	AutomaticSize = Enum.AutomaticSize.X,
+	Font = FONT_HEAVY,
+	TextSize = 26,
+	Text = "WINS: 0",
+}, gui)
+rounded(winsBox, 14)
+make("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, winsBox)
+local winsStroke = make("UIStroke", { Thickness = 2, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
+
+-- Round time, in a small pill under the wins.
 local timerLabel = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 102),
+	Position = UDim2.new(0.5, 0, 0, 154),
 	Size = UDim2.fromOffset(0, 26),
 	AutomaticSize = Enum.AutomaticSize.X,
 	Font = FONT,
@@ -9722,25 +9695,10 @@ local timerLabel = make("TextLabel", {
 glass(timerLabel, 13)
 make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, timerLabel)
 
--- Win counter (top right) -----------------------------------------------------------
-local winsBox = make("TextLabel", {
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -12, 0, 10),
-	Size = UDim2.fromOffset(0, 56),
-	AutomaticSize = Enum.AutomaticSize.X,
-	Font = FONT_HEAVY,
-	TextSize = 32,
-	Text = "WINS: 0",
-}, gui)
-rounded(winsBox, 14)
-make("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, winsBox)
-local winsStroke = make("UIStroke", { Thickness = 2, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
-
-
 -- Banner, hold countdown and status ----------------------------------------------------
 local banner = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 140),
+	Position = UDim2.new(0.5, 0, 0, 192),
 	Size = UDim2.fromOffset(0, 44),
 	AutomaticSize = Enum.AutomaticSize.X,
 	Font = FONT,
@@ -10546,7 +10504,19 @@ RunService.RenderStepped:Connect(function(dt: number)
 	-- The hold counter takes the top-centre slot; the hand and gem stay unobscured.
 	stoneBox.Visible = phase ~= "Holding"
 	timerLabel.Visible = phase ~= "Holding"
+	winsBox.Position = UDim2.new(0.5, 0, 0, if phase == "Holding" then WINS_Y_HOLDING else WINS_Y)
+	-- The time takes the wins' place when the counter is hidden.
+	timerLabel.Position = UDim2.new(0.5, 0, 0, if winsBox.Visible then 154 else WINS_Y)
 	local now = workspace:GetServerTimeNow()
+	-- The 2X card shows while a caught diamond bird's bonus runs, and pops in.
+	local boostLeft = attr("BirdBoostUntil", 0) - now
+	local boosted = boostLeft > 0 and phase ~= "Holding"
+	if boosted and not boostTag.Visible then
+		boostScale.Scale = 1.4
+		TweenService:Create(boostScale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end
+	boostTag.Visible = boosted
+	if boosted then setText(boostTime, Format.duration(boostLeft)) end
 	local roundStart = attr("RoundStart", now)
 	setText(timerLabel, '<font color="#A8AEBE">TIME</font>   ' .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart))
 	setText(status, "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else ""))
@@ -10718,13 +10688,13 @@ end)
             <string name="Source"><![CDATA[--!strict
 -- Flies the diamond bird (see the server's DiamondBird) smoothly on this
 -- client from the times the server gives, beats its wings, and shows the
--- "click the bird" call and the double-gifts countdown on the display.
+-- "click the bird" call on the display. The 2X card beside the stone count
+-- (in the client's display) shows while the bonus runs.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local BirdBonus = require(Shared:WaitForChild("BirdBonus"))
-local Format = require(Shared:WaitForChild("Format"))
 
 local BirdView = {}
 
@@ -10798,7 +10768,7 @@ function BirdView.start(gui: ScreenGui, State: Instance)
 	local call = Instance.new("TextLabel")
 	call.Name = "DiamondBird"
 	call.AnchorPoint = Vector2.new(0.5, 0)
-	call.Position = UDim2.new(0.5, 0, 0, 194)
+	call.Position = UDim2.new(0.5, 0, 0, 244)
 	call.Size = UDim2.fromOffset(0, 40)
 	call.AutomaticSize = Enum.AutomaticSize.X
 	call.BackgroundColor3 = Color3.fromRGB(16, 18, 26)
@@ -10842,15 +10812,9 @@ function BirdView.start(gui: ScreenGui, State: Instance)
 		end
 		local boostUntil = tonumber(State:GetAttribute("BirdBoostUntil")) or 0
 		local text = ""
-		if now < boostUntil then
-			text = string.format("2X GIFTS  ·  %s", Format.duration(boostUntil - now))
-			call.TextColor3 = Color3.fromRGB(246, 200, 92)
-			stroke.Color = Color3.fromRGB(246, 200, 92)
-			call.TextTransparency = 0
-		elseif waiting then
+		-- No call while a bonus runs: the 2X card beside the stone count shows it.
+		if waiting and now >= boostUntil then
 			text = "DIAMOND BIRD  ·  CLICK IT FOR 2X GIFTS"
-			call.TextColor3 = Color3.fromRGB(132, 212, 255)
-			stroke.Color = Color3.fromRGB(132, 212, 255)
 			call.TextTransparency = 0.2 + 0.2 * math.sin(now * 6)
 		end
 		if text ~= shown then
