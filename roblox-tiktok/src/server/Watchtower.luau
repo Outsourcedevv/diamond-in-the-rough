@@ -16,7 +16,9 @@ local BRACE = Color3.fromRGB(92, 68, 48)
 local PLANK = Color3.fromRGB(138, 104, 72)
 local SHINGLE = Color3.fromRGB(70, 62, 58)
 
-Watchtower.HEIGHT = 15 -- studs from the highest leg's ground to the lookout floor
+Watchtower.HEIGHT = 15 -- studs from the highest leg's ground to the lookout floor, as drawn
+Watchtower.SCALE = 1.5 -- every measurement below is drawn this much bigger
+local S = Watchtower.SCALE
 
 -- Where it goes: open ground ahead of the camp and to the left of the
 -- mountain, preferring higher ground for the view. `gap` keeps it that far
@@ -30,21 +32,21 @@ local function site(kit: Kit, random: Random, gap: number): CFrame?
 		local distance = random:NextNumber(65, 130)
 		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
 		local centre = kit.ground(spot.X, spot.Z)
-		if not kit.clear(centre, 7) and centre.Y < 40 and kit.steepness(centre.X, centre.Z) < 0.8 and kit.spaced(centre, gap) then
+		if not kit.clear(centre, 7 * S) and centre.Y < 40 and kit.steepness(centre.X, centre.Z) < 0.8 and kit.spaced(centre, gap) then
 			local flat = Vector3.new(centre.X, 0, centre.Z)
 			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
 			local turn = CFrame.lookAt(flat, flat + facing)
 			local high, low = -math.huge, math.huge
 			for _, x in { -2.8, 2.8 } do
 				for _, z in { -3.2, 2.8 } do
-					local foot = turn * Vector3.new(x, 0, z)
+					local foot = turn * (Vector3.new(x, 0, z) * S)
 					local y = kit.ground(foot.X, foot.Z).Y
 					high, low = math.max(high, y), math.min(low, y)
 				end
 			end
 			-- Higher ground gives the lookout its view; a gentle slope is fine.
 			local score = math.abs(angle + math.rad(45)) + distance / 200 - centre.Y / 50
-			if high - low < 4 and score < bestScore then
+			if high - low < 4 * S and score < bestScore then
 				bestScore = score
 				best = turn + Vector3.new(0, high, 0)
 			end
@@ -72,14 +74,19 @@ function Watchtower.build(kit: Kit, parent: Instance): Model?
 	model.Name = "Watchtower"
 	model.Parent = parent
 	local h = Watchtower.HEIGHT
+	-- Drawn in the tower's own measurements; `at`, `put` and `log` enlarge them.
 	local function at(x: number, y: number, z: number): Vector3
-		return base * Vector3.new(x, y, z)
+		return base * (Vector3.new(x, y, z) * S)
 	end
 	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
-		return kit.piece(model, name, size, base * offset, colour, material, kind)
+		return kit.piece(model, name, size * S, base * (CFrame.new(offset.Position * S) * offset.Rotation), colour, material, kind)
 	end
 	local function log(name: string, a: Vector3, b: Vector3, width: number, colour: Color3): BasePart
-		return kit.beam(model, name, a, b, width, colour, Enum.Material.Wood)
+		return kit.beam(model, name, a, b, width * S, colour, Enum.Material.Wood)
+	end
+	-- How far below the tower's frame the ground is at a world point, in its measurements.
+	local function depth(world: Vector3): number
+		return (kit.ground(world.X, world.Z).Y - base.Position.Y) / S
 	end
 	-- Where a point of a leg is: the legs taper from 2.8 studs out at the
 	-- ground to 2.2 under the floor. `y` is the height above the frame.
@@ -91,7 +98,7 @@ function Watchtower.build(kit: Kit, parent: Instance): Model?
 	for _, sx in { -1, 1 } do
 		for _, sz in { -1, 1 } do
 			local foot = leg(sx, sz, 0)
-			local ground = kit.ground(foot.X, foot.Z).Y - base.Position.Y
+			local ground = depth(foot)
 			kit.solid(log("TowerLeg", leg(sx, sz, ground - 0.6), leg(sx, sz, h + 0.2), 0.62, LOG))
 			kit.solid(put("TowerFooting", Vector3.new(1.3, 0.8, 1.3), CFrame.new(sx * 2.8, ground + 0.2, sz * 2.8), Color3.fromRGB(128, 124, 116), Enum.Material.Cobblestone))
 		end
@@ -140,7 +147,7 @@ function Watchtower.build(kit: Kit, parent: Instance): Model?
 	lamp.CastShadow = false
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(255, 190, 120)
-	light.Range = 12
+	light.Range = 12 * S
 	light.Brightness = 0.8
 	light.Shadows = false
 	light.Parent = lamp
@@ -166,7 +173,7 @@ function Watchtower.build(kit: Kit, parent: Instance): Model?
 	-- The ladder runs up the front, from the ground to the gap in the wall.
 	local front = -3.3
 	local foot = at(0, 0, front)
-	local bottom = kit.ground(foot.X, foot.Z).Y - base.Position.Y - 0.3
+	local bottom = depth(foot) - 0.3
 	for _, x in { -0.55, 0.55 } do
 		kit.solid(log("TowerLadderRail", at(x, bottom, front), at(x, h + 1.7, front), 0.18, LOG))
 	end

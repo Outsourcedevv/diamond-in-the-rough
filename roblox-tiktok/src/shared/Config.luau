@@ -41,6 +41,10 @@ local Config = {
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
 	MessagingTopic = "DiamondRushTikTok", -- Open Cloud topic (published games)
 
+	-- Single player: whoever plays is the streamer, so every player gets the Y
+	-- panel, test gifts and gift keybinds. Set to false for a game where others
+	-- join; then only the owner and Admins can.
+	SinglePlayer = true,
 	-- Extra Roblox user ids allowed to change settings (the owner always can).
 	Admins = {} :: { number },
 }

@@ -13,6 +13,7 @@ export type Kit = {
 	piece: (parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, kind: string?) -> BasePart,
 	beam: (parent: Instance, name: string, a: Vector3, b: Vector3, width: number, colour: Color3, material: Enum.Material) -> BasePart,
 	solid: (BasePart) -> BasePart,
+	enlarge: (model: Instance, origin: Vector3, factor: number) -> (), -- scales a finished model about a point
 	ground: (x: number, z: number) -> Vector3,
 	clear: (at: Vector3, margin: number) -> boolean, -- arena, camp, lake, path or leaderboards
 	spaced: (at: Vector3, gap: number) -> boolean, -- clear of the valley's trees and rocks
@@ -148,11 +149,15 @@ end
 -- plinth. `frame` sits on the plinth's top, its front (-Z) facing the camp;
 -- `drop` is how far the plinth reaches down to the lowest ground under it.
 -- Returns how far in front of the centre its steps end.
-local SHRINE_CLEARANCE = 18 -- studs from the shrine's centre kept free of trees
-local function shrine(kit: Kit, parent: Instance, frame: CFrame, drop: number): number
+Sakura.SHRINE_SCALE = 1.5 -- the shrine is drawn at its own size, then made this much bigger
+local S = Sakura.SHRINE_SCALE
+local SHRINE_CLEARANCE = 18 * S -- studs from the shrine's centre kept free of trees
+local function shrine(kit: Kit, parent: Instance, frame: CFrame, worldDrop: number): number
 	local model = Instance.new("Model")
 	model.Name = "Shrine"
 	model.Parent = parent
+	-- Drawn at its own size (the plinth reaching down `drop`), then enlarged.
+	local drop = worldDrop / S
 	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
 		return kit.piece(model, name, size, frame * offset, colour, material, kind)
 	end
@@ -268,7 +273,8 @@ local function shrine(kit: Kit, parent: Instance, frame: CFrame, drop: number): 
 	for _, x in { -7.2, 7.2 } do
 		lantern(kit, model, frame * Vector3.new(x, 0, -6))
 	end
-	return 7 + steps * 0.9
+	kit.enlarge(model, frame.Position, S)
+	return (7 + steps * 0.9) * S
 end
 
 -- Where the shrine goes: a flat, open meadow ahead of the camp, off to one
@@ -283,22 +289,22 @@ local function shrineSite(kit: Kit, random: Random, gap: number): (CFrame?, numb
 		local distance = random:NextNumber(60, 125)
 		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
 		local centre = kit.ground(spot.X, spot.Z)
-		if not kit.clear(centre, 13) and centre.Y < 24 and kit.steepness(centre.X, centre.Z) < 0.4 and kit.spaced(centre, gap) then
+		if not kit.clear(centre, 13 * S) and centre.Y < 24 and kit.steepness(centre.X, centre.Z) < 0.4 and kit.spaced(centre, gap) then
 			local flat = Vector3.new(centre.X, 0, centre.Z)
 			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
 			local base = CFrame.lookAt(flat, flat + facing)
-			local gate = base * Vector3.new(0, 0, -14)
+			local gate = base * Vector3.new(0, 0, -14 * S)
 			if not kit.clear(kit.ground(gate.X, gate.Z), 3) then
 				-- The ground under the plinth's corners, edges and steps.
 				local low, high = math.huge, -math.huge
 				for _, offset in { Vector3.new(-8.5, 0, -9.7), Vector3.new(8.5, 0, -9.7), Vector3.new(-8.5, 0, 7), Vector3.new(8.5, 0, 7),
 					Vector3.new(0, 0, 0), Vector3.new(-8.5, 0, 0), Vector3.new(8.5, 0, 0), Vector3.new(0, 0, 7), Vector3.new(0, 0, -9.7) } do
-					local at = base * offset
+					local at = base * (offset * S)
 					local y = kit.ground(at.X, at.Z).Y
 					low, high = math.min(low, y), math.max(high, y)
 				end
 				local score = math.abs(angle) + distance / 150 + (high - low) * 0.3
-				if high - low < 2.5 and score < bestScore then
+				if high - low < 3.5 and score < bestScore then
 					bestScore = score
 					best = base + Vector3.new(0, high + 0.9, 0)
 					bestDrop = high + 0.9 - low + 0.6
@@ -328,7 +334,7 @@ function Sakura.build(kit: Kit): Folder
 		local approach = shrine(kit, folder, site, drop)
 		-- Its own small torii on the approach from the camp, facing the camp.
 		local gate = site * Vector3.new(0, 0, -(approach + 2.5))
-		torii(kit, folder, CFrame.new(kit.ground(gate.X, gate.Z)) * site.Rotation * CFrame.Angles(0, math.pi, 0), 6, 7)
+		torii(kit, folder, CFrame.new(kit.ground(gate.X, gate.Z)) * site.Rotation * CFrame.Angles(0, math.pi, 0), 6 * S, 7 * S)
 	else
 		warn("[DiamondRush] Sakura: no flat open meadow for the shrine, so it is left out.")
 	end

@@ -132,7 +132,12 @@ export type Options = {
 export type Bird = {
 	multiplier: () -> number,
 	spawn: () -> (),
+	catch: (player: Player) -> boolean,
 }
+
+-- How far from the bird a catch may be: the bird is flown by each client, so
+-- the server checks the player is roughly in sight of where it should be.
+DiamondBird.CATCH_RANGE = 300
 
 function DiamondBird.start(options: Options): Bird
 	local random = options.random or Random.new()
@@ -152,11 +157,11 @@ function DiamondBird.start(options: Options): Bird
 		task.delay(BirdBonus.LEAVE_SECONDS + 0.5, function() bird:Destroy() end)
 	end
 
-	local function caught(player: Player, bird: Model)
-		if bird ~= current or bird:GetAttribute("LeaveAt") ~= 0 or player:GetAttribute("InGame") ~= true then return end
+	local function caught(player: Player, bird: Model): boolean
+		if bird ~= current or bird:GetAttribute("LeaveAt") ~= 0 or player:GetAttribute("InGame") ~= true then return false end
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if humanoid == nil or humanoid.Health <= 0 then return end
+		if humanoid == nil or humanoid.Health <= 0 then return false end
 		leave(bird)
 		-- Catching another bird while the bonus runs restarts the 30 seconds.
 		boostUntil = workspace:GetServerTimeNow() + Config.BirdBoostSeconds
@@ -173,6 +178,29 @@ function DiamondBird.start(options: Options): Bird
 			if boostId ~= id then return end
 			options.notify:FireAllClients("feed", { text = "Double gifts are over", stone = 0, kind = "notice" })
 		end)
+		return true
+	end
+
+	-- A click the client aimed at the bird it flies (see BirdView). Clicks in
+	-- first person don't always reach the ClickDetector, so this is the main way
+	-- to catch it; the server checks the bird is still circling and that the
+	-- player is within range of where the shared flight path puts it now.
+	local function catch(player: Player): boolean
+		local bird = current
+		if bird == nil or bird:GetAttribute("LeaveAt") ~= 0 then return false end
+		local character = player.Character
+		local head = character and (character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart"))
+		if head == nil or not head:IsA("BasePart") then return false end
+		local path: BirdBonus.Path = {
+			radius = tonumber(bird:GetAttribute("Radius")) or options.radius,
+			height = tonumber(bird:GetAttribute("Height")) or 0,
+			angle = tonumber(bird:GetAttribute("Angle")) or 0,
+			direction = tonumber(bird:GetAttribute("Direction")) or 1,
+		}
+		local start = tonumber(bird:GetAttribute("Start")) or workspace:GetServerTimeNow()
+		local x, y, z = BirdBonus.position(path, workspace:GetServerTimeNow() - start)
+		if (head.Position - Vector3.new(x, y, z)).Magnitude > DiamondBird.CATCH_RANGE then return false end
+		return caught(player, bird)
 	end
 
 	local function spawn()
@@ -216,6 +244,7 @@ function DiamondBird.start(options: Options): Bird
 			return BirdBonus.multiplier(workspace:GetServerTimeNow(), boostUntil, Config.BirdMultiplier)
 		end,
 		spawn = spawn,
+		catch = catch,
 	}
 end
 

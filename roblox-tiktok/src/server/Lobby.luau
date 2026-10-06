@@ -4,6 +4,7 @@
 -- gold capitals carries royal blue banners; a royal blue carpet leads from the
 -- spawn to a stepped dais where a giant diamond turns slowly (each client
 -- spins it, see GamesMenu). Games are joined from the games menu on the side of the screen.
+-- A How to Play board beside the carpet opens the on-screen guide.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
@@ -21,7 +22,7 @@ local MARBLE_SHADE = Color3.fromRGB(222, 218, 210)
 local GOLD = Color3.fromRGB(224, 178, 72)
 local ROYAL = Color3.fromRGB(34, 52, 140)
 
-export type Built = { model: Model, spawn: SpawnLocation, diamond: Model }
+export type Built = { model: Model, spawn: SpawnLocation, diamond: Model, board: Model }
 
 local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, solid: boolean?): Part
 	local p = Instance.new("Part")
@@ -215,6 +216,65 @@ function Lobby.build(parent: Instance): Built
 		end
 	end
 
+	-- The How to Play board beside the carpet, angled to the spawn. Its face is
+	-- drawn, not lettered (lettered signs render badly): a gold gem over three
+	-- list lines. Walking up and pressing E, or clicking it, opens the guide on
+	-- screen (see the client's HowToPlay).
+	local boardModel = Instance.new("Model")
+	boardModel.Name = "HowToPlayBoard"
+	boardModel.Parent = model
+	local boardAt = O + Vector3.new(9, 0, 30)
+	local boardFrame = CFrame.lookAt(boardAt, Vector3.new(spawnAt.X, boardAt.Y, spawnAt.Z))
+	for _, x in { -4.3, 4.3 } do
+		piece(boardModel, "BoardPost", Vector3.new(0.7, 9, 0.7), boardFrame * CFrame.new(x, 4.5, 0), GOLD, Enum.Material.Metal, true)
+	end
+	piece(boardModel, "BoardBase", Vector3.new(10, 0.6, 2), boardFrame * CFrame.new(0, 0.3, 0), MARBLE_SHADE, Enum.Material.Marble, true)
+	piece(boardModel, "BoardFrame", Vector3.new(8.6, 6, 0.4), boardFrame * CFrame.new(0, 5.6, 0), GOLD, Enum.Material.Metal, true)
+	local face = piece(boardModel, "BoardFace", Vector3.new(8, 5.4, 0.5), boardFrame * CFrame.new(0, 5.6, 0), ROYAL, Enum.Material.SmoothPlastic, true)
+	piece(boardModel, "BoardCap", Vector3.new(9.4, 0.5, 0.9), boardFrame * CFrame.new(0, 8.85, 0), GOLD, Enum.Material.Metal)
+	local drawing = Instance.new("SurfaceGui")
+	drawing.Face = Enum.NormalId.Front
+	drawing.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	drawing.PixelsPerStud = 30
+	drawing.LightInfluence = 0.6
+	drawing.Parent = face
+	-- Squares (gems, turned on a corner) are sized by the face's height.
+	local function mark(x: number, y: number, w: number, h: number, colour: Color3, gem: boolean)
+		local frame = Instance.new("Frame")
+		frame.AnchorPoint = Vector2.new(0.5, 0.5)
+		frame.Position = UDim2.fromScale(x, y)
+		frame.Size = UDim2.fromScale(w, h)
+		if gem then
+			frame.SizeConstraint = Enum.SizeConstraint.RelativeYY
+			frame.Rotation = 45
+		end
+		frame.BackgroundColor3 = colour
+		frame.BorderSizePixel = 0
+		frame.Parent = drawing
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.2, 0)
+		corner.Parent = frame
+	end
+	mark(0.5, 0.22, 0.2, 0.2, GOLD, true)
+	for row = 0, 2 do
+		local y = 0.5 + row * 0.15
+		mark(0.2, y, 0.08, 0.08, GOLD, true)
+		mark(0.55, y, 0.52 - row * 0.08, 0.06, MARBLE, false)
+	end
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "HowToPlay"
+	prompt.ActionText = "How to play"
+	prompt.ObjectText = "Guide"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 14
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = face
+	local click = Instance.new("ClickDetector")
+	click.Name = "HowToPlayClick"
+	click.MaxActivationDistance = 40
+	click.Parent = boardModel
+
 	-- A marble balustrade with a gold rail rings the edge; an invisible wall
 	-- behind it stops anyone jumping off.
 	local edge = 60
@@ -237,7 +297,7 @@ function Lobby.build(parent: Instance): Built
 		wall.CastShadow = false
 	end
 
-	return { model = model, spawn = spawn, diamond = gem.model }
+	return { model = model, spawn = spawn, diamond = gem.model, board = boardModel }
 end
 
 return Lobby

@@ -137,6 +137,10 @@ local Config = {
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
 	MessagingTopic = "DiamondRushTikTok", -- Open Cloud topic (published games)
 
+	-- Single player: whoever plays is the streamer, so every player gets the Y
+	-- panel, test gifts and gift keybinds. Set to false for a game where others
+	-- join; then only the owner and Admins can.
+	SinglePlayer = true,
 	-- Extra Roblox user ids allowed to change settings (the owner always can).
 	Admins = {} :: { number },
 }
@@ -1371,6 +1375,57 @@ return Inflate
       </Item>
       <Item class="ModuleScript" referent="13">
         <Properties>
+          <string name="Name">Keybinds</string>
+          <string name="Source"><![CDATA[--!strict
+-- Gift keybinds: keys the streamer can give a gift to, so pressing the key in
+-- the game sends that gift (no TikTok or bridge needed). Set from the Y
+-- panel's GIFT KEYBINDS or from the bridge's catalogue; the server publishes
+-- them as the State attribute "GiftBindings" (JSON {KeyName: {gift, coins}}).
+local Keybinds = {}
+
+Keybinds.MAX = 24 -- bindings kept at once
+
+-- Keys that can carry a gift. Movement (W A S D, Space), the game's own keys
+-- (E for prompts, G games, H how to play, P settings, Y the streamer panel)
+-- and Roblox's zoom keys (I, O) are left out, so a binding never fights them.
+Keybinds.KEYS = {
+	"B", "C", "F", "J", "K", "L", "M", "N", "Q", "R", "T", "U", "V", "X", "Z",
+	"One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Zero",
+	"F6", "F7", "F8",
+}
+local allowed: { [string]: boolean } = {}
+for _, key in Keybinds.KEYS do allowed[key] = true end
+
+local DIGITS = {
+	One = "1", Two = "2", Three = "3", Four = "4", Five = "5",
+	Six = "6", Seven = "7", Eight = "8", Nine = "9", Zero = "0",
+}
+
+-- True for a KeyCode name (e.g. "K", "One", "F6") a gift can be bound to.
+function Keybinds.allowed(key: any): boolean
+	return type(key) == "string" and allowed[key] == true
+end
+
+-- How a key is written on screen: "1" for One, otherwise its name.
+function Keybinds.label(key: string): string
+	return DIGITS[key] or key
+end
+
+-- A binding as the server keeps it, or nil if it is not a valid one.
+function Keybinds.clean(gift: any, coins: any): { gift: string, coins: number }?
+	if type(gift) ~= "string" or type(coins) ~= "number" or coins ~= coins then return nil end
+	local name = string.sub(string.gsub(gift, "^%s+", ""), 1, 40)
+	name = string.gsub(name, "%s+$", "")
+	if name == "" then return nil end
+	return { gift = name, coins = math.clamp(math.floor(coins), 1, 100000) }
+end
+
+return Keybinds
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="14">
+        <Properties>
           <string name="Name">MeshPack</string>
           <string name="Source"><![CDATA[--!strict
 --!native
@@ -1577,7 +1632,7 @@ return MeshPack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="14">
+      <Item class="ModuleScript" referent="15">
         <Properties>
           <string name="Name">MountainCodec</string>
           <string name="Source"><![CDATA[--!strict
@@ -1700,7 +1755,7 @@ return MountainCodec
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="15">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">PartShapes</string>
           <string name="Source"><![CDATA[--!strict
@@ -1780,7 +1835,7 @@ return PartShapes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="16">
+      <Item class="ModuleScript" referent="17">
         <Properties>
           <string name="Name">RockStyle</string>
           <string name="Source"><![CDATA[--!strict
@@ -1957,7 +2012,7 @@ return RockStyle
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">ScenePackData</string>
           <string name="Source"><![CDATA[--!strict
@@ -4470,7 +4525,7 @@ H44kTFtpTKosYs80HUUjx6lJBM1IIhU0wjFDne44YDAzkYybTsIMTzUjZp3NIMZikzorJ1U5ftJ0mVVJ
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="18">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">Skin</string>
           <string name="Source"><![CDATA[--!strict
@@ -4509,11 +4564,11 @@ return Skin
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="19">
+  <Item class="ServerScriptService" referent="20">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="20">
+    <Item class="Script" referent="21">
       <Properties>
         <string name="Name">DiamondRushServer</string>
         <token name="RunContext">0</token>
@@ -4534,6 +4589,8 @@ local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
+local Keybinds = require(Shared:WaitForChild("Keybinds"))
+local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
@@ -4574,6 +4631,8 @@ local settings = {
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
+	-- Players who hid the GAMES tab and SETTINGS button (by user id).
+	hiddenButtons = {} :: { [string]: boolean },
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
@@ -4581,7 +4640,21 @@ local settings = {
 	theme = "default", -- the map's look: "default" (alpine), "sakura" or "farm"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 }
-local saved = Store.load()
+-- Single player: every player has their own save (statues, wins, theme,
+-- keybinds and the rest), so the server waits for its player and loads theirs.
+-- A first visit starts from the game's old shared save.
+if Config.SinglePlayer then
+	local waitUntil = os.clock() + 30
+	while #Players:GetPlayers() == 0 and os.clock() < waitUntil do
+		task.wait(0.1)
+	end
+	local owner = Players:GetPlayers()[1]
+	if owner then Store.useKey("player_" .. tostring(owner.UserId)) end
+end
+local saved, readable = Store.load()
+if saved == nil and readable and Config.SinglePlayer then
+	saved = Store.load(Store.SHARED_KEY)
+end
 if saved then
 	for key, value in saved do
 		if settings[key] ~= nil and type(value) == type(settings[key]) then
@@ -4839,6 +4912,8 @@ end
 -- Players whose client asked for the mountain; only they receive changes.
 local synced: { [Player]: boolean } = {}
 local readyAt: { [Player]: number } = {}
+local catchAt: { [Player]: number } = {}
+local hideAt: { [Player]: number } = {}
 local function sendMessages(messages: { { any } }, player: Player?)
 	for _, message in messages do
 		if player then
@@ -5165,35 +5240,61 @@ cancelHoldForRebuild = function()
 	if interrupted then drop("rebuild") end
 	return interrupted
 end
+-- Puts a player on top of the rock: at `destination` if given, else out of
+-- any restored rock their body is inside (`centreOnly`: only rock right where
+-- they stand, not rock beside them).
+local function liftOut(current: Mountain.Mountain, player: Player, destination: Vector3?, centreOnly: boolean?)
+	if player:GetAttribute("InGame") ~= true or player == holder then return end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if character == nil or root == nil or not root:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then return end
+	local clearance = humanoid.HipHeight + root.Size.Y / 2
+	-- R6 rigs use zero HipHeight; account for their legs.
+	if humanoid.RigType == Enum.HumanoidRigType.R6 then clearance += 2 end
+	if destination == nil then
+		-- Lift players whose body is now inside restored rock onto its surface.
+		local feet = root.Position.Y - clearance
+		local top = current:coveredTop(root.Position, feet + 0.15, root.Position.Y + 1.5, centreOnly)
+		if top then destination = Vector3.new(root.Position.X, top, root.Position.Z) end
+	end
+	if destination then
+		local target = destination + Vector3.new(0, clearance + 1, 0)
+		character:PivotTo(character:GetPivot() + (target - root.Position))
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+-- Each client draws the rock itself, a moment after the server restores it.
+-- A player lifted onto rock their client has not drawn yet falls back into
+-- the old hole, and the rock then appears round them (the holder, moved to
+-- the summit after a big rebuild, was trapped like this). So for a few
+-- seconds after rock comes back, anyone standing inside it is lifted again.
+local UNBURY_SECONDS, UNBURY_EVERY = 6, 0.4
+local unburySerial = 0
+local function keepUnburying()
+	unburySerial += 1
+	local serial = unburySerial
+	task.spawn(function()
+		for _ = 1, math.ceil(UNBURY_SECONDS / UNBURY_EVERY) do
+			task.wait(UNBURY_EVERY)
+			local current = mountain
+			if serial ~= unburySerial or current == nil then return end
+			for _, player in Players:GetPlayers() do
+				liftOut(current, player, nil, true)
+			end
+		end
+	end)
+end
 interruptRebuildHold = function(restored: number, interrupted: Player?)
 	local current = mountain
 	if current == nil then return end
 	-- The former holder goes to the highest restored surface after a big rebuild.
 	local summit = if interrupted and restored >= 10000 then current:summit() else nil
 	for _, player in Players:GetPlayers() do
-		if player:GetAttribute("InGame") ~= true then continue end
-		local character = player.Character
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if character == nil or root == nil or not root:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then continue end
-		local clearance = humanoid.HipHeight + root.Size.Y / 2
-		-- R6 rigs use zero HipHeight; account for their legs.
-		if humanoid.RigType == Enum.HumanoidRigType.R6 then clearance += 2 end
-		local destination = if player == interrupted then summit else nil
-		if destination == nil then
-			-- Lift players whose body is now inside restored rock onto its surface.
-			local feet = root.Position.Y - clearance
-			local top = current:coveredTop(root.Position, feet + 0.15, root.Position.Y + 1.5)
-			if top then destination = Vector3.new(root.Position.X, top, root.Position.Z) end
-		end
-		if destination then
-			local target = destination + Vector3.new(0, clearance + 1, 0)
-			character:PivotTo(character:GetPivot() + (target - root.Position))
-			root.AssemblyLinearVelocity = Vector3.zero
-			root.AssemblyAngularVelocity = Vector3.zero
-		end
-
+		liftOut(current, player, if player == interrupted then summit else nil)
 	end
+	if restored > 0 then keepUnburying() end
 end
 
 local function win(player: Player)
@@ -5366,9 +5467,11 @@ local diamondBird = require(script.DiamondBird).start({
 	state = State,
 	notify = Notify,
 	radius = mountainRadius + 12,
+	-- Low enough to see and click from the trail: about halfway up the
+	-- mountain, never lower than head height above the camp.
 	height = function(): number
 		local top = if mountain then mountain:summit() else nil
-		return (if top then top.Y else mountainRadius) + 8
+		return math.max(12, (if top then top.Y else mountainRadius) * 0.5 + 4)
 	end,
 })
 -- Gifts that arrived during the bonus, so the feed can say so.
@@ -5379,8 +5482,10 @@ local function processTikTok(event: TikTokFeed.Event)
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
 		local name = string.lower(event.gift)
 		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
+		-- The bridge's own keybind for this gift replaces its old one; keys
+		-- set in the game's GIFT KEYBINDS stay.
 		for key, binding in settings.giftBindings do
-			if string.lower(binding.gift) == name then settings.giftBindings[key] = nil end
+			if string.lower(binding.gift) == name and binding.game ~= true then settings.giftBindings[key] = nil end
 		end
 		if event.keybind and event.keybind ~= "" then
 			settings.giftBindings[event.keybind] = { gift = event.gift, coins = event.coins or 1 }
@@ -5396,7 +5501,10 @@ local function processTikTok(event: TikTokFeed.Event)
 		local coins = math.max(1, event.coins or 1)
 		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
-		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
+		text = if event.parts == nil
+			then string.format("%s sent %s x%d", who, event.gift or "a gift", count)
+			elseif count == 1 then string.format("%s sent %s (%d of %d)", who, event.gift or "a gift", event.part or 1, event.parts)
+			else string.format("%s sent %s x%d (%d of %d)", who, event.gift or "a gift", count, event.part or 1, event.parts)
 		recordGifter(event, amount, coins * count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
@@ -5420,10 +5528,12 @@ local function processTikTok(event: TikTokFeed.Event)
 	-- Start the animation promptly while the queued rock work spans frames.
 	if event.type == "gift" then
 		Notify:FireAllClients("giftEffect", {
-			coins = math.max(1, event.coins or 1) * math.max(1, math.floor(event.count or 1)),
+			-- One gift's coins, never the combo total: Galaxy x10 arrives here
+			-- as ten Galaxies, each with the Galaxy's own effect.
+			coins = math.max(1, event.coins or 1),
 			position = preview,
 			name = who,
-			gift = event.gift or "Gift",
+			gift = (event.gift or "Gift") .. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
 			adding = amount < 0,
 			blocks = if amount < 0 then nil else blocks,
 		})
@@ -5438,6 +5548,31 @@ end
 local giftQueue: { TikTokFeed.Event } = {}
 local giftHead = 1
 local giftWorkerRunning = false
+local enqueue: (TikTokFeed.Event) -> ()
+
+-- A gift sent several times at once (Galaxy x10) plays as that many separate
+-- gifts: each one blasts or adds its own stone with its own effect and feed
+-- line, spaced so every effect gets its moment instead of one bigger effect
+-- for the combined coins. Very long combos (Rose x500) are shared out over
+-- at most MAX_SPLIT gifts so the show stays short.
+local MAX_SPLIT = 20
+-- Seconds between the gifts of a combo, by the gift's effect tier: about half
+-- an effect, so at most two overlap (the client plays two at once).
+local SPLIT_SPACING = { 0.6, 0.8, 1.2, 2.2, 2.8, 3.7 }
+local function splitCombo(event: TikTokFeed.Event, doubled: boolean)
+	local count = math.max(1, math.floor(event.count or 1))
+	local parts = math.min(count, MAX_SPLIT)
+	local spacing = SPLIT_SPACING[GiftTier.forCoins(math.max(1, event.coins or 1))]
+	for part = 1, parts do
+		local copy = table.clone(event)
+		copy.count = count // parts + (if part <= count % parts then 1 else 0)
+		copy.part = part
+		copy.parts = parts
+		if doubled then doubledGifts[copy] = true end
+		if part == 1 then enqueue(copy) else task.delay((part - 1) * spacing, enqueue, copy) end
+	end
+end
+
 local function onTikTok(event: TikTokFeed.Event)
 	if event.type == "theme" then
 		-- From the bridge control page's theme buttons: it changes the
@@ -5457,6 +5592,14 @@ local function onTikTok(event: TikTokFeed.Event)
 		event.count = math.max(1, math.floor(event.count or 1)) * multiplier
 		doubledGifts[event] = true
 	end
+	if event.type == "gift" and math.floor(event.count or 1) > 1 then
+		splitCombo(event, doubledGifts[event] == true)
+		return
+	end
+	enqueue(event)
+end
+
+function enqueue(event: TikTokFeed.Event)
 	table.insert(giftQueue, event)
 	State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
 	if giftWorkerRunning then return end
@@ -5501,7 +5644,7 @@ end)
 
 -- Pickaxe mining and settings ---------------------------------------------------------
 local function isAdmin(player: Player): boolean
-	if RunService:IsStudio() then
+	if Config.SinglePlayer or RunService:IsStudio() then
 		return true
 	end
 	if table.find(Config.Admins, player.UserId) then
@@ -5749,6 +5892,26 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "setSkin" and type(value) == "string" then
 		setSkin(value)
 		return
+	elseif action == "setGiftBinding" and type(value) == "table" then
+		-- GIFT KEYBINDS in the Y panel: pressing the key in the game sends the gift.
+		local binding = Keybinds.clean(value.gift, value.coins)
+		local key = value.key
+		if binding == nil or not Keybinds.allowed(key) then
+			notice(player, "Pick a gift name, its coins and one of the free keys.")
+			return
+		end
+		if settings.giftBindings[key] == nil then
+			local count = 0
+			for _ in settings.giftBindings do count += 1 end
+			if count >= Keybinds.MAX then
+				notice(player, string.format("You can keep up to %d keybinds. Remove one first.", Keybinds.MAX))
+				return
+			end
+		end
+		settings.giftBindings[key] = { gift = binding.gift, coins = binding.coins, game = true }
+	elseif action == "removeGiftBinding" and type(value) == "string" then
+		if settings.giftBindings[value] == nil then return end
+		settings.giftBindings[value] = nil
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
 		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1
@@ -5816,6 +5979,32 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 	end
 	if action == "joinGame" or action == "leaveGame" then
 		setInGame(player, action == "joinGame")
+		return
+	end
+	if action == "setHideButtons" then
+		-- Any player can tuck away the GAMES tab and SETTINGS button (their
+		-- keys still work); it is remembered for next time.
+		if type(value) ~= "boolean" then return end
+		local now = os.clock()
+		if now - (hideAt[player] or -math.huge) < 0.2 then return end
+		hideAt[player] = now
+		player:SetAttribute("HideButtons", value)
+		local id = tostring(player.UserId)
+		if (settings.hiddenButtons[id] == true) ~= value then
+			local count = 0
+			for _ in settings.hiddenButtons do count += 1 end
+			if value and count >= 500 then return end
+			settings.hiddenButtons[id] = if value then true else nil
+			Store.save(settings)
+		end
+		return
+	end
+	if action == "catchBird" then
+		-- A click aimed at the bird this player sees (see the client's aim).
+		local now = os.clock()
+		if now - (catchAt[player] or -math.huge) < 0.25 then return end
+		catchAt[player] = now
+		diamondBird.catch(player)
 		return
 	end
 	if admins[player] then
@@ -5889,6 +6078,7 @@ local function onPlayer(player: Player)
 	end
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
+	player:SetAttribute("HideButtons", settings.hiddenButtons[tostring(player.UserId)] == true)
 	if not modernChat then
 		player.Chatted:Connect(function(message)
 			onChat(player, message)
@@ -5906,6 +6096,8 @@ Players.PlayerRemoving:Connect(function(player)
 	mineCooldown[player] = nil
 	synced[player] = nil
 	readyAt[player] = nil
+	catchAt[player] = nil
+	hideAt[player] = nil
 end)
 
 publishSettings()
@@ -5913,7 +6105,7 @@ State:SetAttribute("TikTok", "Starting…")
 newRound()
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="21">
+      <Item class="ModuleScript" referent="22">
         <Properties>
           <string name="Name">DiamondBird</string>
           <string name="Source"><![CDATA[--!strict
@@ -6050,7 +6242,12 @@ export type Options = {
 export type Bird = {
 	multiplier: () -> number,
 	spawn: () -> (),
+	catch: (player: Player) -> boolean,
 }
+
+-- How far from the bird a catch may be: the bird is flown by each client, so
+-- the server checks the player is roughly in sight of where it should be.
+DiamondBird.CATCH_RANGE = 300
 
 function DiamondBird.start(options: Options): Bird
 	local random = options.random or Random.new()
@@ -6070,11 +6267,11 @@ function DiamondBird.start(options: Options): Bird
 		task.delay(BirdBonus.LEAVE_SECONDS + 0.5, function() bird:Destroy() end)
 	end
 
-	local function caught(player: Player, bird: Model)
-		if bird ~= current or bird:GetAttribute("LeaveAt") ~= 0 or player:GetAttribute("InGame") ~= true then return end
+	local function caught(player: Player, bird: Model): boolean
+		if bird ~= current or bird:GetAttribute("LeaveAt") ~= 0 or player:GetAttribute("InGame") ~= true then return false end
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if humanoid == nil or humanoid.Health <= 0 then return end
+		if humanoid == nil or humanoid.Health <= 0 then return false end
 		leave(bird)
 		-- Catching another bird while the bonus runs restarts the 30 seconds.
 		boostUntil = workspace:GetServerTimeNow() + Config.BirdBoostSeconds
@@ -6091,6 +6288,29 @@ function DiamondBird.start(options: Options): Bird
 			if boostId ~= id then return end
 			options.notify:FireAllClients("feed", { text = "Double gifts are over", stone = 0, kind = "notice" })
 		end)
+		return true
+	end
+
+	-- A click the client aimed at the bird it flies (see BirdView). Clicks in
+	-- first person don't always reach the ClickDetector, so this is the main way
+	-- to catch it; the server checks the bird is still circling and that the
+	-- player is within range of where the shared flight path puts it now.
+	local function catch(player: Player): boolean
+		local bird = current
+		if bird == nil or bird:GetAttribute("LeaveAt") ~= 0 then return false end
+		local character = player.Character
+		local head = character and (character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart"))
+		if head == nil or not head:IsA("BasePart") then return false end
+		local path: BirdBonus.Path = {
+			radius = tonumber(bird:GetAttribute("Radius")) or options.radius,
+			height = tonumber(bird:GetAttribute("Height")) or 0,
+			angle = tonumber(bird:GetAttribute("Angle")) or 0,
+			direction = tonumber(bird:GetAttribute("Direction")) or 1,
+		}
+		local start = tonumber(bird:GetAttribute("Start")) or workspace:GetServerTimeNow()
+		local x, y, z = BirdBonus.position(path, workspace:GetServerTimeNow() - start)
+		if (head.Position - Vector3.new(x, y, z)).Magnitude > DiamondBird.CATCH_RANGE then return false end
+		return caught(player, bird)
 	end
 
 	local function spawn()
@@ -6134,6 +6354,7 @@ function DiamondBird.start(options: Options): Bird
 			return BirdBonus.multiplier(workspace:GetServerTimeNow(), boostUntil, Config.BirdMultiplier)
 		end,
 		spawn = spawn,
+		catch = catch,
 	}
 end
 
@@ -6141,7 +6362,7 @@ return DiamondBird
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="22">
+      <Item class="ModuleScript" referent="23">
         <Properties>
           <string name="Name">Farm</string>
           <string name="Source"><![CDATA[--!strict
@@ -6170,7 +6391,9 @@ local HAY = Color3.fromRGB(224, 188, 96)
 local DARK = Color3.fromRGB(46, 36, 30)
 
 Farm.GATE = 9 -- studs of open trail between the gateposts
-Farm.BARN = Vector3.new(15, 15, 21) -- the barn's width, height to the ridge and depth
+Farm.BARN = Vector3.new(15, 15, 21) -- the barn's width, height to the ridge and depth, as drawn
+Farm.BARN_SCALE = 1.5 -- then made this much bigger (the silo with it)
+local S = Farm.BARN_SCALE
 
 -- Where the trail crosses the fence's ring: the angle round the arena (from
 -- +Z, towards +X), so the opening sits on the trail wherever it bends.
@@ -6238,26 +6461,27 @@ local FIELD = { width = 22, from = -12, to = 16 } -- beside the barn, along its 
 local function barnSite(kit: Kit, random: Random, gap: number): (CFrame?, number)
 	local best: CFrame? = nil
 	local bestDrop, bestScore = 0, math.huge
-	local w, d = Farm.BARN.X, Farm.BARN.Z
+	local w, d = Farm.BARN.X * S, Farm.BARN.Z * S
+	local siloOffset = Vector3.new(w / 2 + 4.8 * S, 0, d / 2 - 4.5 * S)
 	for attempt = 1, 500 do
 		-- To one side of the mountain, so it does not hide the barn from the spawn.
 		local angle = (if random:NextNumber() < 0.5 then -1 else 1) * random:NextNumber(math.rad(32), math.rad(72))
 		local distance = random:NextNumber(70, 140)
 		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
 		local centre = kit.ground(spot.X, spot.Z)
-		if not kit.clear(centre, 16) and centre.Y < 26 and kit.steepness(centre.X, centre.Z) < 0.45 and kit.spaced(centre, gap) then
+		if not kit.clear(centre, 16 * S) and centre.Y < 26 and kit.steepness(centre.X, centre.Z) < 0.45 and kit.spaced(centre, gap) then
 			local flat = Vector3.new(centre.X, 0, centre.Z)
 			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
 			local base = CFrame.lookAt(flat, flat + facing)
 			local low, high = math.huge, -math.huge
 			for _, offset in { Vector3.new(-w / 2, 0, -d / 2), Vector3.new(w / 2, 0, -d / 2), Vector3.new(-w / 2, 0, d / 2), Vector3.new(w / 2, 0, d / 2),
-				Vector3.new(0, 0, 0), Vector3.new(w / 2 + 4.8, 0, d / 2 - 4.5) } do
+				Vector3.new(0, 0, 0), siloOffset } do
 				local at = base * offset
 				local y = kit.ground(at.X, at.Z).Y
 				low, high = math.min(low, y), math.max(high, y)
 			end
-			local silo = base * Vector3.new(w / 2 + 4.8, 0, d / 2 - 4.5)
-			if high - low < 3 and not kit.clear(silo, 5) and kit.spaced(silo, 4) then
+			local silo = base * siloOffset
+			if high - low < 4 and not kit.clear(silo, 5 * S) and kit.spaced(silo, 4 * S) then
 				-- How much of the cornfield beside it is open ground.
 				local open = 0
 				for i = 0, 3 do
@@ -6288,11 +6512,18 @@ local function barnSite(kit: Kit, random: Random, gap: number): (CFrame?, number
 end
 
 -- The barn and its silo, built in `base`'s frame: the floor at its origin,
--- the front (with the big doors and the hayloft) facing -Z.
-local function barn(kit: Kit, parent: Instance, base: CFrame, drop: number): Model
+-- the front (with the big doors and the hayloft) facing -Z. It is drawn at
+-- Farm.BARN's size, its foundation reaching down `worldDrop` once enlarged,
+-- then made BARN_SCALE times bigger.
+local function barn(kit: Kit, parent: Instance, base: CFrame, worldDrop: number): Model
 	local model = Instance.new("Model")
 	model.Name = "Barn"
 	model.Parent = parent
+	local drop = worldDrop / S
+	-- A height in the world, as drawn before the barn is enlarged.
+	local function drawn(y: number): number
+		return base.Position.Y + (y - base.Position.Y) / S
+	end
 	local w, d = Farm.BARN.X, Farm.BARN.Z
 	local eave, breakX, breakY, ridge = 8, 5, 12.6, Farm.BARN.Y
 	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
@@ -6396,7 +6627,9 @@ local function barn(kit: Kit, parent: Instance, base: CFrame, drop: number): Mod
 	light.Parent = lamp
 	-- The silo behind one side: concrete staves, iron hoops and a domed cap.
 	local siloAt = base * Vector3.new(w / 2 + 4.8, 0, d / 2 - 4.5)
-	local foot = kit.ground(siloAt.X, siloAt.Z).Y - 0.6
+	-- Its foot reaches the ground where the silo stands once enlarged.
+	local siloFinal = base * Vector3.new((w / 2 + 4.8) * S, 0, (d / 2 - 4.5) * S)
+	local foot = drawn(kit.ground(siloFinal.X, siloFinal.Z).Y - 0.6)
 	local height = base.Position.Y + 21
 	kit.solid(kit.beam(model, "Silo", Vector3.new(siloAt.X, foot, siloAt.Z), Vector3.new(siloAt.X, height, siloAt.Z), 7, Color3.fromRGB(196, 190, 178), Enum.Material.Concrete))
 	for _, y in { 4, 9, 14, 19 } do
@@ -6406,6 +6639,7 @@ local function barn(kit: Kit, parent: Instance, base: CFrame, drop: number): Mod
 	local dome = kit.piece(model, "SiloDome", Vector3.new(7.1, 7.1, 7.1), CFrame.new(siloAt.X, height, siloAt.Z), Color3.fromRGB(178, 182, 186), Enum.Material.Metal) :: Part
 	dome.Shape = Enum.PartType.Ball
 	put("SiloChute", Vector3.new(1.1, 17, 1.1), CFrame.new(w / 2 + 1.5, 8.5, d / 2 - 4.5), BARN_RED, Enum.Material.WoodPlanks)
+	kit.enlarge(model, base.Position, S)
 	return model
 end
 
@@ -6515,7 +6749,8 @@ function Farm.build(kit: Kit): Folder
 	end
 	local base = site :: CFrame
 	barn(kit, folder, base, drop)
-	local w, d = Farm.BARN.X, Farm.BARN.Z
+	-- The yard is laid out round the barn's enlarged size.
+	local w, d = Farm.BARN.X * S, Farm.BARN.Z * S
 	local flatLook = Vector3.new(base.LookVector.X, 0, base.LookVector.Z)
 	-- A point's place in the barn's frame (across, along), ignoring height.
 	local function toLocal(at: Vector3): Vector3
@@ -6645,7 +6880,7 @@ return Farm
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="23">
+      <Item class="ModuleScript" referent="24">
         <Properties>
           <string name="Name">Leaderboards</string>
           <string name="Source"><![CDATA[--!strict
@@ -6978,7 +7213,7 @@ return Leaderboards
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="24">
+      <Item class="ModuleScript" referent="25">
         <Properties>
           <string name="Name">Lobby</string>
           <string name="Source"><![CDATA[--!strict
@@ -6987,6 +7222,7 @@ return Leaderboards
 -- gold capitals carries royal blue banners; a royal blue carpet leads from the
 -- spawn to a stepped dais where a giant diamond turns slowly (each client
 -- spins it, see GamesMenu). Games are joined from the games menu on the side of the screen.
+-- A How to Play board beside the carpet opens the on-screen guide.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
@@ -7004,7 +7240,7 @@ local MARBLE_SHADE = Color3.fromRGB(222, 218, 210)
 local GOLD = Color3.fromRGB(224, 178, 72)
 local ROYAL = Color3.fromRGB(34, 52, 140)
 
-export type Built = { model: Model, spawn: SpawnLocation, diamond: Model }
+export type Built = { model: Model, spawn: SpawnLocation, diamond: Model, board: Model }
 
 local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, solid: boolean?): Part
 	local p = Instance.new("Part")
@@ -7198,6 +7434,65 @@ function Lobby.build(parent: Instance): Built
 		end
 	end
 
+	-- The How to Play board beside the carpet, angled to the spawn. Its face is
+	-- drawn, not lettered (lettered signs render badly): a gold gem over three
+	-- list lines. Walking up and pressing E, or clicking it, opens the guide on
+	-- screen (see the client's HowToPlay).
+	local boardModel = Instance.new("Model")
+	boardModel.Name = "HowToPlayBoard"
+	boardModel.Parent = model
+	local boardAt = O + Vector3.new(9, 0, 30)
+	local boardFrame = CFrame.lookAt(boardAt, Vector3.new(spawnAt.X, boardAt.Y, spawnAt.Z))
+	for _, x in { -4.3, 4.3 } do
+		piece(boardModel, "BoardPost", Vector3.new(0.7, 9, 0.7), boardFrame * CFrame.new(x, 4.5, 0), GOLD, Enum.Material.Metal, true)
+	end
+	piece(boardModel, "BoardBase", Vector3.new(10, 0.6, 2), boardFrame * CFrame.new(0, 0.3, 0), MARBLE_SHADE, Enum.Material.Marble, true)
+	piece(boardModel, "BoardFrame", Vector3.new(8.6, 6, 0.4), boardFrame * CFrame.new(0, 5.6, 0), GOLD, Enum.Material.Metal, true)
+	local face = piece(boardModel, "BoardFace", Vector3.new(8, 5.4, 0.5), boardFrame * CFrame.new(0, 5.6, 0), ROYAL, Enum.Material.SmoothPlastic, true)
+	piece(boardModel, "BoardCap", Vector3.new(9.4, 0.5, 0.9), boardFrame * CFrame.new(0, 8.85, 0), GOLD, Enum.Material.Metal)
+	local drawing = Instance.new("SurfaceGui")
+	drawing.Face = Enum.NormalId.Front
+	drawing.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	drawing.PixelsPerStud = 30
+	drawing.LightInfluence = 0.6
+	drawing.Parent = face
+	-- Squares (gems, turned on a corner) are sized by the face's height.
+	local function mark(x: number, y: number, w: number, h: number, colour: Color3, gem: boolean)
+		local frame = Instance.new("Frame")
+		frame.AnchorPoint = Vector2.new(0.5, 0.5)
+		frame.Position = UDim2.fromScale(x, y)
+		frame.Size = UDim2.fromScale(w, h)
+		if gem then
+			frame.SizeConstraint = Enum.SizeConstraint.RelativeYY
+			frame.Rotation = 45
+		end
+		frame.BackgroundColor3 = colour
+		frame.BorderSizePixel = 0
+		frame.Parent = drawing
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.2, 0)
+		corner.Parent = frame
+	end
+	mark(0.5, 0.22, 0.2, 0.2, GOLD, true)
+	for row = 0, 2 do
+		local y = 0.5 + row * 0.15
+		mark(0.2, y, 0.08, 0.08, GOLD, true)
+		mark(0.55, y, 0.52 - row * 0.08, 0.06, MARBLE, false)
+	end
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "HowToPlay"
+	prompt.ActionText = "How to play"
+	prompt.ObjectText = "Guide"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 14
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = face
+	local click = Instance.new("ClickDetector")
+	click.Name = "HowToPlayClick"
+	click.MaxActivationDistance = 40
+	click.Parent = boardModel
+
 	-- A marble balustrade with a gold rail rings the edge; an invisible wall
 	-- behind it stops anyone jumping off.
 	local edge = 60
@@ -7220,14 +7515,14 @@ function Lobby.build(parent: Instance): Built
 		wall.CastShadow = false
 	end
 
-	return { model = model, spawn = spawn, diamond = gem.model }
+	return { model = model, spawn = spawn, diamond = gem.model, board = boardModel }
 end
 
 return Lobby
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="25">
+      <Item class="ModuleScript" referent="26">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
@@ -7500,11 +7795,14 @@ end
 
 -- If rock fills the space between `bottom` and `top` at or around `position`
 -- (a character buried by a rebuild), the height of the rock surface above it.
-function Mountain.coveredTop(self: Mountain, position: Vector3, bottom: number, top: number): number?
+local AROUND = { { 0, 0 }, { 0.7, 0 }, { -0.7, 0 }, { 0, 0.7 }, { 0, -0.7 } }
+local CENTRE = { { 0, 0 } }
+function Mountain.coveredTop(self: Mountain, position: Vector3, bottom: number, top: number, centreOnly: boolean?): number?
 	local size = self.blockSize
 	local grid = self.grid
 	local best: number? = nil
-	for _, offset in { { 0, 0 }, { 0.7, 0 }, { -0.7, 0 }, { 0, 0.7 }, { 0, -0.7 } } do
+	-- `centreOnly` checks the column the body is in, not the rock beside it.
+	for _, offset in (if centreOnly then CENTRE else AROUND) do
 		local x = math.floor((position.X + offset[1]) / size + 0.5)
 		local z = math.floor((position.Z + offset[2]) / size + 0.5)
 		if math.abs(x) <= 124 and math.abs(z) <= 124 then
@@ -7543,7 +7841,7 @@ return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="26">
+      <Item class="ModuleScript" referent="27">
         <Properties>
           <string name="Name">Sakura</string>
           <string name="Source"><![CDATA[--!strict
@@ -7561,6 +7859,7 @@ export type Kit = {
 	piece: (parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, kind: string?) -> BasePart,
 	beam: (parent: Instance, name: string, a: Vector3, b: Vector3, width: number, colour: Color3, material: Enum.Material) -> BasePart,
 	solid: (BasePart) -> BasePart,
+	enlarge: (model: Instance, origin: Vector3, factor: number) -> (), -- scales a finished model about a point
 	ground: (x: number, z: number) -> Vector3,
 	clear: (at: Vector3, margin: number) -> boolean, -- arena, camp, lake, path or leaderboards
 	spaced: (at: Vector3, gap: number) -> boolean, -- clear of the valley's trees and rocks
@@ -7696,11 +7995,15 @@ end
 -- plinth. `frame` sits on the plinth's top, its front (-Z) facing the camp;
 -- `drop` is how far the plinth reaches down to the lowest ground under it.
 -- Returns how far in front of the centre its steps end.
-local SHRINE_CLEARANCE = 18 -- studs from the shrine's centre kept free of trees
-local function shrine(kit: Kit, parent: Instance, frame: CFrame, drop: number): number
+Sakura.SHRINE_SCALE = 1.5 -- the shrine is drawn at its own size, then made this much bigger
+local S = Sakura.SHRINE_SCALE
+local SHRINE_CLEARANCE = 18 * S -- studs from the shrine's centre kept free of trees
+local function shrine(kit: Kit, parent: Instance, frame: CFrame, worldDrop: number): number
 	local model = Instance.new("Model")
 	model.Name = "Shrine"
 	model.Parent = parent
+	-- Drawn at its own size (the plinth reaching down `drop`), then enlarged.
+	local drop = worldDrop / S
 	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
 		return kit.piece(model, name, size, frame * offset, colour, material, kind)
 	end
@@ -7816,7 +8119,8 @@ local function shrine(kit: Kit, parent: Instance, frame: CFrame, drop: number): 
 	for _, x in { -7.2, 7.2 } do
 		lantern(kit, model, frame * Vector3.new(x, 0, -6))
 	end
-	return 7 + steps * 0.9
+	kit.enlarge(model, frame.Position, S)
+	return (7 + steps * 0.9) * S
 end
 
 -- Where the shrine goes: a flat, open meadow ahead of the camp, off to one
@@ -7831,22 +8135,22 @@ local function shrineSite(kit: Kit, random: Random, gap: number): (CFrame?, numb
 		local distance = random:NextNumber(60, 125)
 		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
 		local centre = kit.ground(spot.X, spot.Z)
-		if not kit.clear(centre, 13) and centre.Y < 24 and kit.steepness(centre.X, centre.Z) < 0.4 and kit.spaced(centre, gap) then
+		if not kit.clear(centre, 13 * S) and centre.Y < 24 and kit.steepness(centre.X, centre.Z) < 0.4 and kit.spaced(centre, gap) then
 			local flat = Vector3.new(centre.X, 0, centre.Z)
 			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
 			local base = CFrame.lookAt(flat, flat + facing)
-			local gate = base * Vector3.new(0, 0, -14)
+			local gate = base * Vector3.new(0, 0, -14 * S)
 			if not kit.clear(kit.ground(gate.X, gate.Z), 3) then
 				-- The ground under the plinth's corners, edges and steps.
 				local low, high = math.huge, -math.huge
 				for _, offset in { Vector3.new(-8.5, 0, -9.7), Vector3.new(8.5, 0, -9.7), Vector3.new(-8.5, 0, 7), Vector3.new(8.5, 0, 7),
 					Vector3.new(0, 0, 0), Vector3.new(-8.5, 0, 0), Vector3.new(8.5, 0, 0), Vector3.new(0, 0, 7), Vector3.new(0, 0, -9.7) } do
-					local at = base * offset
+					local at = base * (offset * S)
 					local y = kit.ground(at.X, at.Z).Y
 					low, high = math.min(low, y), math.max(high, y)
 				end
 				local score = math.abs(angle) + distance / 150 + (high - low) * 0.3
-				if high - low < 2.5 and score < bestScore then
+				if high - low < 3.5 and score < bestScore then
 					bestScore = score
 					best = base + Vector3.new(0, high + 0.9, 0)
 					bestDrop = high + 0.9 - low + 0.6
@@ -7876,7 +8180,7 @@ function Sakura.build(kit: Kit): Folder
 		local approach = shrine(kit, folder, site, drop)
 		-- Its own small torii on the approach from the camp, facing the camp.
 		local gate = site * Vector3.new(0, 0, -(approach + 2.5))
-		torii(kit, folder, CFrame.new(kit.ground(gate.X, gate.Z)) * site.Rotation * CFrame.Angles(0, math.pi, 0), 6, 7)
+		torii(kit, folder, CFrame.new(kit.ground(gate.X, gate.Z)) * site.Rotation * CFrame.Angles(0, math.pi, 0), 6 * S, 7 * S)
 	else
 		warn("[DiamondRush] Sakura: no flat open meadow for the shrine, so it is left out.")
 	end
@@ -7927,7 +8231,7 @@ return Sakura
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="27">
+      <Item class="ModuleScript" referent="28">
         <Properties>
           <string name="Name">ScenePack</string>
           <string name="Source"><![CDATA[--!strict
@@ -8081,7 +8385,7 @@ return ScenePack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="28">
+      <Item class="ModuleScript" referent="29">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -8138,6 +8442,23 @@ end
 local function solid(p: BasePart): BasePart
 	p.CanCollide = true
 	return p
+end
+
+-- Makes a finished model `factor` times bigger about `origin` (a point on its
+-- floor), so a building can grow without being redrawn: every part, where
+-- things hang on them and how far its lights reach.
+local function enlarge(model: Instance, origin: Vector3, factor: number)
+	for _, object in model:GetDescendants() do
+		if object:IsA("BasePart") then
+			local frame = object.CFrame
+			object.Size *= factor
+			object.CFrame = frame.Rotation + (origin + (frame.Position - origin) * factor)
+		elseif object:IsA("Attachment") then
+			object.Position *= factor
+		elseif object:IsA("PointLight") then
+			object.Range = math.min(60, object.Range * factor)
+		end
+	end
 end
 
 -- A cylinder between two points.
@@ -8869,6 +9190,7 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 		piece = piece,
 		beam = beam,
 		solid = solid,
+		enlarge = enlarge,
 		ground = ground,
 		clear = clear,
 		spaced = spaced,
@@ -8924,7 +9246,7 @@ return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="29">
+      <Item class="ModuleScript" referent="30">
         <Properties>
           <string name="Name">Statue</string>
           <string name="Source"><![CDATA[--!strict
@@ -9057,11 +9379,13 @@ return Statue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="30">
+      <Item class="ModuleScript" referent="31">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
--- Saves the win counter, its look, the best round time and the starting stone.
+-- Saves the win counter, its look, the best round time and the starting stone,
+-- the statues, leaderboards, theme, skin and keybinds. In single player each
+-- player has their own save (useKey); otherwise the game shares one.
 -- DataStores need the game to be published (and, in Studio, "Enable Studio
 -- Access to API Services"). Without them everything still works; it just is
 -- not remembered between sessions.
@@ -9069,7 +9393,8 @@ local DataStoreService = game:GetService("DataStoreService")
 
 local Store = {}
 
-local KEY = "settings"
+Store.SHARED_KEY = "settings"
+local KEY = Store.SHARED_KEY
 local store: DataStore? = nil
 local pending: { [string]: any }? = nil
 local saving = false
@@ -9084,19 +9409,26 @@ local function open(): DataStore?
 	return store
 end
 
-function Store.load(): { [string]: any }?
+-- Where saves go from now on, e.g. "player_123" for one player's own save.
+function Store.useKey(key: string)
+	KEY = key
+end
+
+-- The save under `key` (the current one by default), and whether it could be
+-- read: nil and true means there is no save there yet.
+function Store.load(key: string?): ({ [string]: any }?, boolean)
 	local target = open()
 	if target == nil then
-		return nil
+		return nil, false
 	end
-	local ok, data = pcall(target.GetAsync, target, KEY)
+	local ok, data = pcall(target.GetAsync, target, key or KEY)
 	if ok and type(data) == "table" then
-		return data
+		return data, true
 	end
 	if not ok then
 		warn("[DiamondRush] Settings are not saved between sessions: " .. tostring(data))
 	end
-	return nil
+	return nil, ok
 end
 
 -- Saves a few seconds after the last change, so quick edits make one write.
@@ -9133,7 +9465,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="31">
+      <Item class="ModuleScript" referent="32">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -9154,6 +9486,8 @@ export type Event = {
 	gift: string?,
 	coins: number?, -- coins per gift
 	count: number?, -- gifts in this event
+	part: number?, -- set by the server when it plays a combo as separate gifts: which one this is
+	parts: number?, -- and how many there are
 	likes: number?,
 	rocks: number?,
 	keybind: string?,
@@ -9279,7 +9613,7 @@ return TikTokFeed
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="32">
+      <Item class="ModuleScript" referent="33">
         <Properties>
           <string name="Name">Watchtower</string>
           <string name="Source"><![CDATA[--!strict
@@ -9300,7 +9634,9 @@ local BRACE = Color3.fromRGB(92, 68, 48)
 local PLANK = Color3.fromRGB(138, 104, 72)
 local SHINGLE = Color3.fromRGB(70, 62, 58)
 
-Watchtower.HEIGHT = 15 -- studs from the highest leg's ground to the lookout floor
+Watchtower.HEIGHT = 15 -- studs from the highest leg's ground to the lookout floor, as drawn
+Watchtower.SCALE = 1.5 -- every measurement below is drawn this much bigger
+local S = Watchtower.SCALE
 
 -- Where it goes: open ground ahead of the camp and to the left of the
 -- mountain, preferring higher ground for the view. `gap` keeps it that far
@@ -9314,21 +9650,21 @@ local function site(kit: Kit, random: Random, gap: number): CFrame?
 		local distance = random:NextNumber(65, 130)
 		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
 		local centre = kit.ground(spot.X, spot.Z)
-		if not kit.clear(centre, 7) and centre.Y < 40 and kit.steepness(centre.X, centre.Z) < 0.8 and kit.spaced(centre, gap) then
+		if not kit.clear(centre, 7 * S) and centre.Y < 40 and kit.steepness(centre.X, centre.Z) < 0.8 and kit.spaced(centre, gap) then
 			local flat = Vector3.new(centre.X, 0, centre.Z)
 			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
 			local turn = CFrame.lookAt(flat, flat + facing)
 			local high, low = -math.huge, math.huge
 			for _, x in { -2.8, 2.8 } do
 				for _, z in { -3.2, 2.8 } do
-					local foot = turn * Vector3.new(x, 0, z)
+					local foot = turn * (Vector3.new(x, 0, z) * S)
 					local y = kit.ground(foot.X, foot.Z).Y
 					high, low = math.max(high, y), math.min(low, y)
 				end
 			end
 			-- Higher ground gives the lookout its view; a gentle slope is fine.
 			local score = math.abs(angle + math.rad(45)) + distance / 200 - centre.Y / 50
-			if high - low < 4 and score < bestScore then
+			if high - low < 4 * S and score < bestScore then
 				bestScore = score
 				best = turn + Vector3.new(0, high, 0)
 			end
@@ -9356,14 +9692,19 @@ function Watchtower.build(kit: Kit, parent: Instance): Model?
 	model.Name = "Watchtower"
 	model.Parent = parent
 	local h = Watchtower.HEIGHT
+	-- Drawn in the tower's own measurements; `at`, `put` and `log` enlarge them.
 	local function at(x: number, y: number, z: number): Vector3
-		return base * Vector3.new(x, y, z)
+		return base * (Vector3.new(x, y, z) * S)
 	end
 	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
-		return kit.piece(model, name, size, base * offset, colour, material, kind)
+		return kit.piece(model, name, size * S, base * (CFrame.new(offset.Position * S) * offset.Rotation), colour, material, kind)
 	end
 	local function log(name: string, a: Vector3, b: Vector3, width: number, colour: Color3): BasePart
-		return kit.beam(model, name, a, b, width, colour, Enum.Material.Wood)
+		return kit.beam(model, name, a, b, width * S, colour, Enum.Material.Wood)
+	end
+	-- How far below the tower's frame the ground is at a world point, in its measurements.
+	local function depth(world: Vector3): number
+		return (kit.ground(world.X, world.Z).Y - base.Position.Y) / S
 	end
 	-- Where a point of a leg is: the legs taper from 2.8 studs out at the
 	-- ground to 2.2 under the floor. `y` is the height above the frame.
@@ -9375,7 +9716,7 @@ function Watchtower.build(kit: Kit, parent: Instance): Model?
 	for _, sx in { -1, 1 } do
 		for _, sz in { -1, 1 } do
 			local foot = leg(sx, sz, 0)
-			local ground = kit.ground(foot.X, foot.Z).Y - base.Position.Y
+			local ground = depth(foot)
 			kit.solid(log("TowerLeg", leg(sx, sz, ground - 0.6), leg(sx, sz, h + 0.2), 0.62, LOG))
 			kit.solid(put("TowerFooting", Vector3.new(1.3, 0.8, 1.3), CFrame.new(sx * 2.8, ground + 0.2, sz * 2.8), Color3.fromRGB(128, 124, 116), Enum.Material.Cobblestone))
 		end
@@ -9424,7 +9765,7 @@ function Watchtower.build(kit: Kit, parent: Instance): Model?
 	lamp.CastShadow = false
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(255, 190, 120)
-	light.Range = 12
+	light.Range = 12 * S
 	light.Brightness = 0.8
 	light.Shadows = false
 	light.Parent = lamp
@@ -9450,7 +9791,7 @@ function Watchtower.build(kit: Kit, parent: Instance): Model?
 	-- The ladder runs up the front, from the ground to the gap in the wall.
 	local front = -3.3
 	local foot = at(0, 0, front)
-	local bottom = kit.ground(foot.X, foot.Z).Y - base.Position.Y - 0.3
+	local bottom = depth(foot) - 0.3
 	for _, x in { -0.55, 0.55 } do
 		kit.solid(log("TowerLadderRail", at(x, bottom, front), at(x, h + 1.7, front), 0.18, LOG))
 	end
@@ -9470,15 +9811,15 @@ return Watchtower
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="33">
+  <Item class="StarterPlayer" referent="34">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="34">
+    <Item class="StarterPlayerScripts" referent="35">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="35">
+      <Item class="LocalScript" referent="36">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -9496,6 +9837,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
 local Skin = require(Shared:WaitForChild("Skin"))
+local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local FirstPerson = require(script:WaitForChild("FirstPerson"))
 -- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
 FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
@@ -9608,9 +9950,14 @@ local gui = make("ScreenGui", {
 -- The games menu: the game's display, first-person view and hands only show
 -- while playing, not in the lobby.
 local LobbyView = require(script:WaitForChild("LobbyView"))
+-- How to play: from the lobby board, the games menu or H.
+local HowToPlay = require(script:WaitForChild("HowToPlay"))
+HowToPlay.start()
 LobbyView.start(Request, State, function(inGame: boolean)
 	gui.Enabled = inGame
 	FirstPerson.setEnabled(inGame)
+end, function()
+	HowToPlay.setOpen(true)
 end)
 -- The diamond bird flies round the mountain; catching it doubles gifts.
 require(script:WaitForChild("BirdView")).start(gui, State)
@@ -10123,18 +10470,18 @@ panelLabel("TEST GIFTS (no TikTok needed)")
 local testGifts = {
 	{ "Rose · 1", "Rose", 1, 1 },
 	{ "Finger Heart · 5", "Finger Heart", 5, 1 },
-	{ "Rose x10 · 10", "Rose", 1, 10 },
+	{ "Rose x10", "Rose", 1, 10 },
 	{ "Doughnut · 30", "Doughnut", 30, 1 },
 	{ "Hand Hearts · 100", "Hand Hearts", 100, 1 },
 	{ "Money Gun · 500", "Money Gun", 500, 1 },
 	{ "Galaxy · 1,000", "Galaxy", 1000, 1 },
-	{ "Doughnut x40 · 1,200", "Doughnut", 30, 40 },
-	{ "Galaxy x5 · 5,000", "Galaxy", 1000, 5 },
-	{ "Galaxy x10 · 10,000", "Galaxy", 1000, 10 },
+	{ "Doughnut x40", "Doughnut", 30, 40 },
+	{ "Galaxy x5", "Galaxy", 1000, 5 },
+	{ "Galaxy x10", "Galaxy", 1000, 10 },
 	{ "Lion · 29,999", "Lion", 29999, 1 },
 	{ "Universe · 34,999", "TikTok Universe", 34999, 1 },
 }
-panelLabel("Button numbers show total test coins")
+panelLabel("Numbers show coins. x10 sends ten separate gifts")
 for index = 1, #testGifts, 2 do
 	local buttons = {}
 	for offset = 0, 1 do
@@ -10147,6 +10494,132 @@ for index = 1, #testGifts, 2 do
 	end
 	panelButtons(buttons)
 end
+
+-- Gift keybinds: give any gift a key; pressing it in the game sends that gift,
+-- so the streamer can play without the bridge. The bridge's catalogue can set
+-- keybinds too; both show here.
+panelLabel("GIFT KEYBINDS (press the key in the game to send the gift)")
+panelOrder += 1
+local bindingList = make("Frame", {
+	LayoutOrder = panelOrder,
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	ZIndex = 11,
+}, panel)
+make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) }, bindingList)
+local bindingGift = panelBox("", function() end)
+bindingGift.PlaceholderText = "Gift name, e.g. Rose"
+local bindingCoins = panelBox("", function() end)
+bindingCoins.PlaceholderText = "Coins per gift, e.g. 1"
+local chosenKey: string? = nil
+local capturingKey = false
+local bindingButtons: { TextButton } = {}
+bindingButtons = panelButtons({
+	{ "Key: choose", function() end },
+	{ "Save keybind", function()
+		local coins = tonumber((string.gsub(bindingCoins.Text, "[^%d]", "")))
+		if chosenKey == nil or bindingGift.Text == "" or coins == nil then
+			addFeed("Type a gift name and its coins, then choose a key.", 0, "notice")
+			return
+		end
+		send("setGiftBinding", { key = chosenKey, gift = bindingGift.Text, coins = coins })
+		bindingGift.Text = ""
+		bindingCoins.Text = ""
+		chosenKey = nil
+		bindingButtons[1].Text = "Key: choose"
+	end },
+})
+local keyButton = bindingButtons[1]
+bindingButtons[2].BackgroundColor3 = SELECTED
+local freeKeys = {}
+for _, key in Keybinds.KEYS do table.insert(freeKeys, Keybinds.label(key)) end
+panelLabel("Free keys: " .. table.concat(freeKeys, " "))
+keyButton.Activated:Connect(function()
+	capturingKey = true
+	keyButton.Text = "Press a key..."
+end)
+UserInputService.InputBegan:Connect(function(input: InputObject)
+	if not capturingKey or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	capturingKey = false
+	local name = input.KeyCode.Name
+	if Keybinds.allowed(name) then
+		chosenKey = name
+		keyButton.Text = "Key: " .. Keybinds.label(name)
+	else
+		chosenKey = nil
+		keyButton.Text = "Key: choose"
+		addFeed(Keybinds.label(name) .. " is used by the game. Pick one of the free keys.", 0, "notice")
+	end
+end)
+local function refreshBindings()
+	for _, child in bindingList:GetChildren() do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	local ok, bindings = pcall(function()
+		return game:GetService("HttpService"):JSONDecode(attr("GiftBindings", "{}"))
+	end)
+	if not ok or type(bindings) ~= "table" then return end
+	local keys = {}
+	for key in bindings do table.insert(keys, tostring(key)) end
+	table.sort(keys)
+	if #keys == 0 then
+		local row = make("Frame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, ZIndex = 11 }, bindingList)
+		make("TextLabel", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Font = FONT_MEDIUM,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextColor3 = MUTED,
+			Text = "No keybinds yet.",
+			ZIndex = 12,
+		}, row)
+		return
+	end
+	for index, key in keys do
+		local binding = bindings[key]
+		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, bindingList)
+		local cap = make("TextLabel", {
+			Size = UDim2.fromOffset(36, 30),
+			BackgroundColor3 = BUTTON,
+			Font = FONT,
+			TextSize = 14,
+			TextColor3 = WHITE,
+			Text = Keybinds.label(key),
+			ZIndex = 12,
+		}, row)
+		rounded(cap, 8)
+		make("TextLabel", {
+			Position = UDim2.fromOffset(44, 0),
+			Size = UDim2.new(1, -86, 1, 0),
+			BackgroundTransparency = 1,
+			Font = FONT_MEDIUM,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextColor3 = WHITE,
+			Text = string.format("%s · %s coins", tostring(type(binding) == "table" and binding.gift or "?"),
+				Format.commas(tonumber(type(binding) == "table" and binding.coins or 0) or 0)),
+			ZIndex = 12,
+		}, row)
+		local remove = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.fromOffset(34, 30),
+			BackgroundColor3 = DANGER,
+			Font = FONT,
+			TextSize = 14,
+			TextColor3 = WHITE,
+			Text = "X",
+			ZIndex = 12,
+		}, row)
+		rounded(remove, 8)
+		remove.Activated:Connect(function() send("removeGiftBinding", key) end)
+	end
+end
+State:GetAttributeChangedSignal("GiftBindings"):Connect(refreshBindings)
+refreshBindings()
 
 panelLabel("DIAMOND BIRD (every 5 to 7.5 minutes)")
 panelButtons({
@@ -10335,9 +10808,10 @@ local function refreshPanelFields()
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
 end
 
--- Settings (every player): the field of view, from the Settings button or O.
--- The hands are refitted to it, so digging looks the same at any FOV.
-local SETTINGS_KEY = Enum.KeyCode.O
+-- Settings (every player): the field of view and hiding the buttons, from the
+-- Settings button or P (O is Roblox's zoom-out key, which swallows it). The
+-- hands are refitted to the FOV, so digging looks the same at any FOV.
+local SETTINGS_KEY = Enum.KeyCode.P
 local settingsButton = make("TextButton", {
 	Position = UDim2.fromOffset(12, 10),
 	Size = UDim2.fromOffset(0, 32),
@@ -10345,14 +10819,14 @@ local settingsButton = make("TextButton", {
 	Font = FONT,
 	TextSize = 13,
 	TextColor3 = WHITE,
-	Text = "SETTINGS  <font color=\"#A8AEBE\">O</font>",
+	Text = "SETTINGS  <font color=\"#A8AEBE\">P</font>",
 	RichText = true,
 }, gui)
 glass(settingsButton, 16)
 make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, settingsButton)
 local settingsCard = make("Frame", {
 	Position = UDim2.fromOffset(12, 50),
-	Size = UDim2.fromOffset(300, 150),
+	Size = UDim2.fromOffset(300, 214),
 	Visible = false,
 	ZIndex = 15,
 }, gui)
@@ -10398,7 +10872,7 @@ local fovKnob = make("Frame", {
 rounded(fovKnob, 9)
 local function settingsAction(text: string, x: number, colour: Color3): TextButton
 	local button = make("TextButton", {
-		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 96),
+		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 160),
 		Size = UDim2.new(0.5, -4, 0, 30),
 		BackgroundColor3 = colour,
 		Font = FONT,
@@ -10410,6 +10884,45 @@ local function settingsAction(text: string, x: number, colour: Color3): TextButt
 	rounded(button, 8)
 	return button
 end
+-- Hide buttons: tucks away the GAMES tab and this SETTINGS button (G and P
+-- still open them), so they stay off the stream. Remembered by the server.
+settingsText({ Position = UDim2.fromOffset(0, 96), Size = UDim2.new(1, -60, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = "Hide buttons" })
+settingsText({ Position = UDim2.fromOffset(0, 118), Size = UDim2.new(1, -60, 0, 30), Font = FONT_MEDIUM, TextSize = 12, TextColor3 = MUTED, TextWrapped = true,
+	TextYAlignment = Enum.TextYAlignment.Top, Text = "Hides GAMES and SETTINGS. G and P still open them." })
+local hideSwitch = make("TextButton", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, 0, 0, 98),
+	Size = UDim2.fromOffset(46, 26),
+	BackgroundColor3 = BUTTON,
+	AutoButtonColor = false,
+	Text = "",
+	ZIndex = 16,
+}, settingsCard)
+rounded(hideSwitch, 13)
+local hideKnob = make("Frame", {
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.new(0, 3, 0.5, 0),
+	Size = UDim2.fromOffset(20, 20),
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
+	ZIndex = 17,
+}, hideSwitch)
+rounded(hideKnob, 10)
+local function refreshHidden()
+	local hidden = player:GetAttribute("HideButtons") == true
+	hideSwitch.BackgroundColor3 = if hidden then SELECTED else BUTTON
+	hideKnob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
+	settingsButton.Visible = not hidden
+	LobbyView.setTabHidden(hidden)
+end
+player:GetAttributeChangedSignal("HideButtons"):Connect(refreshHidden)
+refreshHidden()
+hideSwitch.Activated:Connect(function()
+	local hidden = player:GetAttribute("HideButtons") ~= true
+	-- Shown at once; the server keeps it for next time.
+	player:SetAttribute("HideButtons", hidden)
+	Request:FireServer("setHideButtons", hidden)
+end)
 local fovReset = settingsAction("Reset", 0, BUTTON)
 local settingsDone = settingsAction("Done", 0.5, SELECTED)
 
@@ -10459,7 +10972,7 @@ local function setSettingsOpen(show: boolean)
 end
 settingsButton.Activated:Connect(function() setSettingsOpen(not settingsCard.Visible) end)
 settingsDone.Activated:Connect(function() setSettingsOpen(false) end)
--- O toggles the settings in the game, unless the streamer bound O to a test gift.
+-- P toggles the settings in the game, unless the streamer bound P to a test gift.
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed or input.KeyCode ~= SETTINGS_KEY or not gui.Enabled or UserInputService:GetFocusedTextBox() then return end
 	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
@@ -10621,6 +11134,25 @@ local rockOutline = make("Highlight", {
 	Enabled = false,
 }, workspace)
 local aimTarget: BasePart? = nil
+-- True while the aim is on (or close to) a diamond bird that is still circling.
+-- The bird is small and moving, so a click within a few degrees counts.
+local aimBird = false
+local function birdNear(ray: Ray): boolean
+	for _, child in workspace:GetChildren() do
+		local root = if child.Name == "DiamondBird" and child:IsA("Model") then child.PrimaryPart else nil
+		if root and child:GetAttribute("LeaveAt") == 0 then
+			local offset = root.Position - ray.Origin
+			local distance = offset.Magnitude
+			if distance > 1e-3 and distance < 400 then
+				local tolerance = math.max(math.rad(4), math.atan(7 / distance))
+				if math.acos(math.clamp(offset.Unit:Dot(ray.Direction.Unit), -1, 1)) <= tolerance then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
 local aimParams = RaycastParams.new()
 aimParams.FilterType = Enum.RaycastFilterType.Exclude
 RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value + 3, function()
@@ -10629,18 +11161,26 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local phase = attr("Phase", "Digging")
 	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
-		and player:GetAttribute("InGame") == true and not LobbyView.isOpen()
+		and player:GetAttribute("InGame") == true and not LobbyView.isOpen() and not HowToPlay.isOpen()
 		and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	aimDot.Visible = active
 	UserInputService.MouseIconEnabled = not active
 	aimTarget = nil
+	aimBird = false
 	if active and camera then
 		aimParams.FilterDescendantsInstances = if character then { character } else {}
 		local viewport = camera.ViewportSize
 		local ray = camera:ViewportPointToRay(viewport.X / 2, viewport.Y / 2)
 		local result = workspace:Raycast(ray.Origin, ray.Direction * 500, aimParams)
 		if result then aimTarget = result.Instance end
+		aimBird = birdNear(ray)
+	end
+	-- The dot turns gold over the bird, so players know a click will catch it.
+	local dotColour = if aimBird then GOLD else WHITE
+	if aimDot.BackgroundColor3 ~= dotColour then
+		aimDot.BackgroundColor3 = dotColour
+		aimDot.Size = if aimBird then UDim2.fromOffset(9, 9) else UDim2.fromOffset(5, 5)
 	end
 	local target = aimTarget
 	local stone = target ~= nil and view:keyForPart(target) ~= nil
@@ -10654,10 +11194,22 @@ local function isDigInput(input: InputObject): boolean
 end
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if not processed and isDigInput(input) then
-		-- A fresh click on the diamond or the diamond bird goes to its
-		-- ClickDetector, never to digging.
+		-- A click on (or close to) the diamond bird catches it. A tap aims
+		-- where the finger is; a click aims at the screen centre.
+		local camera = workspace.CurrentCamera
+		local catching = aimBird
+		if not catching and input.UserInputType == Enum.UserInputType.Touch and camera
+			and player:GetAttribute("InGame") == true then
+			catching = birdNear(camera:ScreenPointToRay(input.Position.X, input.Position.Y))
+		end
 		local target = aimTarget
-		if target == workspace:FindFirstChild("Diamond") or (target and target.Parent and target.Parent.Name == "DiamondBird") then
+		if catching or (target and target.Parent and target.Parent.Name == "DiamondBird") then
+			Request:FireServer("catchBird")
+			digging = false
+			return
+		end
+		-- A fresh click on the diamond goes to its ClickDetector, never to digging.
+		if target == workspace:FindFirstChild("Diamond") then
 			digging = false
 			return
 		end
@@ -10678,7 +11230,7 @@ local function digTarget(): number?
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	local target = aimTarget
-	local allowed = digging and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
+	local allowed = digging and not panel.Visible and not settingsOpen() and not HowToPlay.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	local key = if allowed and target then view:keyForPart(target) else nil
 	if key == nil or root == nil or not root:IsA("BasePart") or (root.Position - (target :: BasePart).Position).Magnitude > 16 then
@@ -10708,7 +11260,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">BirdView</string>
             <string name="Source"><![CDATA[--!strict
@@ -10855,7 +11407,7 @@ return BirdView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -11340,7 +11892,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="39">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -11350,24 +11902,29 @@ return FirstPerson
 --   1  SPARK BURST       (1+ coins)       a crisp golden pop and a puff of dust
 --   2  SHOCKWAVE         (10+ coins)      a ground shockwave, sparks and flying rock
 --   3  DIAMOND FRACTURE  (100+ coins)     glowing cracks, then crystals burst out and shatter
---   4  ORBITAL STRIKE    (500+ coins)     a target locks on, a beam fires from the sky
---   5  GALAXY COLLAPSE   (1,000+ coins)   a swirling black hole pulls in stars, then goes nova
---   6  COSMIC BURST      (10,000+ coins)  the sky darkens, meteors fall, then a comet hits
+--   4  ORBITAL STRIKE    (500+ coins)     a target locks on, a beam fires from the sky, then a
+--                                         barrage walks round the crater and a wider beam ends it
+--   5  GALAXY COLLAPSE   (1,000+ coins)   a swirling black hole pulls in stars, goes nova, flings
+--                                         out spiral arms, then pulses again with a starlight beam
+--   6  COSMIC BURST      (10,000+ coins)  the sky darkens, a meteor storm falls, a comet hits,
+--                                         fire geysers erupt, more meteors, then a cosmic shock
 --
 -- Built from Roblox's own particle textures (sparkles, fire, smoke, embers and
 -- shockwave rings), neon parts, trails, lights, a gentle camera shake and a
 -- brief colour grade. At most two sequences play at once, each with a capped
--- number of parts, lights and particles, and every piece is gone within a few
--- seconds.
+-- number of parts, lights and particles. The small tiers are over in a second
+-- or two; the big ones run for 4 to 8 seconds. Every piece is gone soon after.
 --
 -- Gifts that add stone have their own six, in greens, aimed at the summit:
 --   1  PEBBLE DROP       pebbles fall onto the peak with puffs of dust
 --   2  ROCKSLIDE         a ring of rocks rises out of the slopes and tumbles in
 --   3  STONE SURGE       green veins converge, stone pillars thrust up and sink in
---   4  BOULDER BARRAGE   boulders are hurled in from far away and crash home
---   5  STONE CYCLONE     rocks from the valley spiral up into a cyclone, then slam down
+--   4  BOULDER BARRAGE   a dozen boulders are hurled in from far away and crash home
+--   5  STONE CYCLONE     rocks from the valley spiral up into a towering cyclone,
+--                        then slam down, and the peak blasts out a second ring
 --   6  MOUNTAIN RISING   the ground rumbles, a colossal boulder descends, pulling
---                        rock up from all round, and lands with a blast of light
+--                        rock up from all round, lands with a blast of light, and
+--                        a ring of green pillars erupts round the mountain
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -11389,9 +11946,13 @@ local TEXTURES = {
 }
 GiftEffects.TEXTURES = TEXTURES
 GiftEffects.TITLES = { "SPARK BURST", "SHOCKWAVE", "DIAMOND FRACTURE", "ORBITAL STRIKE", "GALAXY COLLAPSE", "COSMIC BURST" }
-GiftEffects.PART_LIMIT = 70 -- parts one sequence may create
-GiftEffects.LIGHT_LIMIT = 3 -- lights one sequence may create
-GiftEffects.LIFETIME = 9 -- seconds before a sequence is cleared, whatever happens
+-- Per tier: the big gifts get longer, wilder shows with room for more pieces.
+GiftEffects.PART_LIMITS = { 70, 70, 70, 110, 130, 160 } -- parts one sequence may create
+GiftEffects.LIGHT_LIMITS = { 3, 3, 3, 3, 4, 4 } -- lights one sequence may create
+GiftEffects.LIFETIMES = { 9, 9, 9, 10, 11, 12 } -- seconds before a sequence is cleared, whatever happens
+GiftEffects.PARTICLE_BUDGETS = { 400, 400, 400, 600, 700, 900 } -- particles one sequence may emit at once (checked by the tests)
+-- How long the banner stays up for each tier.
+local BANNER_SECONDS = { 1.85, 2.2, 2.55, 4.4, 5.6, 7.4 }
 
 local COLOURS = {
 	Color3.fromRGB(255, 208, 112), -- gold
@@ -11552,7 +12113,7 @@ function GiftEffects.play(data: any)
 	folder.Name = "GiftBurst"
 	folder.Parent = workspace
 	table.insert(active, { folder = folder, tier = tier })
-	Debris:AddItem(folder, GiftEffects.LIFETIME)
+	Debris:AddItem(folder, GiftEffects.LIFETIMES[tier])
 	local colour = if data.adding then ADD_COLOURS[tier] else COLOURS[tier]
 	local centre: Vector3 = data.position
 	local skin = if state then state:GetAttribute("Skin") else nil
@@ -11568,7 +12129,7 @@ function GiftEffects.play(data: any)
 		end)
 	end
 	local function part(shape: Enum.PartType, size: Vector3, frame: CFrame, tint: Color3, material: Enum.Material?): Part?
-		if not alive() or made >= GiftEffects.PART_LIMIT then return nil end
+		if not alive() or made >= GiftEffects.PART_LIMITS[tier] then return nil end
 		made += 1
 		local p = Instance.new("Part")
 		p.Shape = shape
@@ -11608,7 +12169,7 @@ function GiftEffects.play(data: any)
 		end)
 	end
 	local function light(holder: Instance, tint: Color3, range: number, brightness: number, seconds: number)
-		if lights >= GiftEffects.LIGHT_LIMIT then return end
+		if lights >= GiftEffects.LIGHT_LIMITS[tier] then return end
 		lights += 1
 		local glow = Instance.new("PointLight")
 		glow.Color = tint
@@ -11946,17 +12507,19 @@ function GiftEffects.play(data: any)
 				addShake(0.5)
 			end)
 		elseif tier == 4 then
-			-- BOULDER BARRAGE: boulders hurled in from far away crash home one
-			-- after another, trailing dust.
+			-- BOULDER BARRAGE: a dozen boulders hurled in from far away crash home
+			-- one after another, trailing dust, then the peak heaves with a ring
+			-- of light.
 			local rotation = random:NextNumber(0, math.pi * 2)
-			for i = 1, 6 do
-				after((i - 1) * 0.18, function()
+			light(point(summit + Vector3.new(0, 4, 0), 3.6), colour, 20, 1.5, 3.4)
+			for i = 1, 12 do
+				after((i - 1) * 0.22, function()
 					local angle = rotation + i * 1.1
 					local from = summit + Vector3.new(math.cos(angle) * 75, random:NextNumber(4, 12), math.sin(angle) * 75)
-					local landing = summit + Vector3.new(random:NextNumber(-4, 4), 0, random:NextNumber(-4, 4))
+					local landing = summit + Vector3.new(random:NextNumber(-5, 5), 0, random:NextNumber(-5, 5))
 					landing = surface(landing) or landing
-					local apex = towards(from, landing, 0.5) + Vector3.new(0, 34, 0)
-					local rocks = lump(random:NextNumber(1.6, 2.2), CFrame.new(from))
+					local apex = towards(from, landing, 0.5) + Vector3.new(0, random:NextNumber(28, 42), 0)
+					local rocks = lump(random:NextNumber(1.6, 2.3), CFrame.new(from))
 					if rocks == nil then return end
 					local trail = Instance.new("Attachment")
 					trail.Parent = rocks.parts[1]
@@ -11973,62 +12536,77 @@ function GiftEffects.play(data: any)
 					end, function()
 						vanish(rocks)
 						settle(landing, 1.6)
-						chunks(landing, 2, 0.8)
-						addShake(0.3)
+						chunks(landing, 1, 0.8)
+						addShake(0.35)
 					end)
 				end)
 			end
-			after(2, function()
-				shockwave(summit, 18, colour, 0.7)
-				motes(summit, 34, 1.3)
-				light(point(summit + Vector3.new(0, 3, 0), 1.2), colour, 22, 3, 1)
+			after(3.45, function()
+				flash(summit + Vector3.new(0, 1, 0), 12, colour, 0.4)
+				grade({ Brightness = 0.15, Contrast = 0.08, TintColor = colour:Lerp(WHITE, 0.7) }, 0.05, 0.1, 0.5)
+				addShake(0.8)
+				shockwave(summit, 20, colour, 0.75)
+				after(0.12, function() shockwave(summit, 13, WHITE, 0.6) end)
+				column(summit, 40, 3, colour, 0.8)
+				motes(summit, 50, 1.5)
+				dust(summit, 12, 2)
+				light(point(summit + Vector3.new(0, 3, 0), 1.3), colour, 24, 3, 1.1)
 			end)
 		elseif tier == 5 then
-			-- STONE CYCLONE: rocks from the valley spiral up into a whirling
-			-- cyclone over the peak, then slam down into it.
-			light(point(summit + Vector3.new(0, 10, 0), 2.6), colour, 26, 3, 2.4)
-			local count = 22
+			-- STONE CYCLONE: rocks from the valley spiral up into a towering,
+			-- whirling cyclone over the peak with a pulsing green core, then
+			-- slam down into it, and the peak blasts out a second ring.
+			light(point(summit + Vector3.new(0, 10, 0), 4.4), colour, 28, 3, 4.2)
+			local count = 32
+			local spinUp = 3.2
 			local stones: { Lump } = {}
 			local seeds: { { number } } = {}
 			for i = 1, count do
 				local angle = i / count * math.pi * 2
-				local reach = random:NextNumber(22, 32)
-				local rocks = lump(random:NextNumber(0.6, 1.1), CFrame.new(summit))
+				local reach = random:NextNumber(22, 34)
+				local rocks = lump(random:NextNumber(0.6, 1.2), CFrame.new(summit))
 				if rocks == nil then break end
 				table.insert(stones, rocks)
 				-- angle, reach, start height, end height, end reach, spin speed
-				table.insert(seeds, { angle, reach, summit.Y - random:NextNumber(8, 14), summit.Y + 7 + (i % 6) * 2.2, 2.5 + (i % 4) * 1.2, 4 + (i % 3) })
+				table.insert(seeds, { angle, reach, summit.Y - random:NextNumber(8, 14), summit.Y + 7 + (i % 8) * 2.4, 2.5 + (i % 5) * 1.3, 4 + (i % 3) })
 			end
 			local whirl: { Attachment } = {}
-			for i = 1, 3 do
-				local spot = point(summit, 2.4)
+			for i = 1, 4 do
+				local spot = point(summit, spinUp + 0.8)
 				local cloud = emitter({
-					texture = TEXTURES.smoke, count = 0, colour = sequence(rock.dust, colour:Lerp(rock.dust, 0.6)), size = curve(1.5, 3.5),
+					texture = TEXTURES.smoke, count = 0, colour = sequence(rock.dust, colour:Lerp(rock.dust, 0.6)), size = curve(1.5, 3.8),
 					transparency = curve(0.45, 1), lifetime = { 0.6, 1 }, speed = { 0.5, 1.5 }, glow = 0, spin = 60,
 				}, spot)
 				cloud.Rate = 24
 				cloud.Enabled = true
 				table.insert(whirl, spot)
 			end
+			-- The eye of the storm pulses brighter as it spins up.
+			local eye = part(Enum.PartType.Cylinder, Vector3.new(26, 0.8, 0.8), CFrame.new(summit + Vector3.new(0, 13, 0)) * CFrame.Angles(0, 0, math.pi / 2), colour, Enum.Material.ForceField)
 			local positions: { Vector3 } = {}
-			motion(1.6, function(t)
+			motion(spinUp, function(t)
 				local ease = 1 - (1 - t) ^ 2
 				for i, rocks in stones do
 					local seed = seeds[i]
-					local angle = seed[1] + t * seed[6] * 2.2
+					local angle = seed[1] + t * seed[6] * 4
 					local reach = seed[2] + (seed[5] - seed[2]) * ease
 					local position = Vector3.new(summit.X + math.cos(angle) * reach, seed[3] + (seed[4] - seed[3]) * ease, summit.Z + math.sin(angle) * reach)
 					positions[i] = position
 					place(rocks, CFrame.new(position) * CFrame.Angles(angle * 2, angle, 0))
 				end
 				for i, spot in whirl do
-					local angle = t * 9 + i * math.pi * 2 / 3
-					spot.Position = summit + Vector3.new(math.cos(angle) * 4, 4 + i * 3 + t * 4, math.sin(angle) * 4)
+					local angle = t * 16 + i * math.pi / 2
+					spot.Position = summit + Vector3.new(math.cos(angle) * 4.5, 4 + i * 3 + t * 6, math.sin(angle) * 4.5)
+				end
+				if eye then
+					local pulse = 0.8 + t * 2.4 + math.sin(t * 40) * 0.3
+					eye.Size = Vector3.new(26, pulse, pulse)
 				end
 			end, function()
+				if eye then fade(eye, 0.2, { Size = Vector3.new(26, 0.1, 0.1), Transparency = 1 }) end
 				for i, rocks in stones do
 					local from = positions[i] or summit
-					local delay = (i % 5) * 0.03
+					local delay = (i % 6) * 0.03
 					after(delay, function()
 						motion(0.3, function(t)
 							place(rocks, CFrame.new(towards(from, summit, t * t)) * CFrame.Angles(t * 6, t * 3, 0))
@@ -12036,81 +12614,110 @@ function GiftEffects.play(data: any)
 					end)
 				end
 			end)
-			after(1.98, function()
-				flash(summit + Vector3.new(0, 1, 0), 14, colour, 0.4)
-				grade({ Brightness = 0.2, Contrast = 0.1, TintColor = colour:Lerp(WHITE, 0.65) }, 0.05, 0.1, 0.5)
-				addShake(0.9)
-				shockwave(summit, 22, colour, 0.75)
-				after(0.1, function() shockwave(summit, 15, WHITE, 0.6) end)
-				dust(summit, 16, 2.2)
-				motes(summit, 45, 1.5)
+			after(spinUp + 0.38, function()
+				flash(summit + Vector3.new(0, 1, 0), 16, colour, 0.45)
+				grade({ Brightness = 0.22, Contrast = 0.12, TintColor = colour:Lerp(WHITE, 0.65) }, 0.05, 0.12, 0.6)
+				addShake(1.1)
+				shockwave(summit, 24, colour, 0.8)
+				after(0.1, function() shockwave(summit, 16, WHITE, 0.6) end)
+				dust(summit, 18, 2.4)
+				motes(summit, 50, 1.6)
+			end)
+			after(spinUp + 1.1, function()
+				shockwave(summit, 32, colour:Lerp(rock.dust, 0.3), 1)
+				column(summit, 50, 3.5, colour, 0.9)
+				motes(summit, 40, 2)
+				addShake(0.6)
 			end)
 		else
 			-- MOUNTAIN RISING: the sky turns, the ground rumbles and green light
-			-- cracks outward, a colossal boulder descends pulling rock up from
-			-- all round, then lands on the peak with a blast of light.
-			grade({ Brightness = -0.1, Contrast = 0.18, Saturation = -0.05, TintColor = Color3.fromRGB(205, 255, 220) }, 0.6, 2.2, 1.2)
-			for i = 0, 5 do
+			-- cracks outward, a colossal boulder descends slowly, pulling rock
+			-- up from all round, lands on the peak with a blast of light, and a
+			-- ring of green pillars erupts round the mountain.
+			local descent = 2.8
+			grade({ Brightness = -0.12, Contrast = 0.2, Saturation = -0.05, TintColor = Color3.fromRGB(205, 255, 220) }, 0.6, 3.4, 1.4)
+			for i = 0, 9 do
 				after(i * 0.3, function() addShake(0.45) end)
 			end
-			veins(summit, 8, 20, false, 0.2, 0.8)
-			local sky = summit + Vector3.new(0, 70, 0)
+			veins(summit, 8, 20, false, 0.2, 1.2)
+			local sky = summit + Vector3.new(0, 85, 0)
 			local land = summit + Vector3.new(0, 5, 0)
-			local colossus = lump(8, CFrame.new(sky))
+			local colossus = lump(9, CFrame.new(sky))
 			local carried = Vector3.zero
 			if colossus then
 				local core = colossus.parts[1]
-				light(core, colour, 40, 4, 2.4)
+				light(core, colour, 40, 4, descent + 0.8)
 				local halo = Instance.new("Attachment")
 				halo.Parent = core
 				local rings = emitter({
-					texture = TEXTURES.ring, count = 0, colour = sequence(WHITE, colour), size = curve(9, 16),
+					texture = TEXTURES.ring, count = 0, colour = sequence(WHITE, colour), size = curve(9, 18),
 					transparency = curve(0.3, 1), lifetime = { 0.6, 0.6 }, speed = { 0.01, 0.01 }, spread = 0, flat = true,
 				}, halo)
 				rings.Rate = 5
 				rings.Enabled = true
-				motion(1.6, function(t)
+				motion(descent, function(t)
 					local u = t * t * (3 - 2 * t)
 					carried = towards(sky, land, u)
-					place(colossus, CFrame.new(carried) * CFrame.Angles(0.15, t * 1.5, 0.1))
+					place(colossus, CFrame.new(carried) * CFrame.Angles(0.15, t * 2.4, 0.1))
 				end)
 				after(0.4, function()
 					-- Rock is pulled up off the slopes into it.
-					for i = 1, 14 do
-						local angle = i / 14 * math.pi * 2 + random:NextNumber(-0.2, 0.2)
-						local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * random:NextNumber(18, 30)
+					for i = 1, 26 do
+						local angle = i / 26 * math.pi * 2 + random:NextNumber(-0.2, 0.2)
+						local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * random:NextNumber(18, 32)
 						local from = surface(flat) or (flat - Vector3.new(0, 8, 0))
-						local rocks = lump(random:NextNumber(0.7, 1.2), CFrame.new(from))
+						local rocks = lump(random:NextNumber(0.7, 1.3), CFrame.new(from))
 						if rocks == nil then break end
-						dust(from, 2, 1)
+						if i % 3 == 0 then dust(from, 2, 1) end
 						local spin = random:NextNumber(4, 8)
-						after(i * 0.04, function()
-							motion(1.1, function(t)
+						after(i * 0.06, function()
+							motion(1.4, function(t)
 								local target = if carried.Magnitude > 0 then carried else land
-								place(rocks, CFrame.new(towards(from, target, t * t) + Vector3.new(0, math.sin(t * math.pi) * 6, 0)) * CFrame.Angles(spin * t, spin * t, 0))
+								place(rocks, CFrame.new(towards(from, target, t * t) + Vector3.new(0, math.sin(t * math.pi) * 8, 0)) * CFrame.Angles(spin * t, spin * t, 0))
 							end, function()
 								vanish(rocks)
-								motes(carried, 4, 0.6)
+								motes(carried, 3, 0.6)
 							end)
 						end)
 					end
 				end)
 			end
-			after(1.62, function()
+			after(descent + 0.02, function()
 				if colossus then
 					for _, chunk in colossus.parts do fade(chunk, 0.12, { Size = chunk.Size * 0.6, Transparency = 1 }) end
 				end
-				grade({ Brightness = 0.4, Contrast = 0.1, TintColor = Color3.fromRGB(230, 255, 236) }, 0.04, 0.08, 0.6)
-				addShake(1.4)
-				flash(summit + Vector3.new(0, 2, 0), 24, colour, 0.5)
-				shockwave(summit, 30, colour, 0.9)
-				after(0.12, function() shockwave(summit, 20, WHITE, 0.7) end)
-				after(0.3, function() shockwave(summit, 40, colour:Lerp(rock.dust, 0.4), 1.1) end)
-				dust(summit, 22, 3.5)
+				grade({ Brightness = 0.45, Contrast = 0.12, TintColor = Color3.fromRGB(230, 255, 236) }, 0.04, 0.1, 0.7)
+				addShake(1.5)
+				flash(summit + Vector3.new(0, 2, 0), 28, colour, 0.55)
+				shockwave(summit, 32, colour, 0.9)
+				after(0.12, function() shockwave(summit, 22, WHITE, 0.7) end)
+				after(0.3, function() shockwave(summit, 44, colour:Lerp(rock.dust, 0.4), 1.1) end)
+				dust(summit, 24, 3.5)
 				motes(summit, 60, 2)
-				column(summit, 80, 5, colour, 1.3)
+				column(summit, 90, 6, colour, 1.6)
 				chunks(summit, 10, 1.6)
-				light(point(summit + Vector3.new(0, 4, 0), 1.6), colour, 36, 4, 1.4)
+				light(point(summit + Vector3.new(0, 4, 0), 1.8), colour, 36, 4, 1.6)
+			end)
+			-- Aftershock: green pillars burst up in a ring round the mountain,
+			-- one after another, then the whole peak pulses once more.
+			local ringTurn = random:NextNumber(0, math.pi * 2)
+			for i = 1, 8 do
+				after(descent + 0.5 + i * 0.16, function()
+					local angle = ringTurn + i * math.pi / 4
+					local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 16
+					local foot = surface(flat) or (flat - Vector3.new(0, 6, 0))
+					column(foot, 34, 2.2, colour, 0.9)
+					settle(foot, 1.5)
+					addShake(0.4)
+				end)
+			end
+			after(descent + 2.2, function()
+				flash(summit + Vector3.new(0, 2, 0), 18, colour, 0.5)
+				shockwave(summit, 50, colour, 1.2)
+				after(0.15, function() shockwave(summit, 36, WHITE, 0.9) end)
+				motes(summit, 70, 2.4)
+				grade({ Brightness = 0.25, Contrast = 0.08, TintColor = Color3.fromRGB(225, 255, 235) }, 0.05, 0.1, 0.8)
+				addShake(0.9)
 			end)
 		end
 	elseif tier == 1 then
@@ -12207,7 +12814,8 @@ function GiftEffects.play(data: any)
 		end)
 	elseif tier == 4 then
 		-- ORBITAL STRIKE: a target ring locks on while a charge gathers high in
-		-- the sky, then a beam slams down and the ground erupts.
+		-- the sky, a beam slams down and the ground erupts, then a barrage of
+		-- strikes walks round the crater and a last, wider beam finishes it.
 		burst(centre + Vector3.new(0, 0.3, 0), {
 			texture = TEXTURES.ring, count = 1, colour = sequence(colour), size = curve(16, 3), transparency = curve(0.6, 0.1),
 			lifetime = { 0.65, 0.65 }, speed = { 0.01, 0.01 }, spread = 0, flat = true,
@@ -12245,135 +12853,269 @@ function GiftEffects.play(data: any)
 			grade({ Brightness = 0.25, Contrast = 0.1, TintColor = colour:Lerp(WHITE, 0.7) }, 0.04, 0.05, 0.45)
 			addShake(0.8)
 			fireball(centre, 22, 2, colour)
-			smokeColumn(centre, 10, 2.5, 2.2)
+			smokeColumn(centre, 10, 2.5, 3)
 			embers(centre, 30, 1.1)
 			shockwave(centre, 20, colour, 0.7)
 			after(0.12, function() shockwave(centre, 13, WHITE, 0.55) end)
-			chunks(centre, 10, 1.4)
+			chunks(centre, 8, 1.4)
 			light(point(centre + Vector3.new(0, 3, 0), 1.2), colour, 26, 4, 1)
+		end)
+		-- The barrage: four more strikes walk round the crater.
+		local turn = random:NextNumber(0, math.pi * 2)
+		for i = 1, 4 do
+			local angle = turn + i * math.pi / 2 + random:NextNumber(-0.3, 0.3)
+			local spot = centre + Vector3.new(math.cos(angle), 0, math.sin(angle)) * random:NextNumber(6, 10)
+			spot = surface(spot) or spot
+			after(1.0 + i * 0.5, function()
+				burst(spot + Vector3.new(0, 0.3, 0), {
+					texture = TEXTURES.ring, count = 1, colour = sequence(colour), size = curve(7, 1.5), transparency = curve(0.6, 0.1),
+					lifetime = { 0.3, 0.3 }, speed = { 0.01, 0.01 }, spread = 0, flat = true,
+				})
+			end)
+			after(1.3 + i * 0.5, function()
+				column(spot, 70, 1.8, WHITE, 0.4)
+				column(spot, 70, 4, colour, 0.5, Enum.Material.ForceField)
+				flash(spot, 5, colour, 0.3)
+				fireball(spot, 10, 1.4, colour)
+				sparks(spot, 16, colour, 1.1)
+				shockwave(spot, 10, colour, 0.55)
+				chunks(spot, 3, 1)
+				addShake(0.5)
+			end)
+		end
+		-- The last word: a wider beam and three rings.
+		after(3.6, function()
+			column(centre, 80, 5, WHITE, 0.7)
+			column(centre, 80, 11, colour, 0.9, Enum.Material.ForceField)
+			flash(centre, 14, colour, 0.45)
+			grade({ Brightness = 0.32, Contrast = 0.12, TintColor = colour:Lerp(WHITE, 0.65) }, 0.04, 0.1, 0.6)
+			addShake(1.1)
+			fireball(centre, 26, 2.6, colour)
+			smokeColumn(centre, 14, 3, 3.4)
+			embers(centre, 40, 1.3)
+			shockwave(centre, 26, colour, 0.8)
+			after(0.12, function() shockwave(centre, 18, WHITE, 0.6) end)
+			after(0.3, function() shockwave(centre, 34, Color3.fromRGB(255, 150, 70), 1) end)
+			chunks(centre, 8, 1.6)
+			light(point(centre + Vector3.new(0, 3, 0), 1.5), colour, 32, 4, 1.3)
 		end)
 	elseif tier == 5 then
 		-- GALAXY COLLAPSE: a black hole opens over the rock with a spinning
-		-- ring of stars, pulls in light from all round, then goes nova and
-		-- drives a beam into the mountain.
+		-- ring of stars, pulls in light from all round, then goes nova. The
+		-- stars fling out in spiral arms, the hole flickers back for a second
+		-- pulse, and a beam of starlight drives into the mountain.
 		local core = centre + Vector3.new(0, 11, 0)
+		local gather = 1.8
 		local hole = part(Enum.PartType.Ball, Vector3.one * 0.2, CFrame.new(core), Color3.new(0, 0, 0), Enum.Material.SmoothPlastic)
 		local halo = part(Enum.PartType.Ball, Vector3.one * 0.3, CFrame.new(core), colour)
-		if hole then animate(hole, 0.8, { Size = Vector3.one * 3.4 }, Enum.EasingStyle.Back) end
+		if hole then animate(hole, 0.8, { Size = Vector3.one * 3.8 }, Enum.EasingStyle.Back) end
 		if halo then
 			halo.Transparency = 0.55
-			animate(halo, 0.8, { Size = Vector3.one * 5.2 }, Enum.EasingStyle.Back)
-			light(halo, colour, 24, 3, 1.3)
+			animate(halo, 0.8, { Size = Vector3.one * 6 }, Enum.EasingStyle.Back)
+			light(halo, colour, 26, 3, gather + 0.3)
 		end
+		grade({ Brightness = -0.08, Contrast = 0.15, Saturation = 0.15, TintColor = Color3.fromRGB(225, 210, 255) }, 0.5, gather - 0.5, 0.4)
 		-- The accretion ring: stars with short trails orbiting on a tilted plane.
-		local stars: { Part } = {}
-		local tilt = CFrame.new(core) * CFrame.Angles(math.rad(18), random:NextNumber(0, math.pi), math.rad(-10))
-		for i = 1, 16 do
-			local star = part(Enum.PartType.Ball, Vector3.one * random:NextNumber(0.3, 0.55), tilt, (if i % 3 == 0 then PINK elseif i % 3 == 1 then colour else Color3.fromRGB(120, 170, 255)):Lerp(WHITE, 0.3))
-			if star == nil then break end
+		local function star(size: number, at: CFrame, tint: Color3): Part?
+			local ball = part(Enum.PartType.Ball, Vector3.one * size, at, tint)
+			if ball == nil then return nil end
 			local a = Instance.new("Attachment")
 			a.Position = Vector3.new(0, 0.2, 0)
-			a.Parent = star
+			a.Parent = ball
 			local b = Instance.new("Attachment")
 			b.Position = Vector3.new(0, -0.2, 0)
-			b.Parent = star
+			b.Parent = ball
 			local trail = Instance.new("Trail")
 			trail.Attachment0 = a
 			trail.Attachment1 = b
-			trail.Color = sequence(WHITE, star.Color)
-			trail.Lifetime = 0.25
+			trail.Color = sequence(WHITE, tint)
+			trail.Lifetime = 0.3
 			trail.LightEmission = 1
 			trail.FaceCamera = true
 			trail.WidthScale = curve(1, 0)
 			trail.Transparency = curve(0.1, 1)
-			trail.Parent = star
-			table.insert(stars, star)
+			trail.Parent = ball
+			return ball
+		end
+		local function starColour(i: number): Color3
+			return (if i % 3 == 0 then PINK elseif i % 3 == 1 then colour else Color3.fromRGB(120, 170, 255)):Lerp(WHITE, 0.3)
+		end
+		local stars: { Part } = {}
+		local tilt = CFrame.new(core) * CFrame.Angles(math.rad(18), random:NextNumber(0, math.pi), math.rad(-10))
+		for i = 1, 24 do
+			local ball = star(random:NextNumber(0.3, 0.6), tilt, starColour(i))
+			if ball == nil then break end
+			table.insert(stars, ball)
 		end
 		local phases: { number } = {}
 		local orbits: { number } = {}
 		for i = 1, #stars do
 			phases[i] = i / #stars * math.pi * 2
-			orbits[i] = random:NextNumber(4.5, 8)
+			orbits[i] = random:NextNumber(4.5, 9)
 		end
-		motion(0.95, function(t)
-			for i, star in stars do
-				local spin = phases[i] + t * (6 + 4 / orbits[i] * 6)
-				local reach = orbits[i] * (1 - 0.45 * t * t)
-				star.CFrame = tilt * CFrame.new(math.cos(spin) * reach, math.sin(spin * 3 + i) * 0.25, math.sin(spin) * reach)
+		motion(gather, function(t)
+			for i, ball in stars do
+				local spin = phases[i] + t * (9 + 4 / orbits[i] * 9)
+				local reach = orbits[i] * (1 - 0.5 * t * t)
+				ball.CFrame = tilt * CFrame.new(math.cos(spin) * reach, math.sin(spin * 3 + i) * 0.25, math.sin(spin) * reach)
 			end
 		end)
 		-- Light pulled in from a sphere round the hole.
-		local well = part(Enum.PartType.Ball, Vector3.one * 28, CFrame.new(core), WHITE)
+		local well = part(Enum.PartType.Ball, Vector3.one * 30, CFrame.new(core), WHITE)
 		if well then
 			well.Transparency = 1
 			local inward = emitter({
 				texture = TEXTURES.spark, count = 0, colour = sequence(WHITE, colour, PINK), size = curve(0.2, 0.6, 0.1),
-				transparency = curve(0.6, 0, 0.4), lifetime = { 0.45, 0.45 }, speed = { 28, 30 }, spread = 0, spin = 180,
+				transparency = curve(0.6, 0, 0.4), lifetime = { 0.45, 0.45 }, speed = { 30, 32 }, spread = 0, spin = 180,
 			}, well)
 			inward.Shape = Enum.ParticleEmitterShape.Sphere
 			inward.ShapeInOut = Enum.ParticleEmitterShapeInOut.Inward
 			inward.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
-			inward.Rate = 110
+			inward.Rate = 120
 			inward.Enabled = true
-			after(0.85, function() inward.Enabled = false end)
+			after(gather - 0.1, function() inward.Enabled = false end)
+		end
+		for i = 1, 3 do
+			after(i * 0.45, function() addShake(0.25 + i * 0.1) end)
 		end
 		-- Collapse, then nova.
-		after(0.95, function()
+		after(gather, function()
 			if hole then fade(hole, 0.12, { Size = Vector3.one * 0.1 }) end
 			if halo then fade(halo, 0.12, { Size = Vector3.one * 0.1, Transparency = 1 }) end
-			for _, star in stars do fade(star, 0.12, { Size = Vector3.one * 0.05 }) end
+			for _, ball in stars do fade(ball, 0.12, { Size = Vector3.one * 0.05 }) end
 		end)
-		after(1.08, function()
-			flash(core, 16, colour, 0.45)
-			grade({ Brightness = 0.3, Contrast = 0.15, Saturation = 0.2, TintColor = colour:Lerp(WHITE, 0.6) }, 0.05, 0.1, 0.6)
-			addShake(0.9)
-			shockwave(core, 24, colour, 0.8)
-			after(0.1, function() shockwave(core, 16, PINK, 0.7) end)
+		after(gather + 0.13, function()
+			flash(core, 18, colour, 0.5)
+			grade({ Brightness = 0.32, Contrast = 0.15, Saturation = 0.2, TintColor = colour:Lerp(WHITE, 0.6) }, 0.05, 0.1, 0.6)
+			addShake(1)
+			shockwave(core, 26, colour, 0.8)
+			after(0.1, function() shockwave(core, 18, PINK, 0.7) end)
 			burst(core, {
 				texture = TEXTURES.spark, count = 70, colour = sequence(WHITE, colour, PINK), size = curve(0.7, 0.45, 0),
 				lifetime = { 0.7, 1.4 }, speed = { 14, 30 }, drag = 3, spin = 200,
 			})
 			column(centre, 11, 2.6, colour, 0.45)
 			shockwave(centre, 22, colour, 0.7)
-			dust(centre, 16, 2)
+			dust(centre, 14, 2)
 			fireball(centre, 14, 1.6, colour)
-			chunks(centre, 10, 1.4)
+			chunks(centre, 8, 1.4)
+			light(point(core, 1.6), colour, 30, 4, 1.4)
+			-- Spiral arms: new stars fling out from the core and fade.
+			for i = 1, 18 do
+				local arm = (i % 2) * math.pi
+				local ball = star(random:NextNumber(0.35, 0.7), CFrame.new(core), starColour(i))
+				if ball == nil then break end
+				local reachOut = 8 + (i // 2) * 2.2
+				local twist = random:NextNumber(2.2, 3)
+				motion(1.6, function(t)
+					local ease = 1 - (1 - t) ^ 3
+					local angle = arm + ease * twist + (i // 2) * 0.12
+					ball.CFrame = tilt * CFrame.new(math.cos(angle) * reachOut * ease, math.sin(i + t * 4) * 0.6, math.sin(angle) * reachOut * ease)
+					ball.Transparency = math.clamp((t - 0.6) / 0.4, 0, 1)
+				end, function() ball:Destroy() end)
+			end
+		end)
+		-- The second pulse: the hole flickers back, then starlight pours down.
+		local pulseAt = gather + 1.6
+		after(pulseAt, function()
+			flash(core, 9, PINK, 0.4)
+			shockwave(core, 20, PINK, 0.7)
+			after(0.1, function() shockwave(core, 14, colour, 0.6) end)
+			addShake(0.6)
+		end)
+		after(pulseAt + 0.4, function()
+			column(centre, 60, 3.4, WHITE, 0.6)
+			column(centre, 60, 7.5, colour, 0.8, Enum.Material.ForceField)
+			burst(core + Vector3.new(0, 6, 0), {
+				texture = TEXTURES.spark, count = 60, colour = sequence(WHITE, PINK, colour), size = curve(0.6, 0.4, 0),
+				lifetime = { 1, 1.8 }, speed = { 4, 12 }, spread = 70, drag = 1, acceleration = Vector3.new(0, -18, 0), spin = 160,
+			})
+			flash(centre, 14, colour, 0.45)
+			grade({ Brightness = 0.28, Contrast = 0.12, Saturation = 0.2, TintColor = colour:Lerp(WHITE, 0.6) }, 0.04, 0.1, 0.7)
+			addShake(1.1)
+			shockwave(centre, 30, colour, 0.9)
+			after(0.12, function() shockwave(centre, 20, WHITE, 0.7) end)
+			after(0.3, function() shockwave(centre, 38, PINK, 1.1) end)
+			fireball(centre, 20, 2, colour)
+			dust(centre, 18, 2.4)
+			chunks(centre, 8, 1.6)
+			light(point(centre + Vector3.new(0, 4, 0), 1.6), colour, 34, 4, 1.4)
 		end)
 	else
-		-- COSMIC BURST: the sky darkens, meteors rain down round the target,
-		-- then a blazing comet strikes with a mushroom of fire and smoke.
-		grade({ Brightness = -0.12, Contrast = 0.2, Saturation = 0.1, TintColor = Color3.fromRGB(255, 214, 196) }, 0.5, 2.2, 1.2)
-		for i = 1, 5 do
-			after(0.15 + (i - 1) * 0.2, function()
-				local target = centre + Vector3.new(random:NextNumber(-13, 13), 0, random:NextNumber(-13, 13))
-				streak(skyPoint(target, 60, 30), target, 1.1, 0.6, colour, false, function()
-					flash(target, 3.5, colour, 0.3)
-					shockwave(target, 6, colour, 0.5)
-					sparks(target, 14, colour, 1)
-					chunks(target, 2, 0.9)
-					addShake(0.25)
+		-- COSMIC BURST: the sky darkens, a meteor storm rains down round the
+		-- target, a blazing comet strikes with a mushroom of fire and smoke,
+		-- fire geysers erupt in a ring, more meteors fall, and a final cosmic
+		-- shock rolls out across the whole valley.
+		grade({ Brightness = -0.15, Contrast = 0.22, Saturation = 0.1, TintColor = Color3.fromRGB(255, 205, 190) }, 0.5, 5.6, 1.5)
+		local function meteor(delay: number, spread: number, size: number)
+			after(delay, function()
+				local target = centre + Vector3.new(random:NextNumber(-spread, spread), 0, random:NextNumber(-spread, spread))
+				target = surface(target) or target
+				streak(skyPoint(target, 60, 30), target, size, 0.6, colour, false, function()
+					flash(target, 3.5 * size, colour, 0.3)
+					shockwave(target, 6 * size, colour, 0.5)
+					sparks(target, 12, colour, 1)
+					chunks(target, 1, 0.9)
+					addShake(0.3)
 				end)
 			end)
 		end
-		after(1.1, function()
-			streak(skyPoint(centre, 95, 60), centre, 4.5, 0.75, colour, true, function()
-				grade({ Brightness = 0.45, Contrast = 0.1, TintColor = Color3.fromRGB(255, 244, 220) }, 0.04, 0.08, 0.6)
-				addShake(1.4)
-				flash(centre, 26, colour, 0.5)
-				shockwave(centre, 34, colour, 0.9)
-				after(0.12, function() shockwave(centre, 24, WHITE, 0.7) end)
-				after(0.3, function() shockwave(centre, 42, Color3.fromRGB(255, 150, 70), 1.1) end)
-				fireball(centre, 36, 3.5, colour)
-				smokeColumn(centre, 22, 4.5, 3.4)
-				embers(centre, 60, 1.4)
+		for i = 1, 12 do
+			meteor(0.15 + (i - 1) * 0.2, 16, random:NextNumber(0.9, 1.4))
+		end
+		local impact = 2.9
+		after(impact - 0.75, function()
+			streak(skyPoint(centre, 100, 60), centre, 5, 0.75, colour, true, function()
+				grade({ Brightness = 0.5, Contrast = 0.1, TintColor = Color3.fromRGB(255, 244, 220) }, 0.04, 0.1, 0.7)
+				addShake(1.5)
+				flash(centre, 30, colour, 0.55)
+				shockwave(centre, 36, colour, 0.9)
+				after(0.12, function() shockwave(centre, 26, WHITE, 0.7) end)
+				after(0.3, function() shockwave(centre, 46, Color3.fromRGB(255, 150, 70), 1.1) end)
+				fireball(centre, 36, 3.8, colour)
+				smokeColumn(centre, 22, 4.8, 4.5)
+				embers(centre, 60, 1.5)
 				burst(centre + Vector3.new(0, 3, 0), {
 					texture = TEXTURES.spark, count = 45, colour = sequence(WHITE, colour), size = curve(0.8, 0.5, 0),
 					lifetime = { 0.8, 1.6 }, speed = { 16, 34 }, drag = 2.5, spin = 200,
 				})
-				column(centre, 100, 6, colour, 1.4)
-				chunks(centre, 14, 1.8)
-				light(point(centre + Vector3.new(0, 4, 0), 1.8), colour, 40, 5, 1.6)
+				column(centre, 110, 7, colour, 1.6)
+				chunks(centre, 12, 1.8)
+				light(point(centre + Vector3.new(0, 4, 0), 2), colour, 42, 5, 1.8)
 			end)
+		end)
+		-- Fire geysers burst up in a ring, one after another, while the ground rumbles.
+		local turn = random:NextNumber(0, math.pi * 2)
+		for i = 1, 6 do
+			after(impact + 0.6 + i * 0.22, function()
+				local angle = turn + i * math.pi / 3
+				local flat = centre + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 13
+				local foot = surface(flat) or flat
+				column(foot, 26, 2.4, Color3.fromRGB(255, 150, 70), 0.8)
+				fireball(foot, 9, 1.8, colour)
+				smokeColumn(foot, 4, 2, 2.4)
+				shockwave(foot, 7, colour, 0.5)
+				addShake(0.45)
+			end)
+		end
+		-- A second, smaller wave of meteors.
+		for i = 1, 6 do
+			meteor(impact + 1.7 + i * 0.18, 20, random:NextNumber(0.8, 1.2))
+		end
+		-- The cosmic shock: the sky flashes white and rings roll out across the valley.
+		after(impact + 3.6, function()
+			grade({ Brightness = 0.4, Contrast = 0.12, Saturation = 0.15, TintColor = Color3.fromRGB(255, 236, 225) }, 0.05, 0.12, 0.8)
+			addShake(1.2)
+			flash(centre + Vector3.new(0, 4, 0), 22, WHITE, 0.5)
+			shockwave(centre, 50, colour, 1.2)
+			after(0.15, function() shockwave(centre, 38, WHITE, 1) end)
+			after(0.35, function() shockwave(centre, 62, Color3.fromRGB(255, 150, 70), 1.4) end)
+			embers(centre, 40, 1.6)
+			burst(centre + Vector3.new(0, 6, 0), {
+				texture = TEXTURES.spark, count = 50, colour = sequence(WHITE, colour, PINK), size = curve(0.8, 0.5, 0),
+				lifetime = { 1, 1.8 }, speed = { 18, 36 }, drag = 2.5, spin = 200,
+			})
+			light(point(centre + Vector3.new(0, 6, 0), 1.6), colour, 40, 4, 1.4)
 		end)
 	end
 
@@ -12394,7 +13136,7 @@ function GiftEffects.play(data: any)
 		grow.Parent = text
 		TweenService:Create(text, TweenInfo.new(0.3, Enum.EasingStyle.Back), { Position = UDim2.fromScale(0.5, 0.30) }):Play()
 		TweenService:Create(grow, TweenInfo.new(0.3, Enum.EasingStyle.Back), { Scale = 1 }):Play()
-		task.delay(1.5 + tier * 0.35, function()
+		task.delay(BANNER_SECONDS[tier], function()
 			if serial ~= bannerSerial then return end
 			bannerTween = TweenService:Create(text, TweenInfo.new(0.45), { TextTransparency = 1, TextStrokeTransparency = 1 })
 			bannerTween:Play()
@@ -12407,14 +13149,293 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="39">
+        <Item class="ModuleScript" referent="40">
+          <Properties>
+            <string name="Name">HowToPlay</string>
+            <string name="Source"><![CDATA[--!strict
+-- The How to Play guide: a card in the lobby's white and gold with four
+-- pages (connecting TikTok, testing without TikTok, the controls and how to
+-- win). It opens from the board beside the lobby spawn, the games menu's
+-- How to play button, or H anywhere, and frees the mouse while it is open.
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+
+local HowToPlay = {}
+
+local IVORY = Color3.fromRGB(250, 248, 243)
+local GOLD = Color3.fromRGB(224, 178, 72)
+local ROYAL = Color3.fromRGB(34, 52, 140)
+local INK = Color3.fromRGB(46, 44, 56)
+local MUTED = Color3.fromRGB(140, 132, 118)
+local TITLE_FONT = Enum.Font.Merriweather
+HowToPlay.KEY = Enum.KeyCode.H
+-- The lobby board's prompt and click detector carry this name.
+HowToPlay.BOARD = "HowToPlay"
+
+-- Each page: its tab name and its text (Roblox rich text, so no < > or &).
+HowToPlay.PAGES = {
+	{
+		title = "Connect TikTok",
+		text = table.concat({
+			"<b>You need</b> a Windows PC with Roblox Studio and Node.js LTS (free from nodejs.org, installed once).",
+			"",
+			"<b>1.</b>  Open the <b>bridge</b> folder and double-click <b>Start Bridge.bat</b>. Keep the black window open: that is the bridge.",
+			"<b>2.</b>  The control page opens in your browser at <b>localhost:8787</b>.",
+			"<b>3.</b>  Go LIVE on TikTok, type your TikTok username on the control page and press <b>Connect</b>. It remembers you next time.",
+			"<b>4.</b>  In Studio, HTTP requests must be allowed (Home, Game Settings, Security, Allow HTTP Requests). It is already on in this game.",
+			"<b>5.</b>  Press Play, then <b>JOIN</b> Diamond in the Rough. The control page says <b>Roblox: connected</b> and the bottom right of the game shows the TikTok connection.",
+			"<b>6.</b>  Capture the Studio window in TikTok LIVE Studio or OBS.",
+			"",
+			"No bridge? You can still send gifts yourself with test gifts and gift keybinds: see <b>Testing</b>.",
+		}, "\n"),
+	},
+	{
+		title = "Testing",
+		text = table.concat({
+			"<b>Y</b> opens the streamer panel in the game and frees the mouse. Press Y again to close it.",
+			"",
+			"<b>TEST GIFTS</b> send pretend gifts with no TikTok needed, from Rose (1 coin) up to Universe. Bigger gifts make bigger blasts.",
+			"<b>REBUILD TEST GIFTS</b> add stone back, from +100 up to Grow to limit.",
+			"<b>Send a diamond bird now</b> calls the diamond bird straight away.",
+			"",
+			"<b>GIFT KEYBINDS</b>: type a gift name and its coins, press <b>Key</b>, then press the key you want, and press <b>Save keybind</b>. Pressing that key in the game now sends that gift, with or without the bridge.",
+			"",
+			"The control page at localhost:8787 has the same test buttons.",
+		}, "\n"),
+	},
+	{
+		title = "Controls",
+		text = table.concat({
+			"<b>W A S D</b> to walk, <b>Space</b> to jump, move the mouse to look.",
+			"<b>Hold left mouse</b> on the mountain to dig. Stand close to the rock you aim at.",
+			"<b>Click</b> the diamond to pick it up, and the diamond bird to catch it.",
+			"",
+			"<b>G</b>  games menu: join, or go back to the lobby",
+			"<b>P</b>  settings: field of view, and hiding the GAMES and SETTINGS buttons",
+			"<b>H</b>  this guide",
+			"<b>Y</b>  streamer panel: test gifts, keybinds, map and settings",
+			"",
+			"On a phone or tablet, tap to dig and use the on-screen buttons.",
+		}, "\n"),
+	},
+	{
+		title = "How to win",
+		text = table.concat({
+			"Dig into the mountain to find the <b>diamond</b> hidden inside. TikTok gifts blast big holes in it, and likes, follows and shares break rocks too. Some gifts add stone back instead: the streamer chooses which.",
+			"",
+			"When the diamond shows, aim at it and click it from close by to pick it up.",
+			"",
+			"Hold it until the countdown ends (it takes 15 seconds) to win the round. You can't move while you hold it, and a gift that rebuilds rock makes you drop it.",
+			"",
+			"<b>Diamond bird</b>: every 5 to 7 and a half minutes a diamond bird circles the mountain. Aim at it until the dot turns gold and click: every gift counts double for 30 seconds.",
+			"",
+			"The leaderboards behind the mountain show the top helpers (gifts that break the mountain) and the top griefers (gifts that add stone).",
+		}, "\n"),
+	},
+}
+
+local open = false
+local setOpenHandler: ((boolean, number?) -> ())? = nil
+
+function HowToPlay.isOpen(): boolean
+	return open
+end
+
+-- Opens the guide (on `page`, or where it was left) or closes it.
+function HowToPlay.setOpen(show: boolean, page: number?)
+	if setOpenHandler then setOpenHandler(show, page) end
+end
+
+function HowToPlay.toggle()
+	HowToPlay.setOpen(not open)
+end
+
+local function make(className: string, properties: { [string]: any }, parent: Instance?): any
+	local instance = Instance.new(className)
+	for key, value in properties do
+		(instance :: any)[key] = value
+	end
+	if parent ~= nil then
+		instance.Parent = parent
+	end
+	return instance
+end
+
+local function rounded(parent: Instance, radius: number)
+	make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+end
+
+local function stroke(parent: Instance, colour: Color3, thickness: number)
+	make("UIStroke", { Color = colour, Thickness = thickness, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, parent)
+end
+
+function HowToPlay.start()
+	local player = Players.LocalPlayer
+	local gui = make("ScreenGui", {
+		Name = "HowToPlay",
+		ResetOnSpawn = false,
+		DisplayOrder = 20,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Enabled = false,
+	}, player:WaitForChild("PlayerGui"))
+	local card = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(0.92, 0, 0.86, 0),
+		BackgroundColor3 = IVORY,
+	}, gui)
+	make("UISizeConstraint", { MaxSize = Vector2.new(620, 520) }, card)
+	rounded(card, 18)
+	stroke(card, GOLD, 3)
+	make("UIPadding", {
+		PaddingLeft = UDim.new(0, 18),
+		PaddingRight = UDim.new(0, 18),
+		PaddingTop = UDim.new(0, 14),
+		PaddingBottom = UDim.new(0, 16),
+	}, card)
+	make("TextLabel", {
+		Size = UDim2.new(1, -110, 0, 38),
+		BackgroundTransparency = 1,
+		Font = TITLE_FONT,
+		TextSize = 28,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = ROYAL,
+		Text = "How to play",
+	}, card)
+	local close = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 4),
+		Size = UDim2.fromOffset(96, 30),
+		BackgroundColor3 = ROYAL,
+		Font = Enum.Font.GothamBold,
+		TextSize = 13,
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = "Close  H",
+	}, card)
+	rounded(close, 15)
+
+	-- The page tabs.
+	local tabs = make("Frame", {
+		Position = UDim2.fromOffset(0, 48),
+		Size = UDim2.new(1, 0, 0, 32),
+		BackgroundTransparency = 1,
+	}, card)
+	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6) }, tabs)
+	make("Frame", {
+		Position = UDim2.fromOffset(0, 88),
+		Size = UDim2.new(1, 0, 0, 2),
+		BackgroundColor3 = GOLD,
+		BorderSizePixel = 0,
+	}, card)
+	local body = make("ScrollingFrame", {
+		Position = UDim2.fromOffset(0, 100),
+		Size = UDim2.new(1, 0, 1, -122),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		CanvasSize = UDim2.fromOffset(0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 4,
+		ScrollBarImageColor3 = GOLD,
+	}, card)
+	local text = make("TextLabel", {
+		Size = UDim2.new(1, -10, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 16,
+		LineHeight = 1.15,
+		TextWrapped = true,
+		RichText = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		TextColor3 = INK,
+		Text = "",
+	}, body)
+
+	local buttons: { TextButton } = {}
+	local current = 1
+	local function show(page: number)
+		current = math.clamp(page, 1, #HowToPlay.PAGES)
+		for index, button in buttons do
+			local on = index == current
+			button.BackgroundColor3 = if on then ROYAL else Color3.new(1, 1, 1)
+			button.TextColor3 = if on then Color3.new(1, 1, 1) else ROYAL
+		end
+		text.Text = HowToPlay.PAGES[current].text
+		body.CanvasPosition = Vector2.zero
+	end
+	for index, page in HowToPlay.PAGES do
+		local button = make("TextButton", {
+			Size = UDim2.new(1 / #HowToPlay.PAGES, -6, 1, 0),
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			TextScaled = false,
+			Text = page.title,
+		}, tabs)
+		rounded(button, 10)
+		stroke(button, ROYAL, 1.5)
+		button.Activated:Connect(function() show(index) end)
+		table.insert(buttons, button)
+	end
+	make("TextLabel", {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.fromScale(0, 1),
+		Size = UDim2.new(1, 0, 0, 14),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = MUTED,
+		Text = "Open this again from the board by the lobby spawn, the games menu, or H.",
+	}, card)
+	show(1)
+
+	setOpenHandler = function(visible: boolean, page: number?)
+		if page then show(page) end
+		open = visible
+		gui.Enabled = visible
+	end
+	close.Activated:Connect(function() HowToPlay.setOpen(false) end)
+	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+		if processed or input.KeyCode ~= HowToPlay.KEY or UserInputService:GetFocusedTextBox() then return end
+		HowToPlay.toggle()
+	end)
+	-- The lobby board: walk up and press E, or click it.
+	ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt, who: Player)
+		if prompt.Name == HowToPlay.BOARD and who == player then HowToPlay.setOpen(true, 1) end
+	end)
+	task.spawn(function()
+		local lobby = workspace:WaitForChild("Lobby", math.huge)
+		local board = lobby:WaitForChild("HowToPlayBoard", math.huge)
+		local click = board:WaitForChild(HowToPlay.BOARD .. "Click", math.huge)
+		if click:IsA("ClickDetector") then
+			click.MouseClick:Connect(function() HowToPlay.setOpen(true, 1) end)
+		end
+	end)
+	-- First person locks the mouse; free it while the guide is open.
+	RunService.RenderStepped:Connect(function()
+		if open then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			UserInputService.MouseIconEnabled = true
+		end
+	end)
+end
+
+return HowToPlay
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="41">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
 -- The games menu on the left of the screen, in the lobby's royal white and
 -- gold: Diamond in the Rough with its live status and a Join button, more
--- slots marked Coming soon, and Back to lobby while playing. The Hide button
--- hides it to a small tab; the tab (or G) shows it again. Also turns the
+-- slots marked Coming soon, How to play, and Back to lobby while playing. The
+-- Hide button hides it to a small tab; the tab (or G) shows it again. The tab
+-- itself can be hidden from the settings (G still works). Also turns the
 -- lobby's giant diamond on this computer.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12438,9 +13459,17 @@ local WIDTH = 360
 local TOGGLE_KEY = Enum.KeyCode.G
 
 local open = false
+local tabHidden = false
+local refreshTab: () -> () = function() end
 
 function LobbyView.isOpen(): boolean
 	return open
+end
+
+-- Hides the GAMES tab (the settings' "Hide buttons"); G still opens the menu.
+function LobbyView.setTabHidden(hidden: boolean)
+	tabHidden = hidden
+	refreshTab()
 end
 
 local function make(className: string, properties: { [string]: any }, parent: Instance?): any
@@ -12506,8 +13535,9 @@ function LobbyView.status(phase: string, stone: number, skin: string?): string
 end
 
 -- `request` sends joinGame / leaveGame; `onChange(inGame)` runs whenever the
--- player moves between the lobby and the game (and once at the start).
-function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boolean) -> ())
+-- player moves between the lobby and the game (and once at the start);
+-- `onHelp` opens the How to Play guide.
+function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boolean) -> (), onHelp: (() -> ())?)
 	local player = Players.LocalPlayer
 	local gui = make("ScreenGui", {
 		Name = "GamesMenu",
@@ -12534,7 +13564,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	local panel = make("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, -WIDTH - 40, 0.5, 0),
-		Size = UDim2.fromOffset(WIDTH, 556),
+		Size = UDim2.fromOffset(WIDTH, 608),
 		BackgroundColor3 = IVORY,
 		Visible = false,
 	}, gui)
@@ -12675,6 +13705,21 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		stroke(badge, GOLD, 1.5)
 	end
 
+	local help = make("TextButton", {
+		LayoutOrder = 9,
+		Size = UDim2.new(1, 0, 0, 44),
+		BackgroundColor3 = ROYAL,
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = "How to play  H",
+	}, list)
+	rounded(help, 12)
+	stroke(help, GOLD, 2)
+	help.Activated:Connect(function()
+		if onHelp then onHelp() end
+	end)
+
 	local back = make("TextButton", {
 		LayoutOrder = 10,
 		Size = UDim2.new(1, 0, 0, 44),
@@ -12694,7 +13739,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		if show == open then return end
 		open = show
 		if slide then slide:Cancel() end
-		tab.Visible = not show
+		refreshTab()
 		panel.Visible = true
 		local target = if show then UDim2.new(0, 12, 0.5, 0) else UDim2.new(0, -WIDTH - 40, 0.5, 0)
 		local tween = TweenService:Create(panel, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = target })
@@ -12703,6 +13748,9 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 			if playback == Enum.PlaybackState.Completed and not open then panel.Visible = false end
 		end)
 		tween:Play()
+	end
+	refreshTab = function()
+		tab.Visible = not open and not tabHidden
 	end
 	tab.Activated:Connect(function() setOpen(true) end)
 	hide.Activated:Connect(function() setOpen(false) end)
@@ -12792,7 +13840,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="40">
+        <Item class="ModuleScript" referent="42">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -13293,7 +14341,7 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="41">
+        <Item class="ModuleScript" referent="43">
           <Properties>
             <string name="Name">PetalView</string>
             <string name="Source"><![CDATA[--!strict
@@ -13395,7 +14443,7 @@ return PetalView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="42">
+        <Item class="ModuleScript" referent="44">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -13523,7 +14571,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="43">
+        <Item class="ModuleScript" referent="45">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -13639,12 +14687,12 @@ return SceneryView
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="44">
+  <Item class="Workspace" referent="46">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="45">
+    <Item class="Terrain" referent="47">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>

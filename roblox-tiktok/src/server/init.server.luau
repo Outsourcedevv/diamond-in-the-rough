@@ -15,6 +15,8 @@ local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
+local Keybinds = require(Shared:WaitForChild("Keybinds"))
+local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
@@ -55,6 +57,8 @@ local settings = {
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
+	-- Players who hid the GAMES tab and SETTINGS button (by user id).
+	hiddenButtons = {} :: { [string]: boolean },
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
@@ -62,7 +66,21 @@ local settings = {
 	theme = "default", -- the map's look: "default" (alpine), "sakura" or "farm"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 }
-local saved = Store.load()
+-- Single player: every player has their own save (statues, wins, theme,
+-- keybinds and the rest), so the server waits for its player and loads theirs.
+-- A first visit starts from the game's old shared save.
+if Config.SinglePlayer then
+	local waitUntil = os.clock() + 30
+	while #Players:GetPlayers() == 0 and os.clock() < waitUntil do
+		task.wait(0.1)
+	end
+	local owner = Players:GetPlayers()[1]
+	if owner then Store.useKey("player_" .. tostring(owner.UserId)) end
+end
+local saved, readable = Store.load()
+if saved == nil and readable and Config.SinglePlayer then
+	saved = Store.load(Store.SHARED_KEY)
+end
 if saved then
 	for key, value in saved do
 		if settings[key] ~= nil and type(value) == type(settings[key]) then
@@ -320,6 +338,8 @@ end
 -- Players whose client asked for the mountain; only they receive changes.
 local synced: { [Player]: boolean } = {}
 local readyAt: { [Player]: number } = {}
+local catchAt: { [Player]: number } = {}
+local hideAt: { [Player]: number } = {}
 local function sendMessages(messages: { { any } }, player: Player?)
 	for _, message in messages do
 		if player then
@@ -646,35 +666,61 @@ cancelHoldForRebuild = function()
 	if interrupted then drop("rebuild") end
 	return interrupted
 end
+-- Puts a player on top of the rock: at `destination` if given, else out of
+-- any restored rock their body is inside (`centreOnly`: only rock right where
+-- they stand, not rock beside them).
+local function liftOut(current: Mountain.Mountain, player: Player, destination: Vector3?, centreOnly: boolean?)
+	if player:GetAttribute("InGame") ~= true or player == holder then return end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if character == nil or root == nil or not root:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then return end
+	local clearance = humanoid.HipHeight + root.Size.Y / 2
+	-- R6 rigs use zero HipHeight; account for their legs.
+	if humanoid.RigType == Enum.HumanoidRigType.R6 then clearance += 2 end
+	if destination == nil then
+		-- Lift players whose body is now inside restored rock onto its surface.
+		local feet = root.Position.Y - clearance
+		local top = current:coveredTop(root.Position, feet + 0.15, root.Position.Y + 1.5, centreOnly)
+		if top then destination = Vector3.new(root.Position.X, top, root.Position.Z) end
+	end
+	if destination then
+		local target = destination + Vector3.new(0, clearance + 1, 0)
+		character:PivotTo(character:GetPivot() + (target - root.Position))
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+-- Each client draws the rock itself, a moment after the server restores it.
+-- A player lifted onto rock their client has not drawn yet falls back into
+-- the old hole, and the rock then appears round them (the holder, moved to
+-- the summit after a big rebuild, was trapped like this). So for a few
+-- seconds after rock comes back, anyone standing inside it is lifted again.
+local UNBURY_SECONDS, UNBURY_EVERY = 6, 0.4
+local unburySerial = 0
+local function keepUnburying()
+	unburySerial += 1
+	local serial = unburySerial
+	task.spawn(function()
+		for _ = 1, math.ceil(UNBURY_SECONDS / UNBURY_EVERY) do
+			task.wait(UNBURY_EVERY)
+			local current = mountain
+			if serial ~= unburySerial or current == nil then return end
+			for _, player in Players:GetPlayers() do
+				liftOut(current, player, nil, true)
+			end
+		end
+	end)
+end
 interruptRebuildHold = function(restored: number, interrupted: Player?)
 	local current = mountain
 	if current == nil then return end
 	-- The former holder goes to the highest restored surface after a big rebuild.
 	local summit = if interrupted and restored >= 10000 then current:summit() else nil
 	for _, player in Players:GetPlayers() do
-		if player:GetAttribute("InGame") ~= true then continue end
-		local character = player.Character
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if character == nil or root == nil or not root:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then continue end
-		local clearance = humanoid.HipHeight + root.Size.Y / 2
-		-- R6 rigs use zero HipHeight; account for their legs.
-		if humanoid.RigType == Enum.HumanoidRigType.R6 then clearance += 2 end
-		local destination = if player == interrupted then summit else nil
-		if destination == nil then
-			-- Lift players whose body is now inside restored rock onto its surface.
-			local feet = root.Position.Y - clearance
-			local top = current:coveredTop(root.Position, feet + 0.15, root.Position.Y + 1.5)
-			if top then destination = Vector3.new(root.Position.X, top, root.Position.Z) end
-		end
-		if destination then
-			local target = destination + Vector3.new(0, clearance + 1, 0)
-			character:PivotTo(character:GetPivot() + (target - root.Position))
-			root.AssemblyLinearVelocity = Vector3.zero
-			root.AssemblyAngularVelocity = Vector3.zero
-		end
-
+		liftOut(current, player, if player == interrupted then summit else nil)
 	end
+	if restored > 0 then keepUnburying() end
 end
 
 local function win(player: Player)
@@ -847,9 +893,11 @@ local diamondBird = require(script.DiamondBird).start({
 	state = State,
 	notify = Notify,
 	radius = mountainRadius + 12,
+	-- Low enough to see and click from the trail: about halfway up the
+	-- mountain, never lower than head height above the camp.
 	height = function(): number
 		local top = if mountain then mountain:summit() else nil
-		return (if top then top.Y else mountainRadius) + 8
+		return math.max(12, (if top then top.Y else mountainRadius) * 0.5 + 4)
 	end,
 })
 -- Gifts that arrived during the bonus, so the feed can say so.
@@ -860,8 +908,10 @@ local function processTikTok(event: TikTokFeed.Event)
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
 		local name = string.lower(event.gift)
 		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
+		-- The bridge's own keybind for this gift replaces its old one; keys
+		-- set in the game's GIFT KEYBINDS stay.
 		for key, binding in settings.giftBindings do
-			if string.lower(binding.gift) == name then settings.giftBindings[key] = nil end
+			if string.lower(binding.gift) == name and binding.game ~= true then settings.giftBindings[key] = nil end
 		end
 		if event.keybind and event.keybind ~= "" then
 			settings.giftBindings[event.keybind] = { gift = event.gift, coins = event.coins or 1 }
@@ -877,7 +927,10 @@ local function processTikTok(event: TikTokFeed.Event)
 		local coins = math.max(1, event.coins or 1)
 		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
-		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
+		text = if event.parts == nil
+			then string.format("%s sent %s x%d", who, event.gift or "a gift", count)
+			elseif count == 1 then string.format("%s sent %s (%d of %d)", who, event.gift or "a gift", event.part or 1, event.parts)
+			else string.format("%s sent %s x%d (%d of %d)", who, event.gift or "a gift", count, event.part or 1, event.parts)
 		recordGifter(event, amount, coins * count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
@@ -901,10 +954,12 @@ local function processTikTok(event: TikTokFeed.Event)
 	-- Start the animation promptly while the queued rock work spans frames.
 	if event.type == "gift" then
 		Notify:FireAllClients("giftEffect", {
-			coins = math.max(1, event.coins or 1) * math.max(1, math.floor(event.count or 1)),
+			-- One gift's coins, never the combo total: Galaxy x10 arrives here
+			-- as ten Galaxies, each with the Galaxy's own effect.
+			coins = math.max(1, event.coins or 1),
 			position = preview,
 			name = who,
-			gift = event.gift or "Gift",
+			gift = (event.gift or "Gift") .. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
 			adding = amount < 0,
 			blocks = if amount < 0 then nil else blocks,
 		})
@@ -919,6 +974,31 @@ end
 local giftQueue: { TikTokFeed.Event } = {}
 local giftHead = 1
 local giftWorkerRunning = false
+local enqueue: (TikTokFeed.Event) -> ()
+
+-- A gift sent several times at once (Galaxy x10) plays as that many separate
+-- gifts: each one blasts or adds its own stone with its own effect and feed
+-- line, spaced so every effect gets its moment instead of one bigger effect
+-- for the combined coins. Very long combos (Rose x500) are shared out over
+-- at most MAX_SPLIT gifts so the show stays short.
+local MAX_SPLIT = 20
+-- Seconds between the gifts of a combo, by the gift's effect tier: about half
+-- an effect, so at most two overlap (the client plays two at once).
+local SPLIT_SPACING = { 0.6, 0.8, 1.2, 2.2, 2.8, 3.7 }
+local function splitCombo(event: TikTokFeed.Event, doubled: boolean)
+	local count = math.max(1, math.floor(event.count or 1))
+	local parts = math.min(count, MAX_SPLIT)
+	local spacing = SPLIT_SPACING[GiftTier.forCoins(math.max(1, event.coins or 1))]
+	for part = 1, parts do
+		local copy = table.clone(event)
+		copy.count = count // parts + (if part <= count % parts then 1 else 0)
+		copy.part = part
+		copy.parts = parts
+		if doubled then doubledGifts[copy] = true end
+		if part == 1 then enqueue(copy) else task.delay((part - 1) * spacing, enqueue, copy) end
+	end
+end
+
 local function onTikTok(event: TikTokFeed.Event)
 	if event.type == "theme" then
 		-- From the bridge control page's theme buttons: it changes the
@@ -938,6 +1018,14 @@ local function onTikTok(event: TikTokFeed.Event)
 		event.count = math.max(1, math.floor(event.count or 1)) * multiplier
 		doubledGifts[event] = true
 	end
+	if event.type == "gift" and math.floor(event.count or 1) > 1 then
+		splitCombo(event, doubledGifts[event] == true)
+		return
+	end
+	enqueue(event)
+end
+
+function enqueue(event: TikTokFeed.Event)
 	table.insert(giftQueue, event)
 	State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
 	if giftWorkerRunning then return end
@@ -982,7 +1070,7 @@ end)
 
 -- Pickaxe mining and settings ---------------------------------------------------------
 local function isAdmin(player: Player): boolean
-	if RunService:IsStudio() then
+	if Config.SinglePlayer or RunService:IsStudio() then
 		return true
 	end
 	if table.find(Config.Admins, player.UserId) then
@@ -1230,6 +1318,26 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "setSkin" and type(value) == "string" then
 		setSkin(value)
 		return
+	elseif action == "setGiftBinding" and type(value) == "table" then
+		-- GIFT KEYBINDS in the Y panel: pressing the key in the game sends the gift.
+		local binding = Keybinds.clean(value.gift, value.coins)
+		local key = value.key
+		if binding == nil or not Keybinds.allowed(key) then
+			notice(player, "Pick a gift name, its coins and one of the free keys.")
+			return
+		end
+		if settings.giftBindings[key] == nil then
+			local count = 0
+			for _ in settings.giftBindings do count += 1 end
+			if count >= Keybinds.MAX then
+				notice(player, string.format("You can keep up to %d keybinds. Remove one first.", Keybinds.MAX))
+				return
+			end
+		end
+		settings.giftBindings[key] = { gift = binding.gift, coins = binding.coins, game = true }
+	elseif action == "removeGiftBinding" and type(value) == "string" then
+		if settings.giftBindings[value] == nil then return end
+		settings.giftBindings[value] = nil
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
 		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1
@@ -1297,6 +1405,32 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 	end
 	if action == "joinGame" or action == "leaveGame" then
 		setInGame(player, action == "joinGame")
+		return
+	end
+	if action == "setHideButtons" then
+		-- Any player can tuck away the GAMES tab and SETTINGS button (their
+		-- keys still work); it is remembered for next time.
+		if type(value) ~= "boolean" then return end
+		local now = os.clock()
+		if now - (hideAt[player] or -math.huge) < 0.2 then return end
+		hideAt[player] = now
+		player:SetAttribute("HideButtons", value)
+		local id = tostring(player.UserId)
+		if (settings.hiddenButtons[id] == true) ~= value then
+			local count = 0
+			for _ in settings.hiddenButtons do count += 1 end
+			if value and count >= 500 then return end
+			settings.hiddenButtons[id] = if value then true else nil
+			Store.save(settings)
+		end
+		return
+	end
+	if action == "catchBird" then
+		-- A click aimed at the bird this player sees (see the client's aim).
+		local now = os.clock()
+		if now - (catchAt[player] or -math.huge) < 0.25 then return end
+		catchAt[player] = now
+		diamondBird.catch(player)
 		return
 	end
 	if admins[player] then
@@ -1370,6 +1504,7 @@ local function onPlayer(player: Player)
 	end
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
+	player:SetAttribute("HideButtons", settings.hiddenButtons[tostring(player.UserId)] == true)
 	if not modernChat then
 		player.Chatted:Connect(function(message)
 			onChat(player, message)
@@ -1387,6 +1522,8 @@ Players.PlayerRemoving:Connect(function(player)
 	mineCooldown[player] = nil
 	synced[player] = nil
 	readyAt[player] = nil
+	catchAt[player] = nil
+	hideAt[player] = nil
 end)
 
 publishSettings()

@@ -4,6 +4,7 @@ local Format = require("../src/shared/Format")
 local Grid = require("../src/shared/Grid")
 local RockStyle = require("../src/shared/RockStyle")
 local GiftTier = require("../src/shared/GiftTier")
+local Keybinds = require("../src/shared/Keybinds")
 
 local passed, failed = 0, 0
 local function check(condition: boolean, message: string)
@@ -19,7 +20,7 @@ end
 for _, case in { {1, 1}, {9, 1}, {10, 2}, {99, 2}, {100, 3}, {499, 3}, {500, 4}, {999, 4}, {1000, 5}, {9999, 5}, {10000, 6}, {34999, 6}, {1000000000, 6} } do
 	check(GiftTier.forCoins(case[1]) == case[2], "gift tier boundary " .. case[1])
 end
-check(GiftTier.forCoins(30 * 40) == 5, "gift combos scale by their total coin value")
+check(GiftTier.forCoins(30) == 2 and GiftTier.forCoins(1000) == 5, "a combo's effect comes from one gift's coins (it plays as separate gifts)")
 
 -- Hold countdown: 15 real seconds shown as 10 -> 0, slowing near the end.
 check(HoldTimer.display(0, 15, 10, 0.6) == 10, "countdown starts at 10")
@@ -273,6 +274,20 @@ print(string.format("cleared the rest in %.2f s", os.clock() - t0))
 check(grid:remaining() == 0 and grid:exposedCount() == 0, "the whole mountain can be blasted away")
 check(grid:isOpenAround(hidden), "the diamond is reached once the rock around it is gone")
 check(grid:supportBelow(0, 5, 0) == -1, "nothing supports a find once the mountain is gone")
+
+-- Gift keybinds: only free keys, never the game's own or Roblox's zoom keys.
+for _, key in { "K", "One", "Zero", "F6", "Z" } do
+	check(Keybinds.allowed(key), "a gift can go on " .. key)
+end
+for _, key in { "W", "A", "S", "D", "Space", "E", "G", "H", "P", "Y", "I", "O", "Slash", "Escape", "", 5 } do
+	check(not Keybinds.allowed(key), "keys the game uses stay free: " .. tostring(key))
+end
+check(Keybinds.label("One") == "1" and Keybinds.label("Zero") == "0" and Keybinds.label("K") == "K", "keys are shown as on the keyboard")
+local cleaned = Keybinds.clean("  Rose ", 1.7)
+check(cleaned ~= nil and cleaned.gift == "Rose" and cleaned.coins == 1, "a binding keeps the gift's name and whole coins")
+check(Keybinds.clean("", 5) == nil and Keybinds.clean("   ", 5) == nil and Keybinds.clean("Rose", "5") == nil and Keybinds.clean(nil, 5) == nil, "bad bindings are refused")
+local capped = Keybinds.clean(string.rep("x", 80), 10 ^ 9)
+check(capped ~= nil and #capped.gift == 40 and capped.coins == 100000, "long names and huge coin counts are capped")
 
 print(string.format("%d passed, %d failed", passed, failed))
 if failed > 0 then

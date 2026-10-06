@@ -54,6 +54,23 @@ local function solid(p: BasePart): BasePart
 	return p
 end
 
+-- Makes a finished model `factor` times bigger about `origin` (a point on its
+-- floor), so a building can grow without being redrawn: every part, where
+-- things hang on them and how far its lights reach.
+local function enlarge(model: Instance, origin: Vector3, factor: number)
+	for _, object in model:GetDescendants() do
+		if object:IsA("BasePart") then
+			local frame = object.CFrame
+			object.Size *= factor
+			object.CFrame = frame.Rotation + (origin + (frame.Position - origin) * factor)
+		elseif object:IsA("Attachment") then
+			object.Position *= factor
+		elseif object:IsA("PointLight") then
+			object.Range = math.min(60, object.Range * factor)
+		end
+	end
+end
+
 -- A cylinder between two points.
 local function beam(parent: Instance, name: string, a: Vector3, b: Vector3, width: number, colour: Color3, material: Enum.Material): BasePart
 	local delta = b - a
@@ -783,6 +800,7 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 		piece = piece,
 		beam = beam,
 		solid = solid,
+		enlarge = enlarge,
 		ground = ground,
 		clear = clear,
 		spaced = spaced,

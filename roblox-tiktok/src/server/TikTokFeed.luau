@@ -16,6 +16,8 @@ export type Event = {
 	gift: string?,
 	coins: number?, -- coins per gift
 	count: number?, -- gifts in this event
+	part: number?, -- set by the server when it plays a combo as separate gifts: which one this is
+	parts: number?, -- and how many there are
 	likes: number?,
 	rocks: number?,
 	keybind: string?,

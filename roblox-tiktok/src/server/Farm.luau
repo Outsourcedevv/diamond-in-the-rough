@@ -24,7 +24,9 @@ local HAY = Color3.fromRGB(224, 188, 96)
 local DARK = Color3.fromRGB(46, 36, 30)
 
 Farm.GATE = 9 -- studs of open trail between the gateposts
-Farm.BARN = Vector3.new(15, 15, 21) -- the barn's width, height to the ridge and depth
+Farm.BARN = Vector3.new(15, 15, 21) -- the barn's width, height to the ridge and depth, as drawn
+Farm.BARN_SCALE = 1.5 -- then made this much bigger (the silo with it)
+local S = Farm.BARN_SCALE
 
 -- Where the trail crosses the fence's ring: the angle round the arena (from
 -- +Z, towards +X), so the opening sits on the trail wherever it bends.
@@ -92,26 +94,27 @@ local FIELD = { width = 22, from = -12, to = 16 } -- beside the barn, along its 
 local function barnSite(kit: Kit, random: Random, gap: number): (CFrame?, number)
 	local best: CFrame? = nil
 	local bestDrop, bestScore = 0, math.huge
-	local w, d = Farm.BARN.X, Farm.BARN.Z
+	local w, d = Farm.BARN.X * S, Farm.BARN.Z * S
+	local siloOffset = Vector3.new(w / 2 + 4.8 * S, 0, d / 2 - 4.5 * S)
 	for attempt = 1, 500 do
 		-- To one side of the mountain, so it does not hide the barn from the spawn.
 		local angle = (if random:NextNumber() < 0.5 then -1 else 1) * random:NextNumber(math.rad(32), math.rad(72))
 		local distance = random:NextNumber(70, 140)
 		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
 		local centre = kit.ground(spot.X, spot.Z)
-		if not kit.clear(centre, 16) and centre.Y < 26 and kit.steepness(centre.X, centre.Z) < 0.45 and kit.spaced(centre, gap) then
+		if not kit.clear(centre, 16 * S) and centre.Y < 26 and kit.steepness(centre.X, centre.Z) < 0.45 and kit.spaced(centre, gap) then
 			local flat = Vector3.new(centre.X, 0, centre.Z)
 			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
 			local base = CFrame.lookAt(flat, flat + facing)
 			local low, high = math.huge, -math.huge
 			for _, offset in { Vector3.new(-w / 2, 0, -d / 2), Vector3.new(w / 2, 0, -d / 2), Vector3.new(-w / 2, 0, d / 2), Vector3.new(w / 2, 0, d / 2),
-				Vector3.new(0, 0, 0), Vector3.new(w / 2 + 4.8, 0, d / 2 - 4.5) } do
+				Vector3.new(0, 0, 0), siloOffset } do
 				local at = base * offset
 				local y = kit.ground(at.X, at.Z).Y
 				low, high = math.min(low, y), math.max(high, y)
 			end
-			local silo = base * Vector3.new(w / 2 + 4.8, 0, d / 2 - 4.5)
-			if high - low < 3 and not kit.clear(silo, 5) and kit.spaced(silo, 4) then
+			local silo = base * siloOffset
+			if high - low < 4 and not kit.clear(silo, 5 * S) and kit.spaced(silo, 4 * S) then
 				-- How much of the cornfield beside it is open ground.
 				local open = 0
 				for i = 0, 3 do
@@ -142,11 +145,18 @@ local function barnSite(kit: Kit, random: Random, gap: number): (CFrame?, number
 end
 
 -- The barn and its silo, built in `base`'s frame: the floor at its origin,
--- the front (with the big doors and the hayloft) facing -Z.
-local function barn(kit: Kit, parent: Instance, base: CFrame, drop: number): Model
+-- the front (with the big doors and the hayloft) facing -Z. It is drawn at
+-- Farm.BARN's size, its foundation reaching down `worldDrop` once enlarged,
+-- then made BARN_SCALE times bigger.
+local function barn(kit: Kit, parent: Instance, base: CFrame, worldDrop: number): Model
 	local model = Instance.new("Model")
 	model.Name = "Barn"
 	model.Parent = parent
+	local drop = worldDrop / S
+	-- A height in the world, as drawn before the barn is enlarged.
+	local function drawn(y: number): number
+		return base.Position.Y + (y - base.Position.Y) / S
+	end
 	local w, d = Farm.BARN.X, Farm.BARN.Z
 	local eave, breakX, breakY, ridge = 8, 5, 12.6, Farm.BARN.Y
 	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
@@ -250,7 +260,9 @@ local function barn(kit: Kit, parent: Instance, base: CFrame, drop: number): Mod
 	light.Parent = lamp
 	-- The silo behind one side: concrete staves, iron hoops and a domed cap.
 	local siloAt = base * Vector3.new(w / 2 + 4.8, 0, d / 2 - 4.5)
-	local foot = kit.ground(siloAt.X, siloAt.Z).Y - 0.6
+	-- Its foot reaches the ground where the silo stands once enlarged.
+	local siloFinal = base * Vector3.new((w / 2 + 4.8) * S, 0, (d / 2 - 4.5) * S)
+	local foot = drawn(kit.ground(siloFinal.X, siloFinal.Z).Y - 0.6)
 	local height = base.Position.Y + 21
 	kit.solid(kit.beam(model, "Silo", Vector3.new(siloAt.X, foot, siloAt.Z), Vector3.new(siloAt.X, height, siloAt.Z), 7, Color3.fromRGB(196, 190, 178), Enum.Material.Concrete))
 	for _, y in { 4, 9, 14, 19 } do
@@ -260,6 +272,7 @@ local function barn(kit: Kit, parent: Instance, base: CFrame, drop: number): Mod
 	local dome = kit.piece(model, "SiloDome", Vector3.new(7.1, 7.1, 7.1), CFrame.new(siloAt.X, height, siloAt.Z), Color3.fromRGB(178, 182, 186), Enum.Material.Metal) :: Part
 	dome.Shape = Enum.PartType.Ball
 	put("SiloChute", Vector3.new(1.1, 17, 1.1), CFrame.new(w / 2 + 1.5, 8.5, d / 2 - 4.5), BARN_RED, Enum.Material.WoodPlanks)
+	kit.enlarge(model, base.Position, S)
 	return model
 end
 
@@ -369,7 +382,8 @@ function Farm.build(kit: Kit): Folder
 	end
 	local base = site :: CFrame
 	barn(kit, folder, base, drop)
-	local w, d = Farm.BARN.X, Farm.BARN.Z
+	-- The yard is laid out round the barn's enlarged size.
+	local w, d = Farm.BARN.X * S, Farm.BARN.Z * S
 	local flatLook = Vector3.new(base.LookVector.X, 0, base.LookVector.Z)
 	-- A point's place in the barn's frame (across, along), ignoring height.
 	local function toLocal(at: Vector3): Vector3

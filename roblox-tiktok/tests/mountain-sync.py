@@ -232,6 +232,12 @@ check(probe:lineBlocked(gem + Vector3.new(8, 2, 0), gem), "rock between the play
 local beside = probe:keyPosition(Grid.key(dx + 4, 2, dz))
 local top = probe:coveredTop(beside, beside.Y - 1, beside.Y + 1)
 check(top ~= nil and top > beside.Y + 1, "a buried character is lifted to the rock surface")
+local centred = probe:coveredTop(beside, beside.Y - 1, beside.Y + 1, true)
+check(centred ~= nil and centred > beside.Y + 1, "checking only where they stand still finds a buried character")
+if shaftTop >= dy + 3 then
+	local inShaft = probe:keyPosition(Grid.key(dx, dy + 2, dz))
+	check(probe:coveredTop(inShaft, inShaft.Y - 0.15, inShaft.Y + 0.15, true) == nil, "a player in their own dug shaft is not lifted out by the follow-up checks")
+end
 local high = gem + Vector3.new(0, 60, 0)
 check(probe:coveredTop(high, high.Y - 1, high.Y + 1) == nil, "a character in open air is left alone")
 local summit = probe:summit()

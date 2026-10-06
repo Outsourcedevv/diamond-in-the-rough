@@ -212,7 +212,8 @@ for _, p in legs do
 	assert(workspace:Raycast(Vector3.new(low.X, 300, low.Z)).Position.Y > low.Y, "every leg reaches into the ground")
 end
 local groundHere = workspace:Raycast(Vector3.new(towerAt.X, 300, towerAt.Z)).Position.Y
-assert(floor.CFrame.Position.Y - groundHere > 12, "the lookout is high above the ground")
+assert(floor.CFrame.Position.Y - groundHere > 20, "the lookout is high above the ground")
+assert(math.abs(floor.Size.X - (2 * 2.9 + 0.4) * Watchtower.SCALE) < 1e-6, "the tower is drawn " .. Watchtower.SCALE .. " times bigger")
 assert(sakura ~= nil, "the sakura scenery waits out of view")
 local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
 local grade = Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
@@ -278,6 +279,7 @@ for _, p in shrines[1]:GetDescendants() do
 	if p.Name == "ShrinePillar" then pillars += 1 end
 end
 assert(plinth ~= nil and roof == 4 and pillars == 10, "plinth, curved roof and pillars")
+assert(math.abs(plinth.Size.X - 17 * Sakura.SHRINE_SCALE) < 1e-6 and Sakura.SHRINE_SCALE >= 1.5, "the shrine is enlarged: " .. plinth.Size.X)
 local centre = plinth.CFrame.Position
 local flatCentre = Vector3.new(centre.X, 0, centre.Z)
 assert(flatCentre.Magnitude > 55 + 12 and (flatCentre - camp).Magnitude > 25 + 12 and not inReserved(flatCentre), "the shrine stands clear of the arena, camp and boards")
@@ -347,6 +349,14 @@ for _, p in farm:GetDescendants() do if p.Name == "Barn" then table.insert(barns
 assert(#barns == 1, "one barn")
 local foundation = barns[1]:FindFirstChild("BarnFoundation")
 assert(foundation ~= nil and barns[1]:FindFirstChild("Silo") ~= nil and barns[1]:FindFirstChild("SiloDome") ~= nil, "a barn with a silo")
+assert(math.abs(foundation.Size.X - (15 + 0.8) * Farm.BARN_SCALE) < 1e-6 and Farm.BARN_SCALE >= 1.5, "the barn is enlarged: " .. foundation.Size.X)
+do
+	local silo = barns[1]:FindFirstChild("Silo")
+	local axis = silo.CFrame.RightVector * (silo.Size.X / 2)
+	local a, b = silo.CFrame.Position - axis, silo.CFrame.Position + axis
+	local low = if a.Y < b.Y then a else b
+	assert(workspace:Raycast(Vector3.new(low.X, 300, low.Z)).Position.Y > low.Y, "the enlarged silo still stands in the ground")
+end
 local barnAt = foundation.CFrame.Position
 local barnFlat = Vector3.new(barnAt.X, 0, barnAt.Z)
 assert(barnFlat.Magnitude > 55 + 15 and (barnFlat - camp).Magnitude > 25 + 15 and not inReserved(barnFlat), "the barn stands clear of the arena, camp and boards")

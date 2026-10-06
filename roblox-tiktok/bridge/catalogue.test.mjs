@@ -22,5 +22,5 @@ test('catalogue accepts TikTok and cached gift formats, deduplicates IDs, and so
 test('add/remove rules retain exact signed block amounts and validate shortcuts',()=>{
  assert.deepEqual(validateRule({gift:'Rose',coins:1,action:'add',blocks:200,keybind:'K'}),{gift:'Rose',coins:1,rocks:-200,keybind:'K'});
  assert.equal(validateRule({gift:'Galaxy',coins:1000,action:'remove',blocks:1234,keybind:''}).rocks,1234);
- for(const bad of [{blocks:-1},{blocks:1.5},{blocks:Infinity},{keybind:'W'},{action:'unknown'}]) assert.throws(()=>validateRule({gift:'Rose',coins:1,action:'add',blocks:100,keybind:'K',...bad}));
+ for(const bad of [{blocks:-1},{blocks:1.5},{blocks:Infinity},{keybind:'W'},{keybind:'O'},{keybind:'P'},{action:'unknown'}]) assert.throws(()=>validateRule({gift:'Rose',coins:1,action:'add',blocks:100,keybind:'K',...bad}));
 });
