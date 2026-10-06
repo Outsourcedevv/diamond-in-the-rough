@@ -766,7 +766,7 @@ function build(renderer) {
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, modest ? 1.5 : 1.75));
   renderer.setSize(innerWidth, innerHeight, false);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.15;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   // Nothing that casts a shadow moves more than a hair, so shadows are drawn once.
@@ -1185,7 +1185,7 @@ function build(renderer) {
         const v = 0.78 + (f - 0.5) * 0.35 + (m - 0.5) * 0.3;
         const lichen = Math.min(1, Math.max(0, (at(broad, x + 70, y + 20) - 0.62) * 6)) * f;
         const l = band[k];
-        data.set([(80 + 46 * l) * v * (1 - lichen) + 128 * lichen, (64 + 38 * l) * v * (1 - lichen) + 134 * lichen, (60 + 30 * l) * v * (1 - lichen) + 112 * lichen, 255], k * 4);
+        data.set([(112 + 50 * l) * v * (1 - lichen) + 140 * lichen, (94 + 42 * l) * v * (1 - lichen) + 146 * lichen, (88 + 34 * l) * v * (1 - lichen) + 124 * lichen, 255], k * 4);
         height[k] = f * 0.6 + m * 0.5 + l * 0.5 + b * 0.2;
       }
     }
@@ -1224,7 +1224,7 @@ function build(renderer) {
         const f = at(fine, x, y), b = at(broad, x >> 1, y >> 1), m = at(mid, x >> 1, y >> 1);
         const earth = Math.min(1, Math.max(0, (0.36 - b) * 8));
         const v = 0.78 + (f - 0.5) * 0.5;
-        const gr = [80 + 38 * m, 98 + 20 * m, 48 + 16 * m];
+        const gr = [78 + 34 * m, 106 + 22 * m, 46 + 14 * m];
         data.set([(gr[0] * (1 - earth) + 106 * earth) * v, (gr[1] * (1 - earth) + 90 * earth) * v, (gr[2] * (1 - earth) + 68 * earth) * v, 255], k * 4);
       }
     }
@@ -1424,7 +1424,7 @@ function build(renderer) {
   const skyMaterial = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
     uniforms: {
-      zenith: { value: new THREE.Color(0x7f9fcc) }, horizon: { value: new THREE.Color(0xd3d9e5) },
+      zenith: { value: new THREE.Color(0x6b96d2) }, horizon: { value: new THREE.Color(0xd2dceb) },
       haze: { value: HAZE }, sunDir: { value: SUN },
     },
     vertexShader: 'varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
@@ -1638,9 +1638,9 @@ function build(renderer) {
         last = row;
       }
     });
-    const cap = new THREE.CylinderGeometry(0.07, 0.07, 0.12, 10);
+    const cap = new THREE.CylinderGeometry(0.052, 0.052, 0.1, 10);
     cap.rotateX(Math.PI / 2);
-    const capMesh = new THREE.InstancedMesh(cap, mat.ceramic, caps.length);
+    const capMesh = new THREE.InstancedMesh(cap, mat.tiles, caps.length);
     caps.forEach(({ p, out }, k) => {
       holder.position.copy(p).add(V(0, 0.08, 0)).addScaledVector(out, 0.02);
       holder.quaternion.setFromUnitVectors(Zaxis, out.clone().add(V(0, -0.25, 0)).normalize());
@@ -1942,7 +1942,7 @@ function build(renderer) {
         radii.push(radius * (1 - (0.3 * k) / steps));
       }
       limb(points, radii, level >= 4 ? 12 : level >= 2 ? 8 : level >= 1 ? 6 : 4);
-      if (level <= 1) {
+      if (level <= 2) {
         const blush = BLUSH[(r() * BLUSH.length) | 0];
         for (let k = 1; k <= steps; k++) sprays.push({ at: points[k], level, blush });
       }
@@ -1956,7 +1956,7 @@ function build(renderer) {
         const tilt = leader ? 0.25 + r() * 0.3 : (level >= 4 ? 0.55 : 0.7) + r() * 0.4;
         const child = dir.clone().multiplyScalar(Math.cos(tilt)).addScaledVector(side, Math.sin(tilt));
         child.y = Math.max(child.y * 0.85, -0.2);
-        grow(points[from], child.normalize(), length * (0.68 + r() * 0.1), radii[from] * 0.7, level - 1);
+        grow(points[from], child.normalize(), length * (0.68 + r() * 0.1), radii[from] * 0.64, level - 1);
       }
     }
     grow(V(x, -0.3, z), V(pull.x * 0.2, 1, pull.z * 0.2).normalize(), 3.0 * size, 0.42 * size, levels);
@@ -1980,12 +1980,12 @@ function build(renderer) {
     crown.divideScalar(sprays.length).add(V(0, -0.8 * size, 0));
     let reach = 0;
     for (const spray of sprays) reach = Math.max(reach, spray.at.distanceTo(crown));
-    const count = Math.round(3600 * size * size * bloom * richness * (far ? 0.6 : 1));
+    const count = Math.round(7600 * size * size * bloom * richness * (far ? 0.6 : 1));
     const blossom = new THREE.InstancedMesh(card.clone(), blossomMaterial, count);
     const outward = new Float32Array(count * 3), tile = new Float32Array(count);
     for (let i = 0; i < count; i++) {
       const spray = sprays[(r() * sprays.length) | 0];
-      const spread = size * (spray.level === 0 ? 0.42 : 0.55);
+      const spread = size * [0.5, 0.66, 0.8][spray.level];
       const offset = V(r() - 0.5, r() - 0.5, r() - 0.5).normalize().multiplyScalar(spread * Math.cbrt(r()));
       offset.y = offset.y * 0.65 - 0.06 * size;
       const place = spray.at.clone().add(offset);
@@ -1997,7 +1997,7 @@ function build(renderer) {
       const facing = normal.clone().add(V(r() - 0.5, r() - 0.5, r() - 0.5).multiplyScalar(1.3)).normalize();
       holder.position.copy(place).sub(V(x, 0, z));
       holder.quaternion.setFromUnitVectors(Zaxis, facing).multiply(spin.setFromAxisAngle(Zaxis, r() * Math.PI * 2));
-      holder.scale.setScalar(size * 0.36 * (0.75 + r() * 0.5));
+      holder.scale.setScalar(size * 0.46 * (0.75 + r() * 0.5));
       holder.updateMatrix();
       blossom.setMatrixAt(i, holder.matrix);
       const pick = r();
