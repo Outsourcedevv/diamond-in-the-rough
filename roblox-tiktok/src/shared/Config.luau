@@ -19,6 +19,14 @@ local Config = {
 	HoldSlowdown = 0.6, -- 0 = steady countdown, 1 = slows down a lot near the end
 	WinScreenSeconds = 4,
 
+	-- The diamond bird -------------------------------------------------------
+	-- It flies round the mountain every 5 to 7½ minutes. Clicking it doubles
+	-- every gift (blasting or adding stone) for BirdBoostSeconds.
+	BirdMinSeconds = 300,
+	BirdMaxSeconds = 450,
+	BirdBoostSeconds = 30,
+	BirdMultiplier = 2,
+
 	-- Win counter defaults (all live) ----------------------------------------
 	WinTitle = "WINS",
 	WinGoal = 0, -- 0 hides the goal ("WINS: 3" instead of "WINS: 3/10")

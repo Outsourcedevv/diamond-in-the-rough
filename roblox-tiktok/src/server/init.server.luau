@@ -809,6 +809,21 @@ end)
 -- Name filtering can yield, so the first draw runs on its own.
 task.spawn(refreshBoards)
 
+-- The diamond bird ----------------------------------------------------------------
+-- It circles the mountain every 5 to 7½ minutes; whoever clicks it doubles
+-- every gift for 30 seconds.
+local diamondBird = require(script.DiamondBird).start({
+	state = State,
+	notify = Notify,
+	radius = mountainRadius + 12,
+	height = function(): number
+		local top = if mountain then mountain:summit() else nil
+		return (if top then top.Y else mountainRadius) + 8
+	end,
+})
+-- Gifts that arrived during the bonus, so the feed can say so.
+local doubledGifts: { [TikTokFeed.Event]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+
 -- TikTok ------------------------------------------------------------------------
 local function processTikTok(event: TikTokFeed.Event)
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
@@ -862,6 +877,7 @@ local function processTikTok(event: TikTokFeed.Event)
 		})
 	end
 	local _centre, applied = applyStone(amount, centreKey)
+	if doubledGifts[event] then text = "💎 2X " .. text end
 	Notify:FireAllClients("feed", { text = text .. (if applied == nil then " (queued)" elseif amount < 0 and applied == 0 then " (mountain full)" else ""), stone = applied or amount, kind = event.type })
 end
 
@@ -871,6 +887,15 @@ local giftQueue: { TikTokFeed.Event } = {}
 local giftHead = 1
 local giftWorkerRunning = false
 local function onTikTok(event: TikTokFeed.Event)
+	-- While the diamond bird's bonus runs, a gift counts as if it were sent
+	-- twice: double the stone blasted or added, the effect and the leaderboard
+	-- coins. It is decided on arrival, so gifts still queued keep their bonus.
+	local multiplier = diamondBird.multiplier()
+	if event.type == "gift" and multiplier > 1 then
+		event = table.clone(event)
+		event.count = math.max(1, math.floor(event.count or 1)) * multiplier
+		doubledGifts[event] = true
+	end
 	table.insert(giftQueue, event)
 	State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
 	if giftWorkerRunning then return end
@@ -1149,6 +1174,9 @@ local function applySetting(player: Player, action: string, value: any)
 		-- Admin-only presets bypass saved destructive rules without changing them.
 		if value ~= 1000 and value ~= 10000 and value ~= 100000 and value ~= 1500000 then return end
 		testGift(1, 1, "Rebuild test", -value)
+		return
+	elseif action == "spawnBird" then
+		diamondBird.spawn()
 		return
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
