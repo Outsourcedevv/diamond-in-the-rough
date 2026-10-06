@@ -108,6 +108,8 @@ LobbyView.start(Request, State, function(inGame: boolean)
 	gui.Enabled = inGame
 	FirstPerson.setEnabled(inGame)
 end)
+-- The diamond bird flies round the mountain; catching it doubles gifts.
+require(script:WaitForChild("BirdView")).start(gui, State)
 
 -- Stone left (top centre) -------------------------------------------------------
 local stoneBox = make("Frame", {
@@ -585,6 +587,11 @@ for index = 1, #testGifts, 2 do
 	panelButtons(buttons)
 end
 
+panelLabel("DIAMOND BIRD (every 5 to 7½ minutes)")
+panelButtons({
+	{ "Send a diamond bird now", function() send("spawnBird") end },
+})
+
 panelLabel("REBUILD TEST GIFTS (adds blocks)")
 panelLabel("Tests refill dug spaces, then grow new mountain rock.")
 panelButtons({
@@ -902,8 +909,10 @@ local function isDigInput(input: InputObject): boolean
 end
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if not processed and isDigInput(input) then
-		-- A fresh click on the diamond goes to its ClickDetector, never to digging.
-		if aimTarget == workspace:FindFirstChild("Diamond") then
+		-- A fresh click on the diamond or the diamond bird goes to its
+		-- ClickDetector, never to digging.
+		local target = aimTarget
+		if target == workspace:FindFirstChild("Diamond") or (target and target.Parent and target.Parent.Name == "DiamondBird") then
 			digging = false
 			return
 		end
