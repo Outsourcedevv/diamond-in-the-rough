@@ -42,6 +42,16 @@ export function themeEvent(theme) {
   return { type: 'theme', name: 'Control page', theme };
 }
 
+// The mountain's skins: stone with a diamond, or a haystack with a needle.
+export const SKINS = { stone: 'Stone & diamond', hay: 'Hay & needle' };
+
+export function skinEvent(skin) {
+  if (!Object.hasOwn(SKINS, skin)) {
+    throw new Error('Choose stone and diamond, or hay and needle.');
+  }
+  return { type: 'skin', name: 'Control page', skin };
+}
+
 function who(user) {
   return {
     user: String(user?.uniqueId ?? user?.userId ?? 'someone').slice(0, 40),

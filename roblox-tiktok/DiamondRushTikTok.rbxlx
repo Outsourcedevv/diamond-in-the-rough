@@ -153,14 +153,76 @@ return Config
 -- An eight-sided brilliant-cut gem, made from native triangular facets.
 -- Light crown, deeper blue pavilion and a bright table give it the familiar
 -- diamond silhouette against any background, including the open sky.
+--
+-- The haystack skin (see Skin) swaps the gem for a needle: a slim steel shaft
+-- with a sharp point, an open eye and a red thread, lying at a slant. A root
+-- part's "GemKind" attribute ("diamond" or "needle") says which it shows.
 local DiamondShape = {}
 
-export type Facet = { offset: CFrame, size: Vector3, colour: Color3, material: Enum.Material }
+-- `shape` is the part shape: a triangular facet (the default, a WedgePart),
+-- or "Block", "Cylinder" (along X) or "Ball".
+export type Facet = { offset: CFrame, size: Vector3, colour: Color3, material: Enum.Material, shape: string? }
 
 local THICKNESS = 0.006
 
--- Facet layout for a gem whose bounding size is `scale` studs, relative to its centre.
-function DiamondShape.facets(scale: number): { Facet }
+local STEEL = Color3.fromRGB(206, 212, 220)
+local THREAD = Color3.fromRGB(214, 40, 52)
+
+-- A needle about 1.3 x `scale` studs long, slanting through its centre.
+local function needle(scale: number): { Facet }
+	local list: { Facet } = {}
+	local along = Vector3.new(math.sin(math.rad(50)), math.cos(math.rad(50)), 0)
+	local across = Vector3.new(0, 0, 1)
+	local side = along:Cross(across).Unit
+	local function rod(name: string, from: number, to: number, width: number, colour: Color3, material: Enum.Material, shift: Vector3?)
+		local centre = along * ((from + to) / 2) + (shift or Vector3.zero)
+		table.insert(list, {
+			offset = CFrame.fromMatrix(centre * scale, along, side),
+			size = Vector3.new(to - from, width, width) * scale,
+			colour = colour,
+			material = material,
+			shape = name,
+		})
+	end
+	-- The shaft, then a point that narrows in steps.
+	rod("Cylinder", -0.34, 0.46, 0.09, STEEL, Enum.Material.Metal)
+	rod("Cylinder", -0.5, -0.33, 0.06, STEEL, Enum.Material.Metal)
+	rod("Cylinder", -0.62, -0.49, 0.032, STEEL, Enum.Material.Metal)
+	-- A bright glint runs down the shaft, so the needle catches the eye.
+	rod("Block", -0.3, 0.3, 0.022, Color3.fromRGB(240, 250, 255), Enum.Material.Neon, side * 0.04)
+	-- The eye: two flat prongs either side of a slot, joined by a rounded head.
+	for _, offset in { -0.032, 0.032 } do
+		rod("Block", 0.45, 0.63, 0.026, STEEL, Enum.Material.Metal, side * offset)
+	end
+	table.insert(list, {
+		offset = CFrame.new(along * 0.63 * scale),
+		size = Vector3.one * 0.09 * scale,
+		colour = STEEL,
+		material = Enum.Material.Metal,
+		shape = "Ball",
+	})
+	-- A red thread through the eye, trailing down in a loose loop.
+	local eye = along * 0.55
+	local points = { eye, eye + Vector3.new(0.16, -0.22, 0.08), eye + Vector3.new(0.3, -0.5, 0.12), eye + Vector3.new(0.42, -0.62, 0.02) }
+	for i = 1, #points - 1 do
+		local a, b = points[i], points[i + 1]
+		local direction = (b - a).Unit
+		local up = if math.abs(direction.Y) > 0.99 then Vector3.new(1, 0, 0) else Vector3.new(0, 1, 0)
+		table.insert(list, {
+			offset = CFrame.fromMatrix((a + b) / 2 * scale, direction, direction:Cross(up):Cross(direction).Unit),
+			size = Vector3.new((b - a).Magnitude + 0.02, 0.026, 0.026) * scale,
+			colour = THREAD,
+			material = Enum.Material.Fabric,
+			shape = "Cylinder",
+		})
+	end
+	return list
+end
+
+-- Facet layout for a gem whose bounding size is `scale` studs, relative to its
+-- centre. `kind` is "diamond" (the default) or "needle".
+function DiamondShape.facets(scale: number, kind: string?): { Facet }
+	if kind == "needle" then return needle(scale) end
 	local list: { Facet } = {}
 	local function triangle(a: Vector3, b: Vector3, c: Vector3, colour: Color3, material: Enum.Material)
 		local ab, ac, bc = b - a, c - a, c - b
@@ -200,12 +262,14 @@ function DiamondShape.facets(scale: number): { Facet }
 end
 
 local function facetPart(facet: Facet): Part
-	local face = Instance.new("WedgePart") :: any
+	local face = Instance.new(if facet.shape == nil then "WedgePart" else "Part") :: any
+	if facet.shape == "Cylinder" then face.Shape = Enum.PartType.Cylinder
+	elseif facet.shape == "Ball" then face.Shape = Enum.PartType.Ball end
 	face.Name = "Facet"
 	face.Size = facet.size
 	face.Color = facet.colour
 	face.Material = facet.material
-	face.Reflectance = if facet.material == Enum.Material.Neon then 0 else 0.3
+	face.Reflectance = if facet.material == Enum.Material.Neon or facet.material == Enum.Material.Fabric then 0 else 0.3
 	face.CanCollide = false
 	face.CanQuery = false
 	face.CanTouch = false
@@ -223,7 +287,8 @@ function DiamondShape.attach(root: BasePart)
 	local facets = Instance.new("Folder")
 	facets.Name = "Facets"
 	facets.Parent = root
-	for _, facet in DiamondShape.facets(root.Size.X) do
+	local kind = root:GetAttribute("GemKind")
+	for _, facet in DiamondShape.facets(root.Size.X, if type(kind) == "string" then kind else nil) do
 		local face = facetPart(facet)
 		face.CFrame = root.CFrame * facet.offset
 		face.Parent = facets
@@ -239,11 +304,11 @@ end
 -- left the old held gem's facets behind at the world origin.
 export type Gem = { model: Model, parts: { BasePart }, offsets: { CFrame }, frames: { CFrame } }
 
-function DiamondShape.build(size: number, name: string): Gem
+function DiamondShape.build(size: number, name: string, kind: string?): Gem
 	local model = Instance.new("Model")
 	model.Name = name
 	local parts: { BasePart }, offsets: { CFrame }, frames: { CFrame } = {}, {}, {}
-	for _, facet in DiamondShape.facets(size) do
+	for _, facet in DiamondShape.facets(size, kind) do
 		local face = facetPart(facet)
 		face.Anchored = true
 		face.Parent = model
@@ -276,11 +341,26 @@ function DiamondShape.resize(root: BasePart, size: Vector3)
 	DiamondShape.visible(root, visible)
 end
 
+-- Switches a world gem between the diamond and the needle, keeping its size
+-- and whether it shows.
+function DiamondShape.setKind(root: BasePart, kind: string)
+	if (root:GetAttribute("GemKind") or "diamond") == kind then return end
+	root:SetAttribute("GemKind", kind)
+	local visible = root:GetAttribute("GemVisible") == true
+	local facets = root:FindFirstChild("Facets")
+	if facets then facets:Destroy() end
+	DiamondShape.attach(root)
+	root:SetAttribute("GemVisible", nil)
+	DiamondShape.visible(root, visible)
+end
+
 function DiamondShape.visible(root: BasePart, visible: boolean)
 	if root:GetAttribute("GemVisible") == visible then return end
 	root:SetAttribute("GemVisible", visible)
 	root.Transparency = 1
-	for _, face in root.Facets:GetChildren() do
+	local facets = root:FindFirstChild("Facets")
+	if facets == nil then return end
+	for _, face in facets:GetChildren() do
 		(face :: BasePart).Transparency = if visible then 0 else 1
 	end
 end
@@ -1805,10 +1885,31 @@ RockStyle.LAYERS = {
 	{ name = "Rock", material = "Rock", colour = { 113, 108, 102 } },
 	{ name = "Slate", material = "Slate", colour = { 98, 96, 97 } },
 }
+-- The haystack skin (see Skin): the same layers in straw. Sun-bleached tops,
+-- greener fresh hay low down, packed hay beneath it and golden bales inside.
+RockStyle.HAY_LAYERS = {
+	{ name = "Bleached straw", material = "Grass", colour = { 236, 218, 152 } },
+	{ name = "Fresh hay", material = "Grass", colour = { 190, 178, 88 } },
+	{ name = "Packed hay", material = "Fabric", colour = { 150, 112, 58 } },
+	{ name = "Straw", material = "Grass", colour = { 222, 184, 94 } },
+	{ name = "Old hay", material = "Grass", colour = { 196, 154, 70 } },
+	{ name = "Bale", material = "Fabric", colour = { 174, 134, 62 } },
+}
+-- Layers and the colour of the rare flecks inside, for each skin.
+RockStyle.SKINS = {
+	stone = { layers = RockStyle.LAYERS, fleck = { 165, 160, 150 } },
+	hay = { layers = RockStyle.HAY_LAYERS, fleck = { 118, 88, 42 } },
+}
+
+-- The layer table for a skin name ("stone" when unknown).
+function RockStyle.layers(skin: string?): { { name: string, material: string, colour: { number } } }
+	return (RockStyle.SKINS[skin or "stone"] or RockStyle.SKINS.stone).layers
+end
 
 -- The layer and colour for a cell. `top` is the column's original summit
--- layer, `height` the original mountain height in layers.
-function RockStyle.look(key: number, top: number?, height: number): (number, number, number, number)
+-- layer, `height` the original mountain height in layers. `skin` picks the
+-- palette ("stone" by default, or "hay"); the layer is the same in both.
+function RockStyle.look(key: number, top: number?, height: number, skin: string?): (number, number, number, number)
 	local column = key % LAYER
 	local x, y, z = column % SPAN - 128, key // LAYER, column // SPAN - 128
 	local h = y / math.max(1, height)
@@ -1827,7 +1928,8 @@ function RockStyle.look(key: number, top: number?, height: number): (number, num
 		-- Tilted strata show in crater walls.
 		layer = if math.noise(x * 0.05, y * 0.22 + x * 0.03, z * 0.05) > 0.1 then RockStyle.SLATE else RockStyle.ROCK
 	end
-	local base = RockStyle.LAYERS[layer].colour
+	local palette = RockStyle.SKINS[skin or "stone"] or RockStyle.SKINS.stone
+	local base = palette.layers[layer].colour
 	local shade = 0.9 + sample(key, 7321441) * 0.18
 	local r, g, b = base[1] * shade, base[2] * shade, base[3] * shade
 	if layer == RockStyle.GRASS then
@@ -1835,8 +1937,8 @@ function RockStyle.look(key: number, top: number?, height: number): (number, num
 		local warm = math.clamp(math.noise(x * 0.21, z * 0.21, 9.1) + 0.5, 0, 1)
 		r, g, b = r + warm * 18, g + warm * 12, b + warm * 4
 	elseif layer >= RockStyle.ROCK and sample(key, 517927) > 0.985 then
-		-- Rare pale quartz flecks keep the rock from looking flat.
-		r, g, b = 165, 160, 150
+		-- Rare flecks (pale quartz, or dark stalks in hay) keep it from looking flat.
+		r, g, b = palette.fleck[1], palette.fleck[2], palette.fleck[3]
 	end
 	return layer, math.min(255, r), math.min(255, g), math.min(255, b)
 end
@@ -4358,13 +4460,51 @@ H44kTFtpTKosYs80HUUjx6lJBM1IIhU0wjFDne44YDAzkYybTsIMTzUjZp3NIMZikzorJ1U5ftJ0mVVJ
 ]]></string>
         </Properties>
       </Item>
+      <Item class="ModuleScript" referent="18">
+        <Properties>
+          <string name="Name">Skin</string>
+          <string name="Source"><![CDATA[--!strict
+-- The mountain's skin: stone with a diamond hidden inside (the default), or a
+-- haystack with a needle hidden in it. It is the same game, reskinned: only
+-- the rock's look (RockStyle), the gem's shape (DiamondShape) and the words on
+-- the display change. The server publishes the chosen skin as the State
+-- attribute "Skin".
+local Skin = {}
+
+export type Words = {
+	material: string, -- "stone" / "hay": what gifts blast away
+	gem: string, -- "diamond" / "needle": what you find and hold
+	heap: string, -- "mountain" / "haystack"
+	icon: string,
+}
+
+Skin.NAMES = { "stone", "hay" }
+Skin.WORDS = {
+	stone = { material = "stone", gem = "diamond", heap = "mountain", icon = "💎" },
+	hay = { material = "hay", gem = "needle", heap = "haystack", icon = "🌾" },
+} :: { [string]: Words }
+
+-- The words for a skin name; anything unknown reads as stone.
+function Skin.words(name: any): Words
+	return Skin.WORDS[name] or Skin.WORDS.stone
+end
+
+-- The gem shape for a skin (see DiamondShape.facets).
+function Skin.gem(name: any): string
+	return if name == "hay" then "needle" else "diamond"
+end
+
+return Skin
+]]></string>
+        </Properties>
+      </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="18">
+  <Item class="ServerScriptService" referent="19">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="19">
+    <Item class="Script" referent="20">
       <Properties>
         <string name="Name">DiamondRushServer</string>
         <token name="RunContext">0</token>
@@ -4384,6 +4524,7 @@ local TextChatService = game:GetService("TextChatService")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
+local Skin = require(Shared:WaitForChild("Skin"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
@@ -4428,6 +4569,7 @@ local settings = {
 	leaderboards = { gifts = {}, likes = {} } :: { gifts: { any }, likes: { any } },
 	statues = {} :: { any },
 	theme = "default", -- the map's look: "default" (alpine) or "sakura"
+	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 }
 local saved = Store.load()
 if saved then
@@ -4475,6 +4617,7 @@ local function publishSettings()
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
 	State:SetAttribute("Theme", settings.theme)
+	State:SetAttribute("Skin", settings.skin)
 end
 
 local function saveSettings()
@@ -4580,6 +4723,9 @@ diamond.CanCollide = false
 diamond.CanTouch = false
 diamond.CanQuery = false
 diamond.Parent = workspace
+if Skin.WORDS[settings.skin] == nil then settings.skin = "stone" end
+-- In the haystack skin the gem is a needle (see Skin).
+diamond:SetAttribute("GemKind", Skin.gem(settings.skin))
 DiamondShape.attach(diamond)
 local glow = Instance.new("PointLight")
 glow.Color = Color3.fromRGB(140, 230, 255)
@@ -4619,6 +4765,16 @@ click.MaxActivationDistance = 0
 click.Parent = diamond
 
 local DIAMOND_TILT = CFrame.Angles(0, math.rad(22.5), 0)
+
+-- Reskins the mountain live for everyone (stone and a diamond, or hay and a
+-- needle) and remembers it. Each player's game repaints its own rock.
+local function setSkin(name: string): boolean
+	if name == settings.skin or Skin.WORDS[name] == nil then return false end
+	settings.skin = name
+	DiamondShape.setKind(diamond, Skin.gem(name))
+	saveSettings()
+	return true
+end
 
 -- Round state -------------------------------------------------------------------
 local mountain: Mountain.Mountain? = nil
@@ -5272,6 +5428,9 @@ local function onTikTok(event: TikTokFeed.Event)
 		-- scenery straight away, without waiting behind queued gifts.
 		if event.theme then setTheme(event.theme) end
 		return
+	elseif event.type == "skin" then
+		if event.skin then setSkin(event.skin) end
+		return
 	end
 	-- While the diamond bird's bonus runs, a gift counts as if it were sent
 	-- twice: double the stone blasted or added, the effect and the leaderboard
@@ -5452,7 +5611,7 @@ end
 local function setInGame(player: Player, joining: boolean)
 	if (player:GetAttribute("InGame") == true) == joining then return end
 	if not joining and holder == player then
-		notice(player, "You're holding the diamond! Win or lose it first, then go back to the lobby.")
+		notice(player, "You're holding the " .. Skin.words(settings.skin).gem .. "! Win or lose it first, then go back to the lobby.")
 		return
 	end
 	local now = os.clock()
@@ -5566,6 +5725,9 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "setTheme" and type(value) == "string" then
 		setTheme(value)
+		return
+	elseif action == "setSkin" and type(value) == "string" then
+		setSkin(value)
 		return
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
@@ -5730,7 +5892,7 @@ State:SetAttribute("TikTok", "Starting…")
 newRound()
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="20">
+      <Item class="ModuleScript" referent="21">
         <Properties>
           <string name="Name">DiamondBird</string>
           <string name="Source"><![CDATA[--!strict
@@ -5958,7 +6120,7 @@ return DiamondBird
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="21">
+      <Item class="ModuleScript" referent="22">
         <Properties>
           <string name="Name">Leaderboards</string>
           <string name="Source"><![CDATA[--!strict
@@ -6266,7 +6428,7 @@ return Leaderboards
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="22">
+      <Item class="ModuleScript" referent="23">
         <Properties>
           <string name="Name">Lobby</string>
           <string name="Source"><![CDATA[--!strict
@@ -6535,7 +6697,7 @@ return Lobby
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="23">
+      <Item class="ModuleScript" referent="24">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
@@ -6851,7 +7013,7 @@ return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="24">
+      <Item class="ModuleScript" referent="25">
         <Properties>
           <string name="Name">Sakura</string>
           <string name="Source"><![CDATA[--!strict
@@ -7038,7 +7200,7 @@ return Sakura
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="25">
+      <Item class="ModuleScript" referent="26">
         <Properties>
           <string name="Name">ScenePack</string>
           <string name="Source"><![CDATA[--!strict
@@ -7192,7 +7354,7 @@ return ScenePack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="26">
+      <Item class="ModuleScript" referent="27">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -8008,7 +8170,7 @@ return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="27">
+      <Item class="ModuleScript" referent="28">
         <Properties>
           <string name="Name">Statue</string>
           <string name="Source"><![CDATA[--!strict
@@ -8141,7 +8303,7 @@ return Statue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="28">
+      <Item class="ModuleScript" referent="29">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -8217,7 +8379,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="29">
+      <Item class="ModuleScript" referent="30">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -8232,7 +8394,7 @@ local RunService = game:GetService("RunService")
 
 export type Event = {
 	id: string,
-	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "theme"
+	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "theme" | "skin"
 	user: string?,
 	name: string?,
 	gift: string?,
@@ -8242,6 +8404,7 @@ export type Event = {
 	rocks: number?,
 	keybind: string?,
 	theme: string?, -- "theme" events: the map theme the control page chose
+	skin: string?, -- "skin" events: stone and diamond, or hay and needle
 }
 
 local TikTokFeed = {}
@@ -8265,6 +8428,7 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 		rocks = if type(raw.rocks) == "number" and raw.rocks == raw.rocks then math.clamp(raw.rocks, -1500000, 1500000) else nil,
 		keybind = if type(raw.keybind) == "string" then string.sub(raw.keybind, 1, 16) else nil,
 		theme = if type(raw.theme) == "string" then string.sub(raw.theme, 1, 16) else nil,
+		skin = if type(raw.skin) == "string" then string.sub(raw.skin, 1, 16) else nil,
 		id = raw.id,
 		type = raw.type,
 		user = if type(raw.user) == "string" then string.sub(raw.user, 1, 40) else nil,
@@ -8363,15 +8527,15 @@ return TikTokFeed
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="30">
+  <Item class="StarterPlayer" referent="31">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="31">
+    <Item class="StarterPlayerScripts" referent="32">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="32">
+      <Item class="LocalScript" referent="33">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -8388,6 +8552,7 @@ local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
+local Skin = require(Shared:WaitForChild("Skin"))
 local FirstPerson = require(script:WaitForChild("FirstPerson"))
 -- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
 FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
@@ -8498,14 +8663,14 @@ local stoneBox = make("Frame", {
 	BackgroundTransparency = 0.15,
 }, gui)
 rounded(stoneBox, 16)
-make("TextLabel", {
+local stoneTitle = make("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 26),
 	Position = UDim2.fromOffset(0, 6),
 	BackgroundTransparency = 1,
 	Font = FONT,
 	TextSize = 22,
 	TextColor3 = Color3.fromRGB(200, 195, 215),
-	Text = "STONE LEFT",
+	Text = "STONE LEFT", -- or HAY LEFT (see refreshSkin)
 }, stoneBox)
 local stoneValue = make("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 50),
@@ -8702,7 +8867,8 @@ local winBest = winLine(216, 50, 40, GOLD)
 local winNewBest = winLine(282, 44, 34, Color3.fromRGB(120, 255, 150))
 
 local function showWin(data: { [string]: any })
-	winTitle.Text = "💎 DIAMOND SECURED!"
+	local words = Skin.words(attr("Skin", "stone"))
+	winTitle.Text = words.icon .. " " .. string.upper(words.gem) .. " SECURED!"
 	winWho.Text = tostring(data.winner or "") .. " wins!"
 	winTime.Text = "This round's time: " .. Format.duration(tonumber(data.time) or 0)
 	winBest.Text = "Best round's time: " .. Format.duration(tonumber(data.best) or 0)
@@ -8988,6 +9154,23 @@ end
 State:GetAttributeChangedSignal("Theme"):Connect(refreshTheme)
 refreshTheme()
 
+panelLabel("MOUNTAIN SKIN (same game, reskinned)")
+local skinButtons = panelButtons({
+	{ "💎 Stone & diamond", function() send("setSkin", "stone") end },
+	{ "🌾 Hay & needle", function() send("setSkin", "hay") end },
+})
+-- The mountain repaints itself and the display's words follow the skin.
+local function refreshSkin()
+	local skin = attr("Skin", "stone")
+	for i, name in Skin.NAMES do
+		skinButtons[i].BackgroundColor3 = if skin == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+	end
+	stoneTitle.Text = string.upper(Skin.words(skin).material) .. " LEFT"
+	view:setSkin(skin)
+end
+State:GetAttributeChangedSignal("Skin"):Connect(refreshSkin)
+refreshSkin()
+
 panelLabel("REBUILD TEST GIFTS (adds blocks)")
 panelLabel("Tests refill dug spaces, then grow new mountain rock.")
 panelButtons({
@@ -9217,11 +9400,11 @@ RunService.RenderStepped:Connect(function(dt: number)
 		lastCount = -1
 		banner.Visible = phase == "Revealed" or phase == "Rebuilding"
 		if phase == "Rebuilding" then
-			banner.Text = "REBUILDING THE MOUNTAIN"
+			banner.Text = "REBUILDING THE " .. string.upper(Skin.words(attr("Skin", "stone")).heap)
 			banner.TextTransparency = 0
 		end
 		if phase == "Revealed" then
-			banner.Text = "DIAMOND UNCOVERED — FIND IT AND CLICK IT"
+			banner.Text = string.upper(Skin.words(attr("Skin", "stone")).gem) .. " UNCOVERED — FIND IT AND CLICK IT"
 			banner.TextTransparency = 0.25 + 0.25 * math.sin(now * 6)
 		end
 	end
@@ -9237,7 +9420,8 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	elseif kind == "notice" and type(data) == "string" then
 		addFeed(data, 0, "notice")
 	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then
-		addFeed(tostring(data.name) .. (if data.reason == "rebuild" then " — rebuild cancelled the countdown! Pick up the diamond again." else " dropped the diamond!"), 0, "drop")
+		local gem = Skin.words(attr("Skin", "stone")).gem
+		addFeed(tostring(data.name) .. (if data.reason == "rebuild" then " — rebuild cancelled the countdown! Pick up the " .. gem .. " again." else " dropped the " .. gem .. "!"), 0, "drop")
 	end
 end)
 
@@ -9359,7 +9543,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">BirdView</string>
             <string name="Source"><![CDATA[--!strict
@@ -9512,7 +9696,7 @@ return BirdView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -9635,7 +9819,9 @@ function FirstPerson.start()
 	end
 
 	-- The held gem: anchored facets moved in one call each frame (no welds).
-	local gem = DiamondShape.build(GEM_SIZE, "HeldDiamond")
+	-- In the haystack skin it is a needle (see Skin).
+	local gemKind = if State:GetAttribute("Skin") == "hay" then "needle" else "diamond"
+	local gem = DiamondShape.build(GEM_SIZE, "HeldDiamond", gemKind)
 	local core = part("Core", Vector3.new(0.1, 0.1, 0.1), Color3.new(1, 1, 1))
 	core.Transparency = 1
 	core.Parent = gem.model
@@ -9663,6 +9849,18 @@ function FirstPerson.start()
 	outline.OutlineTransparency = 0.35
 	outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	outline.Parent = gem.model
+	-- A reskin rebuilds the held gem, carrying its light, sparkles and outline over.
+	State:GetAttributeChangedSignal("Skin"):Connect(function()
+		local kind = if State:GetAttribute("Skin") == "hay" then "needle" else "diamond"
+		if kind == gemKind then return end
+		gemKind = kind
+		local old = gem
+		gem = DiamondShape.build(GEM_SIZE, "HeldDiamond", kind)
+		core.Parent = gem.model
+		outline.Parent = gem.model
+		gem.model.Parent = old.model.Parent
+		old.model:Destroy()
+	end)
 
 	local hiddenArms: { [BasePart]: number } = {}
 	local armNames = { RightHand = true, RightLowerArm = true, RightUpperArm = true, LeftHand = true, LeftLowerArm = true, LeftUpperArm = true, ["Right Arm"] = true, ["Left Arm"] = true }
@@ -9860,7 +10058,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -10202,7 +10400,7 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
@@ -10219,6 +10417,7 @@ local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Format = require(Shared:WaitForChild("Format"))
+local Skin = require(Shared:WaitForChild("Skin"))
 
 local LobbyView = {}
 
@@ -10269,12 +10468,15 @@ local function text(parent: Instance, properties: { [string]: any }): TextLabel
 	return label
 end
 
--- What the Diamond in the Rough card says about the round going on now.
-function LobbyView.status(phase: string, stone: number): string
-	if phase == "Won" then return "🏆 Diamond found! A new round starts soon" end
-	if phase == "Rebuilding" then return "⛰ The mountain is being rebuilt" end
-	if phase == "Holding" then return "💎 Someone is holding the diamond!" end
-	return "🔴 LIVE · " .. Format.commas(stone) .. " stone left"
+-- What the Diamond in the Rough card says about the round going on now, in
+-- the mountain's skin ("stone" by default, or "hay": see Skin).
+function LobbyView.status(phase: string, stone: number, skin: string?): string
+	local words = Skin.words(skin)
+	local gem = words.gem
+	if phase == "Won" then return "🏆 " .. string.upper(string.sub(gem, 1, 1)) .. string.sub(gem, 2) .. " found! A new round starts soon" end
+	if phase == "Rebuilding" then return "⛰ The " .. words.heap .. " is being rebuilt" end
+	if phase == "Holding" then return words.icon .. " Someone is holding the " .. gem .. "!" end
+	return "🔴 LIVE · " .. Format.commas(stone) .. " " .. words.material .. " left"
 end
 
 -- `request` sends joinGame / leaveGame; `onChange(inGame)` runs whenever the
@@ -10512,10 +10714,11 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	end)
 
 	local function refreshLive()
-		live.Text = LobbyView.status(tostring(state:GetAttribute("Phase") or "Digging"), tonumber(state:GetAttribute("Stone")) or 0)
+		live.Text = LobbyView.status(tostring(state:GetAttribute("Phase") or "Digging"), tonumber(state:GetAttribute("Stone")) or 0, state:GetAttribute("Skin"))
 	end
 	state:GetAttributeChangedSignal("Phase"):Connect(refreshLive)
 	state:GetAttributeChangedSignal("Stone"):Connect(refreshLive)
+	state:GetAttributeChangedSignal("Skin"):Connect(refreshLive)
 	refreshLive()
 
 	local inGame: boolean? = nil
@@ -10578,7 +10781,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -10613,9 +10816,13 @@ local DEBRIS_LIMIT = 24
 local REBUILD_LAYERS = 16
 local REBUILD_STEP = 0.15 -- seconds between rebuild layers, matching the server
 
-local MATERIALS: { Enum.Material } = {}
-for index, layer in RockStyle.LAYERS do
-	MATERIALS[index] = (Enum.Material :: any)[layer.material]
+-- Materials per layer for each skin (stone, or hay: see Skin).
+local MATERIALS: { [string]: { Enum.Material } } = {}
+for skin, palette in RockStyle.SKINS do
+	MATERIALS[skin] = {}
+	for index, layer in palette.layers do
+		MATERIALS[skin][index] = (Enum.Material :: any)[layer.material]
+	end
 end
 
 -- Rotation for every shape code, so a wedge slopes down towards open air and a
@@ -10646,6 +10853,7 @@ export type View = typeof(setmetatable({} :: {
 	round: number,
 	height: number,
 	blockSize: number,
+	skin: string,
 	ready: boolean,
 	meta: any,
 	sliceStart: number,
@@ -10672,6 +10880,7 @@ function MountainView.new(): View
 		round = 0,
 		height = 1,
 		blockSize = 0.4,
+		skin = "stone",
 		ready = false,
 		meta = nil,
 		sliceStart = os.clock(),
@@ -10766,6 +10975,30 @@ function MountainView._handle(self: View, kind: string, payload: any)
 		self:_finishSnapshot()
 	elseif kind == "diff" and self.grid and self.ready and payload.round == self.round then
 		self:_applyDiff(payload)
+	elseif kind == "skin" then
+		self:_repaint(payload)
+	end
+end
+
+-- Reskins the mountain (stone or hay, see Skin), in order with the changes
+-- from the server.
+function MountainView.setSkin(self: View, skin: string)
+	if RockStyle.SKINS[skin] == nil then return end
+	self:push("skin", skin)
+end
+
+-- Every drawn cell keeps its shape and layer and takes the new skin's look.
+function MountainView._repaint(self: View, skin: string)
+	if skin == self.skin then return end
+	self.skin = skin
+	local materials = MATERIALS[skin]
+	local count = 0
+	for key, part in self.parts do
+		local layer, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height, skin)
+		part.Material = materials[layer]
+		part.Color = Color3.fromRGB(r, g, b)
+		count += 1
+		if count % 512 == 0 then self:_pace() end
 	end
 end
 
@@ -10820,7 +11053,7 @@ function MountainView._finishSnapshot(self: View)
 			for i = 1, math.min(5, #keys) do
 				local key = keys[math.max(1, math.floor(i * #keys / 5))]
 				local shape = RockStyle.shape(grid, key)
-				local _, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height)
+				local _, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height, self.skin)
 				table.insert(samples, {
 					frame = CFrame.new(self:keyPosition(key)) * (self.rotations[shape] or CFrame.identity),
 					size = self.templates[1].Size,
@@ -10884,7 +11117,7 @@ function MountainView._refresh(self: View, key: number): BasePart?
 		return nil
 	end
 	local shape = RockStyle.shape(grid, key)
-	local layer, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height)
+	local layer, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height, self.skin)
 	local code = shape + layer * 16
 	if code == old then return nil end
 	local kind = RockStyle.kind(shape)
@@ -10902,7 +11135,7 @@ function MountainView._refresh(self: View, key: number): BasePart?
 	end
 	local stone = part :: BasePart
 	stone.CFrame = CFrame.new(self:keyPosition(key)) * self.rotations[shape]
-	stone.Material = MATERIALS[layer]
+	stone.Material = MATERIALS[self.skin][layer]
 	stone.Color = Color3.fromRGB(r, g, b)
 	if fresh then stone.Parent = self.folder end
 	self.codes[key] = code
@@ -11046,7 +11279,7 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="39">
           <Properties>
             <string name="Name">PetalView</string>
             <string name="Source"><![CDATA[--!strict
@@ -11148,7 +11381,7 @@ return PetalView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="39">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -11275,7 +11508,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="40">
+        <Item class="ModuleScript" referent="41">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -11391,12 +11624,12 @@ return SceneryView
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="41">
+  <Item class="Workspace" referent="42">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="42">
+    <Item class="Terrain" referent="43">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>
