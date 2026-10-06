@@ -96,7 +96,8 @@ function RebuildEffects.restore(data: any)
 		local p = Instance.new("WedgePart")
 		p.Size = stone.size * 1.6
 		p.Color = stone.colour
-		p.Material = Enum.Material.Slate
+		-- Stone or hay, like the rock it becomes.
+		p.Material = if typeof(stone.part) == "Instance" and stone.part:IsA("BasePart") then stone.part.Material else Enum.Material.Slate
 		p.Anchored = true
 		p.CanCollide = false
 		p.CanQuery = false

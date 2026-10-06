@@ -112,12 +112,16 @@ local function torii(kit: Kit, parent: Instance, frame: CFrame, span: number, ta
 	gui.PixelsPerStud = 60
 	gui.LightInfluence = 1
 	gui.Parent = plaque
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.TextScaled = true
-	text.Text = "💎"
-	text.Parent = gui
+	-- A gold diamond: a square turned on its corner.
+	local mark = Instance.new("Frame")
+	mark.AnchorPoint = Vector2.new(0.5, 0.5)
+	mark.Position = UDim2.fromScale(0.5, 0.5)
+	mark.Size = UDim2.fromScale(0.5, 0.42)
+	mark.SizeConstraint = Enum.SizeConstraint.RelativeXX
+	mark.Rotation = 45
+	mark.BackgroundColor3 = Color3.fromRGB(232, 190, 92)
+	mark.BorderSizePixel = 0
+	mark.Parent = gui
 end
 
 -- A stone lantern (tōrō) with a softly glowing fire box; no light of its own.

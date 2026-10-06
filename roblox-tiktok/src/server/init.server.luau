@@ -370,11 +370,13 @@ local function growthCapacity(): number
 	return math.max(Config.GrowthMaxStone, startingStone * 2)
 end
 -- Long rock work yields every few milliseconds so the server keeps its frame
--- rate. Changes stream to clients while the work continues.
+-- rate. Changes stream to clients while the work continues. The server draws
+-- no rock, so it can spend about half of each 60 Hz frame on a gift.
+local GIFT_WORK_SECONDS = 0.008
 local function workCheckpoint(onYield: (() -> ())?, effect: string?, budget: number?): () -> ()
 	local frameStart = os.clock()
 	local lastCountUpdate = frameStart
-	local slice = budget or 0.003
+	local slice = budget or GIFT_WORK_SECONDS
 	return function()
 		if os.clock() - frameStart >= slice then
 			if os.clock() - lastCountUpdate >= 0.1 then
@@ -733,7 +735,7 @@ end
 -- Raised so both boards show over the summit as seen from the camp.
 local boardLift = math.max(14, mountainRadius * 0.55)
 local helperBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1].facing, boardLift, {
-	title = "⛏️ TOP HELPERS",
+	title = "TOP HELPERS",
 	unit = "coins",
 	trim = Color3.fromRGB(36, 92, 204),
 	valueColour = Color3.fromRGB(160, 214, 255),
@@ -741,7 +743,7 @@ local helperBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1]
 	empty = "Send a gift to help break the mountain!",
 }, groundAt)
 local grieferBoard = Leaderboards.build(showcase, boardSpots[2].at, boardSpots[2].facing, boardLift, {
-	title = "🧱 TOP GRIEFERS",
+	title = "TOP GRIEFERS",
 	unit = "coins",
 	trim = Color3.fromRGB(196, 36, 44),
 	valueColour = Color3.fromRGB(255, 178, 188),
@@ -892,6 +894,8 @@ local function processTikTok(event: TikTokFeed.Event)
 	local current = mountain
 	local centreKey = if current then current.grid:randomExposed() else nil
 	local preview = if current and centreKey then current:keyPosition(centreKey) else Vector3.new(0, 8, 0)
+	-- Gifts that add stone play their effect on the summit: the mountain is fed.
+	if amount < 0 and current then preview = current:summit() or preview end
 	local available = if current then current:remaining() else 0
 	local blocks = if phase == "Won" or phase == "Rebuilding" then nil elseif amount < 0 then -math.min(-amount, math.max(0, growthCapacity() - available)) else math.min(amount, available)
 	-- Start the animation promptly while the queued rock work spans frames.
@@ -906,7 +910,7 @@ local function processTikTok(event: TikTokFeed.Event)
 		})
 	end
 	local _centre, applied = applyStone(amount, centreKey)
-	if doubledGifts[event] then text = "💎 2X " .. text end
+	if doubledGifts[event] then text = "2X " .. text end
 	Notify:FireAllClients("feed", { text = text .. (if applied == nil then " (queued)" elseif amount < 0 and applied == 0 then " (mountain full)" else ""), stone = applied or amount, kind = event.type })
 end
 
@@ -999,6 +1003,8 @@ local function filtered(player: Player, text: string): string?
 	return if ok then result else nil
 end
 
+-- Rebuild test presets: blocks added -> the coins that pick its effect tier.
+local REBUILD_TEST_COINS: { [number]: number } = { [100] = 1, [1000] = 10, [10000] = 100, [50000] = 500, [100000] = 1000, [1500000] = 10000 }
 local function testGift(coins: number, count: number, name: string, rocks: number?)
 	onTikTok({
 		id = "test-" .. tostring(os.clock()),
@@ -1210,8 +1216,10 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "testRebuildGift" and type(value) == "number" then
 		-- Admin-only presets bypass saved destructive rules without changing them.
-		if value ~= 1000 and value ~= 10000 and value ~= 100000 and value ~= 1500000 then return end
-		testGift(1, 1, "Rebuild test", -value)
+		-- Each carries the coins of one adding-effect tier, smallest to biggest.
+		local coins = REBUILD_TEST_COINS[value]
+		if coins == nil then return end
+		testGift(coins, 1, "Rebuild test", -value)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
@@ -1238,8 +1246,9 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		return
 	end
 	if action == "mine" then
-		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
-		-- DigPerSecond allows for the time since the last dig.
+		-- Sent each time a digging hand lands (four times a second while the
+		-- dig button is held): dig as many rocks as DigPerSecond allows for the
+		-- time since the last dig, rounded so strikes on time get their full share.
 		-- The client names the rock cell it is aiming at (rock parts are local).
 		-- Digging carries on while a gift blasts or rebuilds the mountain.
 		local current = mountain
@@ -1249,7 +1258,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		local now = os.clock()
 		local since = now - (mineCooldown[player] or 0)
-		local allowed = math.min(math.floor(since * Config.DigPerSecond), math.ceil(Config.DigPerSecond / 4))
+		local allowed = math.min(math.floor(since * Config.DigPerSecond + 0.5), math.ceil(Config.DigPerSecond / 4))
 		if allowed < 1 then
 			return
 		end

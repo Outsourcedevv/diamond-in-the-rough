@@ -61,6 +61,7 @@ local function verify(view: any, server: any, label: string)
 			exposed += 1
 			check(part ~= nil and not part.destroyed and part.Parent == view.folder, label .. ": every exposed rock is drawn")
 			check(view.keys[part] == key, label .. ": part maps back to its cell")
+			check(part.CastShadow == false, label .. ": rocks cast no shadow (thousands of them)")
 			local shape = view.codes[key] % 16
 			check(shape == RockStyle.shape(grid, key), label .. ": drawn shape matches its neighbours")
 			for _, offset in openFaces(shape) do

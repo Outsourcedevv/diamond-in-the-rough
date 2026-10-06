@@ -116,7 +116,9 @@ function MountainView._makeTemplates(self: View)
 		part.CanCollide = true
 		part.CanQuery = true
 		part.CanTouch = false
-		part.CastShadow = true
+		-- Thousands of small rocks casting shadows cost more than any other
+		-- part of the scene; the mountain still takes shadows and shading.
+		part.CastShadow = false
 		part.TopSurface = Enum.SurfaceType.Smooth
 		part.BottomSurface = Enum.SurfaceType.Smooth
 		self.templates[kind] = part
@@ -349,8 +351,11 @@ function MountainView._refresh(self: View, key: number): BasePart?
 	end
 	local stone = part :: BasePart
 	stone.CFrame = CFrame.new(self:keyPosition(key)) * self.rotations[shape]
-	stone.Material = MATERIALS[self.skin][layer]
-	stone.Color = Color3.fromRGB(r, g, b)
+	-- A rock that only changes shape keeps its look: skip the property writes.
+	if fresh or old == nil or old // 16 ~= layer then
+		stone.Material = MATERIALS[self.skin][layer]
+		stone.Color = Color3.fromRGB(r, g, b)
+	end
 	if fresh then stone.Parent = self.folder end
 	self.codes[key] = code
 	return if fresh then stone else nil
@@ -449,7 +454,6 @@ function MountainView._throwDebris(self: View, parts: { BasePart }, at: Vector3?
 	for _, part in parts do
 		part.CanCollide = false
 		part.CanQuery = false
-		part.CastShadow = false
 		local away = if at then part.Position - at else Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1))
 		if away.Magnitude < 0.05 then away = Vector3.new(random:NextNumber(-1, 1), 0.5, random:NextNumber(-1, 1)) end
 		table.insert(self.debris, {
@@ -474,7 +478,6 @@ function MountainView._throwDebris(self: View, parts: { BasePart }, at: Vector3?
 				part.Transparency = 0
 				part.CanCollide = true
 				part.CanQuery = true
-				part.CastShadow = true
 				if part.Parent == self.folder then
 					self:_release(part, entry.kind)
 				else

@@ -861,50 +861,12 @@ function Grid.randomExposed(self: Grid): number?
 	return self.exposedList[self.rand(1, count)]
 end
 
--- A minimal binary heap of {distance, key} pairs, nearest first.
-local function push(heap: { { number } }, item: { number })
-	table.insert(heap, item)
-	local i = #heap
-	while i > 1 do
-		local parent = i // 2
-		if heap[parent][1] <= heap[i][1] then
-			break
-		end
-		heap[parent], heap[i] = heap[i], heap[parent]
-		i = parent
-	end
-end
-
-local function pop(heap: { { number } }): { number }?
-	local count = #heap
-	if count == 0 then
-		return nil
-	end
-	local top = heap[1]
-	heap[1] = heap[count]
-	heap[count] = nil
-	count -= 1
-	local i = 1
-	while true do
-		local left, right, smallest = i * 2, i * 2 + 1, i
-		if left <= count and heap[left][1] < heap[smallest][1] then
-			smallest = left
-		end
-		if right <= count and heap[right][1] < heap[smallest][1] then
-			smallest = right
-		end
-		if smallest == i then
-			break
-		end
-		heap[smallest], heap[i] = heap[i], heap[smallest]
-		i = smallest
-	end
-	return top
-end
-
 -- Blasts up to `count` cells as one crater around a random exposed cell (or
 -- `centre`): the nearest cells to the centre go first, and the crater only
 -- grows through cells it has opened up. Returns the removed keys and the centre.
+-- The nearest-first queue is a binary heap kept in two flat arrays (distance
+-- and key) and the queued marks are bits in buffers, so a big gift allocates
+-- almost nothing per rock.
 function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?, onRemoved: ((number) -> ())?): ({ number }, number?)
 	local removed: { number } = {}
 	local start = if centre ~= nil and self.solid[centre] and self.exposedIndex[centre] then centre else self:randomExposed()
@@ -912,23 +874,48 @@ function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() 
 		return removed, nil
 	end
 	local cx, cy, cz = Grid.coords(start)
-	local heap: { { number } } = {}
-	local queued = (newCellMap())
+	local distances: { number } = {}
+	local keys: { number } = {}
+	local size = 0
+	local queued: { [number]: buffer } = {}
 	local pages = self.solidPages
+	local rand = self.rand
 	local function enqueue(key: number)
-		if queued[key] or not hasBit(pages, key) then
+		local index = key // 4096
+		local page = queued[index]
+		if page == nil then
+			page = buffer.create(512)
+			queued[index] = page
+		end
+		local offset, mask = (key % 4096) // 8, bit32.lshift(1, key % 8)
+		local byte = buffer.readu8(page, offset)
+		if bit32.btest(byte, mask) or not hasBit(pages, key) then
 			return
 		end
-		queued[key] = true
-		local x, y, z = Grid.coords(key)
+		buffer.writeu8(page, offset, bit32.bor(byte, mask))
+		local column = key % LAYER
+		local x, z = column % SPAN - OFFSET, column // SPAN - OFFSET
+		local y = key // LAYER
 		-- Craters dig a little more readily downwards and outwards than up.
 		local dy = (y - cy) * (if y > cy then 1.15 else 0.9)
-		push(heap, { (x - cx) ^ 2 + dy * dy + (z - cz) ^ 2 + self.rand() * 0.6, key })
+		local distance = (x - cx) ^ 2 + dy * dy + (z - cz) ^ 2 + rand() * 0.6
+		-- Sift up: parents move down until the new entry's place is found.
+		size += 1
+		local i = size
+		while i > 1 do
+			local parent = i // 2
+			local above = distances[parent]
+			if above <= distance then
+				break
+			end
+			distances[i], keys[i] = above, keys[parent]
+			i = parent
+		end
+		distances[i], keys[i] = distance, key
 	end
 	enqueue(start)
 	while #removed < count do
-		local item = pop(heap)
-		if item == nil then
+		if size == 0 then
 			-- The crater ran out of reachable rock: carry on from a new spot.
 			local nextStart = self:randomExposed()
 			if nextStart == nil then
@@ -938,7 +925,30 @@ function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() 
 			enqueue(nextStart)
 			continue
 		end
-		local key = item[2]
+		-- Pop the nearest; the last entry sifts down from the top.
+		local key = keys[1]
+		local distance, last = distances[size], keys[size]
+		distances[size], keys[size] = nil, nil
+		size -= 1
+		if size > 0 then
+			local i = 1
+			while true do
+				local left = i * 2
+				local smallest, best = i, distance
+				if left <= size and distances[left] < best then
+					smallest, best = left, distances[left]
+				end
+				if left + 1 <= size and distances[left + 1] < best then
+					smallest = left + 1
+				end
+				if smallest == i then
+					break
+				end
+				distances[i], keys[i] = distances[smallest], keys[smallest]
+				i = smallest
+			end
+			distances[i], keys[i] = distance, last
+		end
 		if self:remove(key) then
 			table.insert(removed, key)
 			if onRemoved then onRemoved(key) end
@@ -4475,13 +4485,12 @@ export type Words = {
 	material: string, -- "stone" / "hay": what gifts blast away
 	gem: string, -- "diamond" / "needle": what you find and hold
 	heap: string, -- "mountain" / "haystack"
-	icon: string,
 }
 
 Skin.NAMES = { "stone", "hay" }
 Skin.WORDS = {
-	stone = { material = "stone", gem = "diamond", heap = "mountain", icon = "💎" },
-	hay = { material = "hay", gem = "needle", heap = "haystack", icon = "🌾" },
+	stone = { material = "stone", gem = "diamond", heap = "mountain" },
+	hay = { material = "hay", gem = "needle", heap = "haystack" },
 } :: { [string]: Words }
 
 -- The words for a skin name; anything unknown reads as stone.
@@ -4880,11 +4889,13 @@ local function growthCapacity(): number
 	return math.max(Config.GrowthMaxStone, startingStone * 2)
 end
 -- Long rock work yields every few milliseconds so the server keeps its frame
--- rate. Changes stream to clients while the work continues.
+-- rate. Changes stream to clients while the work continues. The server draws
+-- no rock, so it can spend about half of each 60 Hz frame on a gift.
+local GIFT_WORK_SECONDS = 0.008
 local function workCheckpoint(onYield: (() -> ())?, effect: string?, budget: number?): () -> ()
 	local frameStart = os.clock()
 	local lastCountUpdate = frameStart
-	local slice = budget or 0.003
+	local slice = budget or GIFT_WORK_SECONDS
 	return function()
 		if os.clock() - frameStart >= slice then
 			if os.clock() - lastCountUpdate >= 0.1 then
@@ -5243,7 +5254,7 @@ end
 -- Raised so both boards show over the summit as seen from the camp.
 local boardLift = math.max(14, mountainRadius * 0.55)
 local helperBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1].facing, boardLift, {
-	title = "⛏️ TOP HELPERS",
+	title = "TOP HELPERS",
 	unit = "coins",
 	trim = Color3.fromRGB(36, 92, 204),
 	valueColour = Color3.fromRGB(160, 214, 255),
@@ -5251,7 +5262,7 @@ local helperBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1]
 	empty = "Send a gift to help break the mountain!",
 }, groundAt)
 local grieferBoard = Leaderboards.build(showcase, boardSpots[2].at, boardSpots[2].facing, boardLift, {
-	title = "🧱 TOP GRIEFERS",
+	title = "TOP GRIEFERS",
 	unit = "coins",
 	trim = Color3.fromRGB(196, 36, 44),
 	valueColour = Color3.fromRGB(255, 178, 188),
@@ -5402,6 +5413,8 @@ local function processTikTok(event: TikTokFeed.Event)
 	local current = mountain
 	local centreKey = if current then current.grid:randomExposed() else nil
 	local preview = if current and centreKey then current:keyPosition(centreKey) else Vector3.new(0, 8, 0)
+	-- Gifts that add stone play their effect on the summit: the mountain is fed.
+	if amount < 0 and current then preview = current:summit() or preview end
 	local available = if current then current:remaining() else 0
 	local blocks = if phase == "Won" or phase == "Rebuilding" then nil elseif amount < 0 then -math.min(-amount, math.max(0, growthCapacity() - available)) else math.min(amount, available)
 	-- Start the animation promptly while the queued rock work spans frames.
@@ -5416,7 +5429,7 @@ local function processTikTok(event: TikTokFeed.Event)
 		})
 	end
 	local _centre, applied = applyStone(amount, centreKey)
-	if doubledGifts[event] then text = "💎 2X " .. text end
+	if doubledGifts[event] then text = "2X " .. text end
 	Notify:FireAllClients("feed", { text = text .. (if applied == nil then " (queued)" elseif amount < 0 and applied == 0 then " (mountain full)" else ""), stone = applied or amount, kind = event.type })
 end
 
@@ -5509,6 +5522,8 @@ local function filtered(player: Player, text: string): string?
 	return if ok then result else nil
 end
 
+-- Rebuild test presets: blocks added -> the coins that pick its effect tier.
+local REBUILD_TEST_COINS: { [number]: number } = { [100] = 1, [1000] = 10, [10000] = 100, [50000] = 500, [100000] = 1000, [1500000] = 10000 }
 local function testGift(coins: number, count: number, name: string, rocks: number?)
 	onTikTok({
 		id = "test-" .. tostring(os.clock()),
@@ -5720,8 +5735,10 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "testRebuildGift" and type(value) == "number" then
 		-- Admin-only presets bypass saved destructive rules without changing them.
-		if value ~= 1000 and value ~= 10000 and value ~= 100000 and value ~= 1500000 then return end
-		testGift(1, 1, "Rebuild test", -value)
+		-- Each carries the coins of one adding-effect tier, smallest to biggest.
+		local coins = REBUILD_TEST_COINS[value]
+		if coins == nil then return end
+		testGift(coins, 1, "Rebuild test", -value)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
@@ -5748,8 +5765,9 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		return
 	end
 	if action == "mine" then
-		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
-		-- DigPerSecond allows for the time since the last dig.
+		-- Sent each time a digging hand lands (four times a second while the
+		-- dig button is held): dig as many rocks as DigPerSecond allows for the
+		-- time since the last dig, rounded so strikes on time get their full share.
 		-- The client names the rock cell it is aiming at (rock parts are local).
 		-- Digging carries on while a gift blasts or rebuilds the mountain.
 		local current = mountain
@@ -5759,7 +5777,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		local now = os.clock()
 		local since = now - (mineCooldown[player] or 0)
-		local allowed = math.min(math.floor(since * Config.DigPerSecond), math.ceil(Config.DigPerSecond / 4))
+		local allowed = math.min(math.floor(since * Config.DigPerSecond + 0.5), math.ceil(Config.DigPerSecond / 4))
 		if allowed < 1 then
 			return
 		end
@@ -6065,13 +6083,13 @@ function DiamondBird.start(options: Options): Bird
 		state:SetAttribute("BirdBoostUntil", boostUntil)
 		state:SetAttribute("BirdCatcher", player.DisplayName)
 		options.notify:FireAllClients("feed", {
-			text = string.format("💎 %s caught the diamond bird! Gifts x%d for %d s", player.DisplayName, Config.BirdMultiplier, Config.BirdBoostSeconds),
+			text = string.format("%s caught the diamond bird! Gifts x%d for %d s", player.DisplayName, Config.BirdMultiplier, Config.BirdBoostSeconds),
 			stone = 0,
 			kind = "gift",
 		})
 		task.delay(Config.BirdBoostSeconds, function()
 			if boostId ~= id then return end
-			options.notify:FireAllClients("feed", { text = "💎 Double gifts are over", stone = 0, kind = "notice" })
+			options.notify:FireAllClients("feed", { text = "Double gifts are over", stone = 0, kind = "notice" })
 		end)
 	end
 
@@ -6100,7 +6118,7 @@ function DiamondBird.start(options: Options): Bird
 		click.MouseClick:Connect(function(player: Player) caught(player, bird) end)
 		bird.Parent = workspace
 		current = bird
-		options.notify:FireAllClients("feed", { text = "💎 A diamond bird appeared! Click it for double gifts", stone = 0, kind = "notice" })
+		options.notify:FireAllClients("feed", { text = "A diamond bird appeared! Click it for double gifts", stone = 0, kind = "notice" })
 	end
 
 	task.spawn(function()
@@ -6129,8 +6147,7 @@ return DiamondBird
           <string name="Source"><![CDATA[--!strict
 -- The farm theme's own scenery: the mountain stands in a ranch corral, a
 -- timber board fence all the way round the arena except for the opening
--- where the trail comes in from the camp, under a log arch with a hanging
--- DIAMOND RANCH sign. Beyond the fence, in view of the spawn, is a red
+-- where the trail comes in from the camp, under a log arch. Beyond the fence, in view of the spawn, is a red
 -- gambrel-roofed barn with a silo, a cornfield with a scarecrow, a windpump,
 -- a tractor, hay bales and cows grazing by a water trough. Scenery builds it
 -- once, alongside the alpine valley, and keeps it out of view until the theme
@@ -6198,9 +6215,8 @@ local function fence(kit: Kit, parent: Instance, random: Random)
 			end
 		end
 	end
-	-- The gate: two tall log posts at the ends of the fence, a log beam
-	-- across them with knee braces, and the ranch's sign hanging under it,
-	-- lettered on both faces.
+	-- The gate: two tall log posts at the ends of the fence and a log beam
+	-- across them with knee braces.
 	local left, right = posts[1], posts[#posts]
 	local across = Vector3.new(right.X - left.X, 0, right.Z - left.Z).Unit
 	for _, at in { left, right } do
@@ -6212,29 +6228,6 @@ local function fence(kit: Kit, parent: Instance, random: Random)
 	kit.beam(model, "GateBeam", a, b, 0.75, LOG, Enum.Material.Wood)
 	kit.beam(model, "GateBrace", Vector3.new(left.X, top - 2.2, left.Z), Vector3.new(left.X, top - 0.2, left.Z) + across * 2, 0.35, LOG, Enum.Material.Wood)
 	kit.beam(model, "GateBrace", Vector3.new(right.X, top - 2.2, right.Z), Vector3.new(right.X, top - 0.2, right.Z) - across * 2, 0.35, LOG, Enum.Material.Wood)
-	local middle = (Vector3.new(left.X, top, left.Z) + Vector3.new(right.X, top, right.Z)) / 2 - Vector3.new(0, 2.1, 0)
-	local outward = Vector3.new(middle.X, 0, middle.Z).Unit
-	local frame = CFrame.lookAt(middle, middle + outward)
-	local sign = kit.piece(model, "RanchSign", Vector3.new(6.6, 1.7, 0.25), frame, Color3.fromRGB(138, 100, 64), Enum.Material.WoodPlanks)
-	for _, side in { -2.7, 2.7 } do
-		kit.piece(model, "SignChain", Vector3.new(0.1, 1.3, 0.1), frame * CFrame.new(side, 1.45, 0), Color3.fromRGB(56, 56, 58), Enum.Material.Metal)
-	end
-	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
-		local gui = Instance.new("SurfaceGui")
-		gui.Face = face
-		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-		gui.PixelsPerStud = 50
-		gui.LightInfluence = 1
-		gui.Parent = sign
-		local text = Instance.new("TextLabel")
-		text.Size = UDim2.fromScale(1, 1)
-		text.BackgroundTransparency = 1
-		text.Font = Enum.Font.FredokaOne
-		text.TextScaled = true
-		text.TextColor3 = Color3.fromRGB(252, 238, 206)
-		text.Text = "DIAMOND RANCH"
-		text.Parent = gui
-	end
 end
 
 -- Where the barn goes: open, fairly flat ground in view of the spawn (to one
@@ -6993,8 +6986,7 @@ return Leaderboards
 -- mountain valley, where every player arrives. A ring of marble columns with
 -- gold capitals carries royal blue banners; a royal blue carpet leads from the
 -- spawn to a stepped dais where a giant diamond turns slowly (each client
--- spins it, see GamesMenu), and a crest above the far colonnade welcomes
--- players. Games are joined from the games menu on the side of the screen.
+-- spins it, see GamesMenu). Games are joined from the games menu on the side of the screen.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
@@ -7043,18 +7035,6 @@ end
 local function beam(parent: Instance, name: string, a: Vector3, b: Vector3, width: number, height: number, colour: Color3, material: Enum.Material, solid: boolean?): Part
 	local length = (b - a).Magnitude
 	return piece(parent, name, Vector3.new(width, height, length), CFrame.lookAt((a + b) / 2, b), colour, material, solid)
-end
-
-local function label(parent: Instance, text: string, position: UDim2, size: UDim2, colour: Color3, font: Enum.Font)
-	local line = Instance.new("TextLabel")
-	line.BackgroundTransparency = 1
-	line.Position = position
-	line.Size = size
-	line.Font = font
-	line.TextScaled = true
-	line.TextColor3 = colour
-	line.Text = text
-	line.Parent = parent
 end
 
 function Lobby.build(parent: Instance): Built
@@ -7203,27 +7183,20 @@ function Lobby.build(parent: Instance): Built
 			gui.PixelsPerStud = 30
 			gui.LightInfluence = 0.8
 			gui.Parent = banner
-			label(gui, "👑", UDim2.fromScale(0.1, 0.12), UDim2.fromScale(0.8, 0.3), GOLD, Enum.Font.GothamBold)
-			label(gui, "◆", UDim2.fromScale(0.3, 0.56), UDim2.fromScale(0.4, 0.2), GOLD, Enum.Font.GothamBold)
+			-- Two gold diamonds (squares turned on their corners), large over small.
+			for _, mark in { { 0.27, 0.42 }, { 0.66, 0.2 } } do
+				local gem = Instance.new("Frame")
+				gem.AnchorPoint = Vector2.new(0.5, 0.5)
+				gem.Position = UDim2.fromScale(0.5, mark[1])
+				gem.Size = UDim2.fromScale(mark[2], mark[2])
+				gem.SizeConstraint = Enum.SizeConstraint.RelativeXX
+				gem.Rotation = 45
+				gem.BackgroundColor3 = GOLD
+				gem.BorderSizePixel = 0
+				gem.Parent = gui
+			end
 		end
 	end
-
-	-- The welcome crest stands on the far colonnade, facing the spawn above the diamond.
-	local crestAt = O + Vector3.new(0, entablature + 2.8 - O.Y + 5.5, -radius)
-	local crestFrame = CFrame.lookAt(crestAt, crestAt + Vector3.new(0, 0, 1))
-	local crest = piece(model, "Crest", Vector3.new(34, 11, 1), crestFrame, MARBLE, Enum.Material.Marble)
-	for _, edge in { { 0, 5.7, 35.2, 0.6 }, { 0, -5.7, 35.2, 0.6 }, { 17.3, 0, 0.6, 11.8 }, { -17.3, 0, 0.6, 11.8 } } do
-		piece(model, "CrestFrame", Vector3.new(edge[3], edge[4], 1.2), crestFrame * CFrame.new(edge[1], edge[2], 0), GOLD, Enum.Material.Metal)
-	end
-	piece(model, "CrestCrown", Vector3.new(6, 3, 1.2), crestFrame * CFrame.new(0, 7.4, 0), GOLD, Enum.Material.Metal)
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 24
-	gui.LightInfluence = 0.7
-	gui.Parent = crest
-	label(gui, "WELCOME", UDim2.fromScale(0.05, 0.08), UDim2.fromScale(0.9, 0.52), ROYAL, Enum.Font.Merriweather)
-	label(gui, "Open  👑 GAMES  on the left to play", UDim2.fromScale(0.08, 0.64), UDim2.fromScale(0.84, 0.24), Color3.fromRGB(150, 112, 30), Enum.Font.GothamBold)
 
 	-- A marble balustrade with a gold rail rings the edge; an invisible wall
 	-- behind it stops anyone jumping off.
@@ -7687,12 +7660,16 @@ local function torii(kit: Kit, parent: Instance, frame: CFrame, span: number, ta
 	gui.PixelsPerStud = 60
 	gui.LightInfluence = 1
 	gui.Parent = plaque
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.TextScaled = true
-	text.Text = "💎"
-	text.Parent = gui
+	-- A gold diamond: a square turned on its corner.
+	local mark = Instance.new("Frame")
+	mark.AnchorPoint = Vector2.new(0.5, 0.5)
+	mark.Position = UDim2.fromScale(0.5, 0.5)
+	mark.Size = UDim2.fromScale(0.5, 0.42)
+	mark.SizeConstraint = Enum.SizeConstraint.RelativeXX
+	mark.Rotation = 45
+	mark.BackgroundColor3 = Color3.fromRGB(232, 190, 92)
+	mark.BorderSizePixel = 0
+	mark.Parent = gui
 end
 
 -- A stone lantern (tōrō) with a softly glowing fire box; no light of its own.
@@ -8137,6 +8114,7 @@ local Farm = require(script.Parent.Farm)
 local Scenery = {}
 local random = Random.new(4207)
 
+local SHADOW_SIZE = 3 -- studs across: smaller parts cast no shadow
 local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
 	local p = Instance.new(kind or "Part") :: BasePart
 	p.Name = name
@@ -8148,7 +8126,9 @@ local function piece(parent: Instance, name: string, size: Vector3, frame: CFram
 	p.CanCollide = false
 	p.CanQuery = false
 	p.CanTouch = false
-	p.CastShadow = true
+	-- Small props (crates, firewood, flowers, trim) cast no shadow: theirs are
+	-- too small to notice and each one costs every frame.
+	p.CastShadow = size.Magnitude >= SHADOW_SIZE
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 	p.Parent = parent
@@ -8826,26 +8806,6 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	beam(folder, "PickaxeHandle", leanAt, leanAt + Vector3.new(0.4, 2.6, 0.5), 0.16, Color3.fromRGB(122, 84, 52), Enum.Material.Wood)
 	piece(folder, "PickaxeHead", Vector3.new(1.5, 0.22, 0.22), CFrame.new(leanAt + Vector3.new(0.4, 2.55, 0.5)) * CFrame.Angles(0, 0.9, 0.25), Color3.fromRGB(150, 154, 158), Enum.Material.Metal)
 
-	-- A trail sign points the way to the mountain.
-	local signAt = camp + Vector3.new(4.5, 0, -11)
-	beam(folder, "SignPost", signAt, signAt + Vector3.new(0, 4.2, 0), 0.35, Color3.fromRGB(92, 68, 46), Enum.Material.Wood)
-	-- The lettered face looks back towards the camp, where players spawn.
-	local board = piece(folder, "SignBoard", Vector3.new(4.4, 1.1, 0.2), CFrame.lookAt(signAt + Vector3.new(0, 3.5, 0), signAt + Vector3.new(0, 3.5, 1)), Color3.fromRGB(132, 100, 66), Enum.Material.WoodPlanks)
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 50
-	gui.LightInfluence = 1
-	gui.Parent = board
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.Font = Enum.Font.FredokaOne
-	text.TextScaled = true
-	text.TextColor3 = Color3.fromRGB(250, 236, 206)
-	text.Text = "⛏  DIAMOND MOUNTAIN"
-	text.Parent = gui
-
 	-- What only the alpine theme shows.
 	local alpine = Instance.new("Folder")
 	alpine.Name = "AlpineOnly"
@@ -9074,7 +9034,7 @@ function Statue.build(parent: Instance, spec: Spec): Model
 		line.Text = text
 		line.Parent = gui
 	end
-	engrave("★  IN HONOUR OF  ★", 0.06, 0.16, Enum.Font.GothamBold)
+	engrave("IN HONOUR OF", 0.06, 0.16, Enum.Font.GothamBold)
 	engrave(spec.name, 0.25, 0.42, Enum.Font.FredokaOne)
 	engrave(Format.commas(spec.coins) .. " COINS", 0.7, 0.22, Enum.Font.GothamBold)
 	return model
@@ -9547,7 +9507,7 @@ local Notify = Remotes:WaitForChild("Notify") :: RemoteEvent
 local Request = Remotes:WaitForChild("Request") :: RemoteEvent
 local RebuildEffects = require(script:WaitForChild("RebuildEffects"))
 local GiftEffects = require(script:WaitForChild("GiftEffects"))
-GiftEffects.start(player:WaitForChild("PlayerGui"))
+GiftEffects.start(player:WaitForChild("PlayerGui"), State)
 
 -- The rock is drawn here, not replicated from the server: the server sends a
 -- snapshot and compact change lists, and MountainView keeps local parts in step.
@@ -9569,10 +9529,21 @@ task.spawn(function()
 	until view.round > 0
 end)
 
-local FONT = Enum.Font.FredokaOne
+-- One clean look throughout: Gotham type, dark glass panels with a hairline
+-- edge, white text, a pale blue accent and gold for wins.
+local FONT = Enum.Font.GothamBold
+local FONT_MEDIUM = Enum.Font.GothamMedium
+local FONT_HEAVY = Enum.Font.GothamBlack
 local WHITE = Color3.fromRGB(255, 255, 255)
-local GOLD = Color3.fromRGB(255, 205, 70)
-local PANEL = Color3.fromRGB(28, 24, 40)
+local GOLD = Color3.fromRGB(246, 200, 92)
+local ACCENT = Color3.fromRGB(132, 212, 255)
+local GREEN = Color3.fromRGB(118, 230, 160)
+local MUTED = Color3.fromRGB(168, 174, 190)
+local PANEL = Color3.fromRGB(16, 18, 26)
+local GLASS = 0.28 -- how see-through the HUD's panels are
+local BUTTON = Color3.fromRGB(46, 50, 68)
+local SELECTED = Color3.fromRGB(64, 128, 236)
+local DANGER = Color3.fromRGB(176, 64, 72)
 
 local function attr(name: string, fallback: any): any
 	local value = State:GetAttribute(name)
@@ -9615,7 +9586,16 @@ local function setText(label: TextLabel, text: string)
 end
 
 local function outline(parent: Instance, thickness: number)
-	make("UIStroke", { Thickness = thickness, Color = Color3.fromRGB(0, 0, 0), Transparency = 0.3 }, parent)
+	make("UIStroke", { Thickness = thickness, Color = Color3.fromRGB(0, 0, 0), Transparency = 0.55 }, parent)
+end
+
+-- A dark glass panel with rounded corners and a faint edge.
+local function glass(instance: GuiObject, radius: number, transparency: number?)
+	instance.BackgroundColor3 = PANEL
+	instance.BackgroundTransparency = transparency or GLASS
+	instance.BorderSizePixel = 0
+	rounded(instance, radius)
+	make("UIStroke", { Thickness = 1, Color = WHITE, Transparency = 0.88, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, instance)
 end
 
 local gui = make("ScreenGui", {
@@ -9640,120 +9620,156 @@ require(script:WaitForChild("PetalView")).start(State)
 -- Stone left (top centre) -------------------------------------------------------
 local stoneBox = make("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 8),
-	Size = UDim2.fromOffset(440, 108),
-	BackgroundColor3 = PANEL,
-	BackgroundTransparency = 0.15,
+	Position = UDim2.new(0.5, 0, 0, 10),
+	Size = UDim2.fromOffset(300, 84),
 }, gui)
-rounded(stoneBox, 16)
+glass(stoneBox, 14)
 local stoneTitle = make("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 26),
-	Position = UDim2.fromOffset(0, 6),
+	Size = UDim2.new(1, 0, 0, 16),
+	Position = UDim2.fromOffset(0, 10),
 	BackgroundTransparency = 1,
 	Font = FONT,
-	TextSize = 22,
-	TextColor3 = Color3.fromRGB(200, 195, 215),
+	TextSize = 13,
+	TextColor3 = MUTED,
 	Text = "STONE LEFT", -- or HAY LEFT (see refreshSkin)
 }, stoneBox)
 local stoneValue = make("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 50),
-	Position = UDim2.fromOffset(0, 28),
+	Size = UDim2.new(1, 0, 0, 38),
+	Position = UDim2.fromOffset(0, 26),
 	BackgroundTransparency = 1,
-	Font = FONT,
-	TextSize = 50,
+	Font = FONT_HEAVY,
+	TextSize = 36,
 	TextColor3 = WHITE,
 	Text = "250,000",
 }, stoneBox)
-outline(stoneValue, 2)
 local bar = make("Frame", {
-	Position = UDim2.new(0, 18, 1, -22),
-	Size = UDim2.new(1, -36, 0, 12),
-	BackgroundColor3 = Color3.fromRGB(60, 55, 75),
+	Position = UDim2.new(0, 20, 1, -15),
+	Size = UDim2.new(1, -40, 0, 4),
+	BackgroundColor3 = WHITE,
+	BackgroundTransparency = 0.85,
+	BorderSizePixel = 0,
 }, stoneBox)
-rounded(bar, 6)
-local barFill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(150, 145, 140) }, bar)
-rounded(barFill, 6)
+rounded(bar, 2)
+local barFill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, bar)
+rounded(barFill, 2)
 
-local timerLabel = make("TextLabel", {
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 122),
-	Size = UDim2.fromOffset(300, 30),
+-- Diamond bird bonus: a gold 2X card beside the stone count while it runs.
+local boostTag = make("Frame", {
+	Position = UDim2.new(0.5, 158, 0, 10),
+	Size = UDim2.fromOffset(84, 84),
+	Visible = false,
+}, gui)
+glass(boostTag, 14)
+local boostStroke = boostTag:FindFirstChildOfClass("UIStroke")
+if boostStroke then
+	boostStroke.Color = GOLD
+	boostStroke.Thickness = 2
+	boostStroke.Transparency = 0
+end
+local boostScale = make("UIScale", { Scale = 1 }, boostTag)
+make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 40),
+	Position = UDim2.fromOffset(0, 12),
+	BackgroundTransparency = 1,
+	Font = FONT_HEAVY,
+	TextSize = 38,
+	TextColor3 = GOLD,
+	Text = "2X",
+}, boostTag)
+local boostTime = make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 18),
+	Position = UDim2.fromOffset(0, 54),
 	BackgroundTransparency = 1,
 	Font = FONT,
-	TextSize = 26,
+	TextSize = 14,
 	TextColor3 = WHITE,
-	Text = "⏱ 0:00.0",
-}, gui)
-outline(timerLabel, 2)
+	Text = "",
+}, boostTag)
 
--- Win counter (top right) -----------------------------------------------------------
+-- Win counter, under the stone count ------------------------------------------------
+local WINS_Y, WINS_Y_HOLDING = 102, 158 -- moves below the hold countdown while it shows
 local winsBox = make("TextLabel", {
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -12, 0, 8),
-	Size = UDim2.fromOffset(0, 72),
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, WINS_Y),
+	Size = UDim2.fromOffset(0, 44),
 	AutomaticSize = Enum.AutomaticSize.X,
-	Font = FONT,
-	TextSize = 46,
+	Font = FONT_HEAVY,
+	TextSize = 26,
 	Text = "WINS: 0",
 }, gui)
-rounded(winsBox, 16)
-make("UIPadding", { PaddingLeft = UDim.new(0, 22), PaddingRight = UDim.new(0, 22) }, winsBox)
-local winsStroke = make("UIStroke", { Thickness = 3, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
+rounded(winsBox, 14)
+make("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, winsBox)
+local winsStroke = make("UIStroke", { Thickness = 2, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
 
+-- Round time, in a small pill under the wins.
+local timerLabel = make("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 154),
+	Size = UDim2.fromOffset(0, 26),
+	AutomaticSize = Enum.AutomaticSize.X,
+	Font = FONT,
+	TextSize = 14,
+	TextColor3 = WHITE,
+	RichText = true,
+	Text = "",
+}, gui)
+glass(timerLabel, 13)
+make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, timerLabel)
 
 -- Banner, hold countdown and status ----------------------------------------------------
 local banner = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 160),
-	Size = UDim2.fromOffset(640, 54),
-	BackgroundTransparency = 1,
+	Position = UDim2.new(0.5, 0, 0, 192),
+	Size = UDim2.fromOffset(0, 44),
+	AutomaticSize = Enum.AutomaticSize.X,
 	Font = FONT,
-	TextSize = 40,
-	TextColor3 = Color3.fromRGB(150, 240, 255),
+	TextSize = 22,
+	TextColor3 = ACCENT,
 	Text = "",
 	Visible = false,
 }, gui)
-outline(banner, 3)
+glass(banner, 22, 0.2)
+make("UIPadding", { PaddingLeft = UDim.new(0, 22), PaddingRight = UDim.new(0, 22) }, banner)
 
 local countdown = make("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0),
 	Position = UDim2.new(0.5, 0, 0, 10),
-	Size = UDim2.fromOffset(320, 144),
+	Size = UDim2.fromOffset(320, 140),
 	BackgroundTransparency = 1,
 	Visible = false,
 }, gui)
 local countHolder = make("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 44),
+	Size = UDim2.new(1, 0, 0, 36),
 	BackgroundTransparency = 1,
 	Font = FONT,
-	TextSize = 24,
+	TextSize = 20,
 	TextScaled = true,
 	TextColor3 = WHITE,
 	Text = "",
 }, countdown)
-make("UITextSizeConstraint", { MinTextSize = 14, MaxTextSize = 24 }, countHolder)
-outline(countHolder, 3)
+make("UITextSizeConstraint", { MinTextSize = 13, MaxTextSize = 20 }, countHolder)
+outline(countHolder, 1.5)
 local countNumber = make("TextLabel", {
-	Position = UDim2.fromOffset(0, 40),
-	Size = UDim2.new(1, 0, 0, 104),
+	Position = UDim2.fromOffset(0, 36),
+	Size = UDim2.new(1, 0, 0, 100),
 	BackgroundTransparency = 1,
-	Font = FONT,
-	TextSize = 96,
+	Font = FONT_HEAVY,
+	TextSize = 88,
 	TextColor3 = WHITE,
 	Text = "10",
 }, countdown)
-outline(countNumber, 5)
+outline(countNumber, 3)
 local countScale = make("UIScale", { Scale = 1 }, countNumber)
 
 local status = make("TextLabel", {
 	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -12, 1, -10),
-	Size = UDim2.fromOffset(520, 22),
+	Position = UDim2.new(1, -14, 1, -10),
+	Size = UDim2.fromOffset(520, 20),
 	BackgroundTransparency = 1,
-	Font = Enum.Font.GothamMedium,
-	TextSize = 15,
+	Font = FONT_MEDIUM,
+	TextSize = 13,
 	TextXAlignment = Enum.TextXAlignment.Right,
-	TextColor3 = Color3.fromRGB(230, 230, 240),
+	TextColor3 = MUTED,
 	Text = "",
 }, gui)
 outline(status, 1)
@@ -9762,35 +9778,45 @@ outline(status, 1)
 local feed = make("Frame", {
 	AnchorPoint = Vector2.new(0, 1),
 	Position = UDim2.new(0, 12, 1, -12),
-	Size = UDim2.fromOffset(440, 300),
+	Size = UDim2.fromOffset(440, 280),
 	BackgroundTransparency = 1,
 }, gui)
 make("UIListLayout", {
 	VerticalAlignment = Enum.VerticalAlignment.Bottom,
 	SortOrder = Enum.SortOrder.LayoutOrder,
-	Padding = UDim.new(0, 6),
+	Padding = UDim.new(0, 5),
 }, feed)
 local feedOrder = 0
 
 local function addFeed(text: string, stone: number, kind: string)
 	feedOrder += 1
-	local colour = if kind == "gift" then GOLD elseif kind == "follow" then Color3.fromRGB(255, 120, 170) else Color3.fromRGB(170, 220, 255)
+	local colour = if kind == "gift" then GOLD elseif kind == "follow" then Color3.fromRGB(255, 140, 180) else ACCENT
+	local clean = (text:gsub("[<>&]", ""))
 	local row = make("TextLabel", {
 		LayoutOrder = feedOrder,
-		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundColor3 = PANEL,
-		BackgroundTransparency = 0.25,
-		Font = FONT,
-		TextSize = 20,
+		Size = UDim2.fromOffset(0, 30),
+		AutomaticSize = Enum.AutomaticSize.X,
+		Font = FONT_MEDIUM,
+		TextSize = 15,
 		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 		TextColor3 = WHITE,
 		RichText = true,
 		Text = if stone ~= 0
-			then string.format('%s  <font color="#%s">%s%s</font>', (text:gsub("[<>&]", "")), (if stone < 0 then Color3.fromRGB(100, 240, 170) else colour):ToHex(), if stone < 0 then "+" else "-", Format.commas(math.abs(stone)))
-			else (text:gsub("[<>&]", "")),
+			then string.format('%s   <b><font color="#%s">%s%s</font></b>', clean, (if stone < 0 then GREEN else colour):ToHex(), if stone < 0 then "+" else "-", Format.commas(math.abs(stone)))
+			else clean,
 	}, feed)
-	rounded(row, 10)
-	make("UIPadding", { PaddingLeft = UDim.new(0, 12) }, row)
+	glass(row, 8)
+	make("UISizeConstraint", { MaxSize = Vector2.new(440, 30) }, row)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 12) }, row)
+	-- A thin bar in the row's colour along its left edge.
+	local edge = make("Frame", {
+		Position = UDim2.new(0, -14, 0, 7),
+		Size = UDim2.new(0, 3, 1, -14),
+		BackgroundColor3 = if stone < 0 then GREEN else colour,
+		BorderSizePixel = 0,
+	}, row)
+	rounded(edge, 2)
 	local rows = {}
 	for _, child in feed:GetChildren() do
 		if child:IsA("TextLabel") then
@@ -9805,7 +9831,11 @@ local function addFeed(text: string, stone: number, kind: string)
 	end
 	task.delay(7, function()
 		if row.Parent then
-			local fade = TweenService:Create(row, TweenInfo.new(0.6), { BackgroundTransparency = 1, TextTransparency = 1 })
+			local info = TweenInfo.new(0.6)
+			local fade = TweenService:Create(row, info, { BackgroundTransparency = 1, TextTransparency = 1 })
+			TweenService:Create(edge, info, { BackgroundTransparency = 1 }):Play()
+			local edgeStroke = row:FindFirstChildOfClass("UIStroke")
+			if edgeStroke then TweenService:Create(edgeStroke, info, { Transparency = 1 }):Play() end
 			fade:Play()
 			fade.Completed:Wait()
 			row:Destroy()
@@ -9816,49 +9846,47 @@ end
 -- Win screen --------------------------------------------------------------------------
 local winScreen = make("Frame", {
 	Size = UDim2.fromScale(1, 1),
-	BackgroundColor3 = Color3.fromRGB(10, 8, 20),
-	BackgroundTransparency = 0.25,
+	BackgroundColor3 = Color3.fromRGB(8, 10, 16),
+	BackgroundTransparency = 0.35,
 	Visible = false,
 	ZIndex = 20,
 }, gui)
 local winCard = make("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromOffset(620, 360),
-	BackgroundColor3 = PANEL,
+	Size = UDim2.fromOffset(540, 300),
 	ZIndex = 21,
 }, winScreen)
-rounded(winCard, 24)
-make("UIStroke", { Thickness = 4, Color = Color3.fromRGB(150, 240, 255) }, winCard)
+glass(winCard, 20, 0.05)
 local winScale = make("UIScale", { Scale = 1 }, winCard)
-local function winLine(y: number, height: number, size: number, colour: Color3): TextLabel
+local function winLine(y: number, height: number, font: Enum.Font, size: number, colour: Color3): TextLabel
 	return make("TextLabel", {
 		Position = UDim2.fromOffset(0, y),
 		Size = UDim2.new(1, 0, 0, height),
 		BackgroundTransparency = 1,
-		Font = FONT,
+		Font = font,
 		TextSize = size,
 		TextColor3 = colour,
 		Text = "",
 		ZIndex = 22,
 	}, winCard)
 end
-local winTitle = winLine(24, 64, 56, Color3.fromRGB(150, 240, 255))
-local winWho = winLine(92, 40, 30, WHITE)
-local winTime = winLine(160, 50, 40, WHITE)
-local winBest = winLine(216, 50, 40, GOLD)
-local winNewBest = winLine(282, 44, 34, Color3.fromRGB(120, 255, 150))
+local winTitle = winLine(30, 48, FONT_HEAVY, 40, ACCENT)
+local winWho = winLine(84, 32, FONT, 24, WHITE)
+local winTime = winLine(140, 30, FONT_MEDIUM, 20, WHITE)
+local winBest = winLine(174, 30, FONT_MEDIUM, 20, GOLD)
+local winNewBest = winLine(230, 32, FONT, 18, GREEN)
 
 local function showWin(data: { [string]: any })
 	local words = Skin.words(attr("Skin", "stone"))
-	winTitle.Text = words.icon .. " " .. string.upper(words.gem) .. " SECURED!"
+	winTitle.Text = string.upper(words.gem) .. " SECURED"
 	winWho.Text = tostring(data.winner or "") .. " wins!"
-	winTime.Text = "This round's time: " .. Format.duration(tonumber(data.time) or 0)
-	winBest.Text = "Best round's time: " .. Format.duration(tonumber(data.best) or 0)
-	winNewBest.Text = if data.newBest then "⭐ NEW BEST! ⭐" else ""
+	winTime.Text = "This round: " .. Format.duration(tonumber(data.time) or 0)
+	winBest.Text = "Best round: " .. Format.duration(tonumber(data.best) or 0)
+	winNewBest.Text = if data.newBest then "NEW BEST TIME" else ""
 	winScreen.Visible = true
-	winScale.Scale = 0.6
-	TweenService:Create(winScale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	winScale.Scale = 0.85
+	TweenService:Create(winScale, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 	task.delay(Config.WinScreenSeconds, function()
 		winScreen.Visible = false
 	end)
@@ -9871,13 +9899,12 @@ local panel = make("ScrollingFrame", {
 	Size = UDim2.fromOffset(340, 520),
 	CanvasSize = UDim2.fromOffset(0, 0),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	ScrollBarThickness = 6,
-	BackgroundColor3 = PANEL,
-	BackgroundTransparency = 0.05,
+	ScrollBarThickness = 4,
+	ScrollBarImageColor3 = MUTED,
 	Visible = false,
 	ZIndex = 10,
 }, gui)
-rounded(panel, 14)
+glass(panel, 14, 0.06)
 make("UIPadding", {
 	PaddingLeft = UDim.new(0, 12),
 	PaddingRight = UDim.new(0, 14),
@@ -9891,12 +9918,14 @@ local function panelLabel(text: string)
 	panelOrder += 1
 	make("TextLabel", {
 		LayoutOrder = panelOrder,
-		Size = UDim2.new(1, 0, 0, 20),
+		Size = UDim2.new(1, 0, 0, 18),
 		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamBold,
-		TextSize = 14,
+		Font = FONT,
+		TextSize = 12,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextColor3 = Color3.fromRGB(200, 195, 215),
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextColor3 = MUTED,
 		Text = text,
 		ZIndex = 11,
 	}, panel)
@@ -9906,16 +9935,18 @@ local function panelBox(text: string, onSubmit: (string) -> ()): TextBox
 	panelOrder += 1
 	local box = make("TextBox", {
 		LayoutOrder = panelOrder,
-		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundColor3 = Color3.fromRGB(50, 44, 68),
-		Font = Enum.Font.GothamMedium,
-		TextSize = 17,
+		Size = UDim2.new(1, 0, 0, 32),
+		BackgroundColor3 = Color3.fromRGB(32, 35, 48),
+		Font = FONT_MEDIUM,
+		TextSize = 15,
 		TextColor3 = WHITE,
+		PlaceholderColor3 = Color3.fromRGB(120, 126, 142),
 		ClearTextOnFocus = false,
 		Text = text,
 		ZIndex = 11,
 	}, panel)
 	rounded(box, 8)
+	make("UIStroke", { Thickness = 1, Color = WHITE, Transparency = 0.9, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, box)
 	box.FocusLost:Connect(function()
 		onSubmit(box.Text)
 	end)
@@ -9935,9 +9966,9 @@ local function panelButtons(buttons: { { any } }): { TextButton }
 	for _, spec in buttons do
 		local button = make("TextButton", {
 			Size = UDim2.new(1 / #buttons, -6, 1, 0),
-			BackgroundColor3 = Color3.fromRGB(90, 70, 150),
+			BackgroundColor3 = BUTTON,
 			Font = FONT,
-			TextSize = 16,
+			TextSize = 14,
 			TextColor3 = WHITE,
 			Text = spec[1],
 			ZIndex = 12,
@@ -10061,22 +10092,22 @@ local function refreshRules()
 		make("TextLabel", {
 			Size = UDim2.new(1, -40, 1, 0),
 			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamMedium,
-			TextSize = 15,
+			Font = FONT_MEDIUM,
+			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = WHITE,
-			Text = string.format("%s → %s rocks", tostring(name), (if (tonumber(rocks) or 0) < 0 then "ADD " else "REMOVE ") .. Format.commas(math.abs(tonumber(rocks) or 0))),
+			Text = string.format("%s: %s %s rocks", tostring(name), if (tonumber(rocks) or 0) < 0 then "adds" else "removes", Format.commas(math.abs(tonumber(rocks) or 0))),
 			ZIndex = 12,
 		}, row)
 		local remove = make("TextButton", {
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.fromScale(1, 0),
 			Size = UDim2.fromOffset(34, 30),
-			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
+			BackgroundColor3 = DANGER,
 			Font = FONT,
-			TextSize = 16,
+			TextSize = 14,
 			TextColor3 = WHITE,
-			Text = "✕",
+			Text = "X",
 			ZIndex = 12,
 		}, row)
 		rounded(remove, 8)
@@ -10117,22 +10148,22 @@ for index = 1, #testGifts, 2 do
 	panelButtons(buttons)
 end
 
-panelLabel("DIAMOND BIRD (every 5 to 7½ minutes)")
+panelLabel("DIAMOND BIRD (every 5 to 7.5 minutes)")
 panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
 
 panelLabel("MAP THEME (changes for everyone straight away)")
 local themeButtons = panelButtons({
-	{ "⛰ Alpine", function() send("setTheme", "default") end },
-	{ "🌸 Sakura", function() send("setTheme", "sakura") end },
-	{ "🚜 Farm", function() send("setTheme", "farm") end },
+	{ "Alpine", function() send("setTheme", "default") end },
+	{ "Sakura", function() send("setTheme", "sakura") end },
+	{ "Farm", function() send("setTheme", "farm") end },
 })
 -- The theme showing now is lit up.
 local function refreshTheme()
 	local theme = attr("Theme", "default")
 	for i, name in { "default", "sakura", "farm" } do
-		themeButtons[i].BackgroundColor3 = if theme == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+		themeButtons[i].BackgroundColor3 = if theme == name then SELECTED else BUTTON
 	end
 end
 State:GetAttributeChangedSignal("Theme"):Connect(refreshTheme)
@@ -10140,14 +10171,14 @@ refreshTheme()
 
 panelLabel("MOUNTAIN SKIN (same game, reskinned)")
 local skinButtons = panelButtons({
-	{ "💎 Stone & diamond", function() send("setSkin", "stone") end },
-	{ "🌾 Hay & needle", function() send("setSkin", "hay") end },
+	{ "Stone & diamond", function() send("setSkin", "stone") end },
+	{ "Hay & needle", function() send("setSkin", "hay") end },
 })
 -- The mountain repaints itself and the display's words follow the skin.
 local function refreshSkin()
 	local skin = attr("Skin", "stone")
 	for i, name in Skin.NAMES do
-		skinButtons[i].BackgroundColor3 = if skin == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+		skinButtons[i].BackgroundColor3 = if skin == name then SELECTED else BUTTON
 	end
 	stoneTitle.Text = string.upper(Skin.words(skin).material) .. " LEFT"
 	view:setSkin(skin)
@@ -10157,9 +10188,14 @@ refreshSkin()
 
 panelLabel("REBUILD TEST GIFTS (adds blocks)")
 panelLabel("Tests refill dug spaces, then grow new mountain rock.")
+panelLabel("Each plays the next adding effect, smallest to biggest.")
 panelButtons({
+	{ "+100 blocks", function() send("testRebuildGift", 100) end },
 	{ "+1,000 blocks", function() send("testRebuildGift", 1000) end },
+})
+panelButtons({
 	{ "+10,000 blocks", function() send("testRebuildGift", 10000) end },
+	{ "+50,000 blocks", function() send("testRebuildGift", 50000) end },
 })
 panelButtons({
 	{ "+100,000 blocks", function() send("testRebuildGift", 100000) end },
@@ -10191,9 +10227,9 @@ local function panelButton(text: string): TextButton
 	local button = make("TextButton", {
 		LayoutOrder = panelOrder,
 		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundColor3 = Color3.fromRGB(90, 70, 150),
+		BackgroundColor3 = BUTTON,
 		Font = FONT,
-		TextSize = 16,
+		TextSize = 14,
 		TextColor3 = WHITE,
 		Text = text,
 		ZIndex = 12,
@@ -10246,10 +10282,10 @@ local function refreshStatues()
 		make("TextLabel", {
 			Size = UDim2.fromScale(1, 1),
 			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamMedium,
+			Font = FONT_MEDIUM,
 			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = Color3.fromRGB(190, 180, 210),
+			TextColor3 = MUTED,
 			Text = "No statues yet.",
 			ZIndex = 12,
 		}, row)
@@ -10260,21 +10296,21 @@ local function refreshStatues()
 		make("TextLabel", {
 			Size = UDim2.new(1, -96, 1, 0),
 			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamMedium,
-			TextSize = 15,
+			Font = FONT_MEDIUM,
+			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextColor3 = GOLD,
-			Text = string.format("🏆 %s · %s coins", tostring(statue.name), Format.commas(tonumber(statue.coins) or 0)),
+			Text = string.format("%s · %s coins", tostring(statue.name), Format.commas(tonumber(statue.coins) or 0)),
 			ZIndex = 12,
 		}, row)
 		local remove = make("TextButton", {
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.fromScale(1, 0),
 			Size = UDim2.fromOffset(88, 30),
-			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
+			BackgroundColor3 = DANGER,
 			Font = FONT,
-			TextSize = 15,
+			TextSize = 14,
 			TextColor3 = WHITE,
 			Text = "Remove",
 			ZIndex = 12,
@@ -10299,6 +10335,138 @@ local function refreshPanelFields()
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
 end
 
+-- Settings (every player): the field of view, from the Settings button or O.
+-- The hands are refitted to it, so digging looks the same at any FOV.
+local SETTINGS_KEY = Enum.KeyCode.O
+local settingsButton = make("TextButton", {
+	Position = UDim2.fromOffset(12, 10),
+	Size = UDim2.fromOffset(0, 32),
+	AutomaticSize = Enum.AutomaticSize.X,
+	Font = FONT,
+	TextSize = 13,
+	TextColor3 = WHITE,
+	Text = "SETTINGS  <font color=\"#A8AEBE\">O</font>",
+	RichText = true,
+}, gui)
+glass(settingsButton, 16)
+make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, settingsButton)
+local settingsCard = make("Frame", {
+	Position = UDim2.fromOffset(12, 50),
+	Size = UDim2.fromOffset(300, 150),
+	Visible = false,
+	ZIndex = 15,
+}, gui)
+glass(settingsCard, 14, 0.08)
+make("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 14) }, settingsCard)
+local function settingsText(properties: { [string]: any }): TextLabel
+	local label = make("TextLabel", { BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 16 }, settingsCard)
+	for key, value in properties do (label :: any)[key] = value end
+	return label
+end
+settingsText({ Size = UDim2.new(1, 0, 0, 14), Font = FONT, TextSize = 12, TextColor3 = MUTED, Text = "SETTINGS" })
+settingsText({ Position = UDim2.fromOffset(0, 26), Size = UDim2.new(1, -50, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = "Field of view" })
+local fovValue = settingsText({ Position = UDim2.new(1, -50, 0, 26), Size = UDim2.fromOffset(50, 20), Font = FONT, TextSize = 15, TextColor3 = WHITE, TextXAlignment = Enum.TextXAlignment.Right, Text = "" })
+-- The slider: a track, its filled part and a knob, with a taller hit area.
+local fovSlider = make("TextButton", {
+	Position = UDim2.fromOffset(0, 54),
+	Size = UDim2.new(1, 0, 0, 28),
+	BackgroundTransparency = 1,
+	Text = "",
+	AutoButtonColor = false,
+	ZIndex = 16,
+}, settingsCard)
+local fovTrack = make("Frame", {
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.fromScale(0, 0.5),
+	Size = UDim2.new(1, 0, 0, 6),
+	BackgroundColor3 = WHITE,
+	BackgroundTransparency = 0.82,
+	BorderSizePixel = 0,
+	ZIndex = 16,
+}, fovSlider)
+rounded(fovTrack, 3)
+local fovFill = make("Frame", { Size = UDim2.fromScale(0.5, 1), BackgroundColor3 = SELECTED, BorderSizePixel = 0, ZIndex = 17 }, fovTrack)
+rounded(fovFill, 3)
+local fovKnob = make("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(18, 18),
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
+	ZIndex = 18,
+}, fovTrack)
+rounded(fovKnob, 9)
+local function settingsAction(text: string, x: number, colour: Color3): TextButton
+	local button = make("TextButton", {
+		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 96),
+		Size = UDim2.new(0.5, -4, 0, 30),
+		BackgroundColor3 = colour,
+		Font = FONT,
+		TextSize = 13,
+		TextColor3 = WHITE,
+		Text = text,
+		ZIndex = 16,
+	}, settingsCard)
+	rounded(button, 8)
+	return button
+end
+local fovReset = settingsAction("Reset", 0, BUTTON)
+local settingsDone = settingsAction("Done", 0.5, SELECTED)
+
+local function refreshFov()
+	local fov = FirstPerson.fieldOfView()
+	local fraction = (fov - FirstPerson.FOV_MIN) / (FirstPerson.FOV_MAX - FirstPerson.FOV_MIN)
+	fovFill.Size = UDim2.fromScale(fraction, 1)
+	fovKnob.Position = UDim2.fromScale(fraction, 0.5)
+	fovValue.Text = tostring(fov)
+end
+refreshFov()
+local function fovFromScreen(x: number)
+	local left, width = fovTrack.AbsolutePosition.X, math.max(1, fovTrack.AbsoluteSize.X)
+	local fraction = math.clamp((x - left) / width, 0, 1)
+	FirstPerson.setFieldOfView(FirstPerson.FOV_MIN + fraction * (FirstPerson.FOV_MAX - FirstPerson.FOV_MIN))
+	refreshFov()
+end
+local draggingFov = false
+fovSlider.InputBegan:Connect(function(input: InputObject)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		draggingFov = true
+		fovFromScreen(input.Position.X)
+	end
+end)
+UserInputService.InputChanged:Connect(function(input: InputObject)
+	if draggingFov and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		fovFromScreen(input.Position.X)
+	end
+end)
+UserInputService.InputEnded:Connect(function(input: InputObject)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		draggingFov = false
+	end
+end)
+fovReset.Activated:Connect(function()
+	FirstPerson.setFieldOfView(FirstPerson.FOV_DEFAULT)
+	refreshFov()
+end)
+
+local function settingsOpen(): boolean
+	return settingsCard.Visible and gui.Enabled
+end
+local function setSettingsOpen(show: boolean)
+	settingsCard.Visible = show
+	draggingFov = false
+	if show then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
+end
+settingsButton.Activated:Connect(function() setSettingsOpen(not settingsCard.Visible) end)
+settingsDone.Activated:Connect(function() setSettingsOpen(false) end)
+-- O toggles the settings in the game, unless the streamer bound O to a test gift.
+UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+	if processed or input.KeyCode ~= SETTINGS_KEY or not gui.Enabled or UserInputService:GetFocusedTextBox() then return end
+	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
+	if ok and type(bindings) == "table" and bindings[SETTINGS_KEY.Name] ~= nil then return end
+	setSettingsOpen(not settingsCard.Visible)
+end)
+
 -- The settings panel is hidden: the owner presses Y to open or close it.
 local isAdmin = false
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
@@ -10312,8 +10480,8 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	end
 end)
 RunService.RenderStepped:Connect(function()
-	-- First person locks the mouse; free it while the panel is open.
-	if panel.Visible then
+	-- First person locks the mouse; free it while the panel or settings are open.
+	if panel.Visible or settingsOpen() then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		UserInputService.MouseIconEnabled = true
 	end
@@ -10362,16 +10530,28 @@ RunService.RenderStepped:Connect(function(dt: number)
 	-- The hold counter takes the top-centre slot; the hand and gem stay unobscured.
 	stoneBox.Visible = phase ~= "Holding"
 	timerLabel.Visible = phase ~= "Holding"
+	winsBox.Position = UDim2.new(0.5, 0, 0, if phase == "Holding" then WINS_Y_HOLDING else WINS_Y)
+	-- The time takes the wins' place when the counter is hidden.
+	timerLabel.Position = UDim2.new(0.5, 0, 0, if winsBox.Visible then 154 else WINS_Y)
 	local now = workspace:GetServerTimeNow()
+	-- The 2X card shows while a caught diamond bird's bonus runs, and pops in.
+	local boostLeft = attr("BirdBoostUntil", 0) - now
+	local boosted = boostLeft > 0 and phase ~= "Holding"
+	if boosted and not boostTag.Visible then
+		boostScale.Scale = 1.4
+		TweenService:Create(boostScale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end
+	boostTag.Visible = boosted
+	if boosted then setText(boostTime, Format.duration(boostLeft)) end
 	local roundStart = attr("RoundStart", now)
-	setText(timerLabel, "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart))
+	setText(timerLabel, '<font color="#A8AEBE">TIME</font>   ' .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart))
 	setText(status, "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else ""))
 
 	if phase == "Holding" then
 		local elapsed = now - attr("HoldStart", now)
 		local shown = HoldTimer.display(elapsed, Config.HoldSeconds, Config.HoldCountFrom, Config.HoldSlowdown)
 		countdown.Visible = true
-		setText(countHolder, "💎 " .. tostring(attr("Holder", "")) .. " — HOLD IT!")
+		setText(countHolder, string.upper(tostring(attr("Holder", ""))) .. " IS HOLDING IT")
 		setText(countNumber, tostring(shown))
 		if shown ~= lastCount then
 			lastCount = shown
@@ -10389,8 +10569,8 @@ RunService.RenderStepped:Connect(function(dt: number)
 			banner.TextTransparency = 0
 		end
 		if phase == "Revealed" then
-			banner.Text = string.upper(Skin.words(attr("Skin", "stone")).gem) .. " UNCOVERED — FIND IT AND CLICK IT"
-			banner.TextTransparency = 0.25 + 0.25 * math.sin(now * 6)
+			banner.Text = string.upper(Skin.words(attr("Skin", "stone")).gem) .. " UNCOVERED  ·  FIND IT AND CLICK IT"
+			banner.TextTransparency = 0.15 + 0.15 * math.sin(now * 5)
 		end
 	end
 end)
@@ -10411,7 +10591,8 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 end)
 
 -- Digging: hold the dig button (left mouse / touch) and your hands tear
--- through the rock you aim at, about DigPerSecond rocks a second.
+-- through the rock you aim at, about DigPerSecond rocks a second: a hand lands
+-- four times a second and breaks a quarter of that each time (see FirstPerson).
 -- A separate full-viewport layer keeps the dot aligned with the camera ray,
 -- regardless of the HUD inset or the screen's aspect ratio.
 local aimGui = make("ScreenGui", {
@@ -10449,7 +10630,7 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	local phase = attr("Phase", "Digging")
 	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
 		and player:GetAttribute("InGame") == true and not LobbyView.isOpen()
-		and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
+		and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	aimDot.Visible = active
 	UserInputService.MouseIconEnabled = not active
@@ -10468,7 +10649,6 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	rockOutline.Enabled = stone
 end)
 local digging = false
-local digClock = 0
 local function isDigInput(input: InputObject): boolean
 	return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
 end
@@ -10482,7 +10662,6 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 			return
 		end
 		digging = true
-		digClock = 1
 	end
 end)
 UserInputService.InputEnded:Connect(function(input: InputObject)
@@ -10493,27 +10672,28 @@ end)
 UserInputService.WindowFocusReleased:Connect(function()
 	digging = false
 end)
-RunService.Heartbeat:Connect(function(dt: number)
+-- The rock this player is digging now, while the dig button is held: its key,
+-- or nil when there is nothing to dig.
+local function digTarget(): number?
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	local target = aimTarget
-	local allowed = digging and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
+	local allowed = digging and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
-	local key = if target then view:keyForPart(target) else nil
-	local onRock = allowed and root ~= nil and root:IsA("BasePart")
-		and key ~= nil and (root.Position - (target :: BasePart).Position).Magnitude <= 16
-	player:SetAttribute("DiggingRock", onRock == true)
-	if not allowed then
-		return
+	local key = if allowed and target then view:keyForPart(target) else nil
+	if key == nil or root == nil or not root:IsA("BasePart") or (root.Position - (target :: BasePart).Position).Magnitude > 16 then
+		return nil
 	end
-	digClock += dt
-	if digClock < 0.1 then
-		return
-	end
-	digClock = 0
+	return key
+end
+-- The hands swing while this is set; the rock breaks as each one lands.
+RunService.Heartbeat:Connect(function()
+	player:SetAttribute("DiggingRock", digTarget() ~= nil)
+end)
+FirstPerson.onStrike(function()
+	local key = digTarget()
 	local character = player.Character
-	local tool = character and character:FindFirstChildOfClass("Tool")
-	if tool == nil and onRock then
+	if key ~= nil and (character == nil or character:FindFirstChildOfClass("Tool") == nil) then
 		Request:FireServer("mine", key)
 	end
 end)
@@ -10534,13 +10714,13 @@ end)
             <string name="Source"><![CDATA[--!strict
 -- Flies the diamond bird (see the server's DiamondBird) smoothly on this
 -- client from the times the server gives, beats its wings, and shows the
--- "click the bird" call and the double-gifts countdown on the display.
+-- "click the bird" call on the display. The 2X card beside the stone count
+-- (in the client's display) shows while the bonus runs.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local BirdBonus = require(Shared:WaitForChild("BirdBonus"))
-local Format = require(Shared:WaitForChild("Format"))
 
 local BirdView = {}
 
@@ -10614,27 +10794,27 @@ function BirdView.start(gui: ScreenGui, State: Instance)
 	local call = Instance.new("TextLabel")
 	call.Name = "DiamondBird"
 	call.AnchorPoint = Vector2.new(0.5, 0)
-	call.Position = UDim2.new(0.5, 0, 0, 214)
-	call.Size = UDim2.fromOffset(0, 46)
+	call.Position = UDim2.new(0.5, 0, 0, 244)
+	call.Size = UDim2.fromOffset(0, 40)
 	call.AutomaticSize = Enum.AutomaticSize.X
-	call.BackgroundColor3 = Color3.fromRGB(28, 24, 40)
+	call.BackgroundColor3 = Color3.fromRGB(16, 18, 26)
 	call.BackgroundTransparency = 0.2
-	call.Font = Enum.Font.FredokaOne
-	call.TextSize = 30
-	call.TextColor3 = Color3.fromRGB(150, 240, 255)
+	call.Font = Enum.Font.GothamBold
+	call.TextSize = 20
+	call.TextColor3 = Color3.fromRGB(132, 212, 255)
 	call.Text = ""
 	call.Visible = false
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 14)
+	corner.CornerRadius = UDim.new(0, 20)
 	corner.Parent = call
 	local padding = Instance.new("UIPadding")
 	padding.PaddingLeft = UDim.new(0, 18)
 	padding.PaddingRight = UDim.new(0, 18)
 	padding.Parent = call
 	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 3
+	stroke.Thickness = 1.5
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Color = Color3.fromRGB(150, 240, 255)
+	stroke.Color = Color3.fromRGB(132, 212, 255)
 	stroke.Parent = call
 	call.Parent = gui
 
@@ -10658,15 +10838,9 @@ function BirdView.start(gui: ScreenGui, State: Instance)
 		end
 		local boostUntil = tonumber(State:GetAttribute("BirdBoostUntil")) or 0
 		local text = ""
-		if now < boostUntil then
-			text = string.format("💎 2X GIFTS  %s", Format.duration(boostUntil - now))
-			call.TextColor3 = Color3.fromRGB(255, 205, 70)
-			stroke.Color = Color3.fromRGB(255, 205, 70)
-			call.TextTransparency = 0
-		elseif waiting then
-			text = "💎 DIAMOND BIRD! CLICK IT FOR 2X GIFTS"
-			call.TextColor3 = Color3.fromRGB(150, 240, 255)
-			stroke.Color = Color3.fromRGB(150, 240, 255)
+		-- No call while a bonus runs: the 2X card beside the stone count shows it.
+		if waiting and now >= boostUntil then
+			text = "DIAMOND BIRD  ·  CLICK IT FOR 2X GIFTS"
 			call.TextTransparency = 0.2 + 0.2 * math.sin(now * 6)
 		end
 		if text ~= shown then
@@ -10686,8 +10860,14 @@ return BirdView
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
 -- First-person view with two hands in front of the camera (like the PC game).
--- The hands follow the camera, bob while walking and alternate reaching,
--- curling around stone and raking rubble back while digging.
+-- The hands follow the camera, bob while walking and take turns digging: each
+-- swing draws back, drives forward into the rock with the fingers clawed, and
+-- rakes the rubble down and back. The rock breaks when a hand lands (see
+-- FirstPerson.onStrike), so what you see and what you dig stay in step.
+--
+-- The hands are drawn small and close to the camera, so they never sink into
+-- the rock when you stand right against it, and they are refitted to the
+-- field of view (FirstPerson.setFieldOfView), so they look the same at any FOV.
 --
 -- Picking up the diamond: the gem flies from where it lay into your right hand,
 -- the hand lifts it up and the camera eases upward so the gem is framed
@@ -10705,6 +10885,17 @@ local GEM_SIZE = 1.05 -- studs across: about a third of the screen in the raised
 local FLY_SECONDS = 0.45 -- world position to hand
 local CAMERA_EASE = 0.7
 local HOLD_PITCH = math.rad(28) -- looking up, but still showing the peak below the gem
+local SWING_SECONDS = 0.25 -- one hand's swing; the server digs DigPerSecond / 4 rocks per strike
+local IMPACT = 0.5 -- how far through a swing the hand lands
+local VIEW_SCALE = 0.5 -- the hands are built at half size, half as far away: the same on screen
+local BASE_FOV = 70 -- the field of view the hands were framed for
+local PIVOT = Vector3.new(0, -0.92, -1.6) -- the hands' resting point in front of the camera
+
+FirstPerson.SWING_SECONDS = SWING_SECONDS
+FirstPerson.IMPACT = IMPACT
+FirstPerson.FOV_MIN = 50
+FirstPerson.FOV_MAX = 100
+FirstPerson.FOV_DEFAULT = BASE_FOV
 
 local function part(name: string, size: Vector3, colour: Color3, material: Enum.Material?): Part
 	local p = Instance.new("Part")
@@ -10725,10 +10916,64 @@ local function smooth(value: number): number
 	return value * value * (3 - 2 * value)
 end
 
+-- One hand's pose through a swing (0 to 1), as offsets from its resting pose:
+-- `inward` towards the middle of the screen, `up`, `back` towards the camera,
+-- the hand's pitch (radians, positive tips the fingers up) and how far the
+-- fingers curl (0 to 1). The pose starts and ends at rest, so swings chain
+-- without a jump. Pure, for tests.
+export type Pose = { inward: number, up: number, back: number, pitch: number, curl: number }
+local KEYS: { { at: number, pose: Pose } } = {
+	{ at = 0, pose = { inward = 0, up = 0, back = 0, pitch = 0, curl = 0.15 } },
+	-- Draw back and up, wrist cocked.
+	{ at = 0.34, pose = { inward = 0.03, up = 0.15, back = 0.16, pitch = math.rad(26), curl = 0.35 } },
+	-- Drive forward and a little down into the rock, fingers clawed.
+	{ at = IMPACT, pose = { inward = 0.2, up = -0.03, back = -0.6, pitch = math.rad(-16), curl = 0.92 } },
+	-- Rake the rubble down and back.
+	{ at = 0.8, pose = { inward = 0.13, up = -0.24, back = -0.18, pitch = math.rad(18), curl = 1 } },
+	{ at = 1, pose = { inward = 0, up = 0, back = 0, pitch = 0, curl = 0.15 } },
+}
+function FirstPerson.pose(t: number): Pose
+	t = math.clamp(t, 0, 1)
+	for i = 1, #KEYS - 1 do
+		local a, b = KEYS[i], KEYS[i + 1]
+		if t <= b.at then
+			local u = (t - a.at) / (b.at - a.at)
+			-- The drive into the rock speeds up to the impact; everything else eases.
+			u = if b.at == IMPACT then u * u else smooth(u)
+			local p, q = a.pose, b.pose
+			return {
+				inward = p.inward + (q.inward - p.inward) * u,
+				up = p.up + (q.up - p.up) * u,
+				back = p.back + (q.back - p.back) * u,
+				pitch = p.pitch + (q.pitch - p.pitch) * u,
+				curl = p.curl + (q.curl - p.curl) * u,
+			}
+		end
+	end
+	return KEYS[#KEYS].pose
+end
+
+-- How much bigger the hands must be drawn at `fov` to look the same on screen
+-- as at the field of view they were framed for.
+function FirstPerson.fovScale(fov: number): number
+	return math.tan(math.rad(fov) / 2) / math.tan(math.rad(BASE_FOV) / 2)
+end
+
+-- Where a point framed at the base field of view goes, in camera space, at a
+-- field of view `scale` times wider (see fovScale): the hands grow about their
+-- resting point, which moves out with the edge of the screen. Pure, for tests.
+function FirstPerson.fit(frame: CFrame, scale: number): CFrame
+	local p = frame.Position
+	local fitted = Vector3.new(p.X * scale, p.Y * scale, PIVOT.Z + (p.Z - PIVOT.Z) * scale) * VIEW_SCALE
+	return CFrame.new(fitted) * frame.Rotation
+end
+
 -- In the lobby the view is a normal third-person camera and the hands hide.
 local enabled = true
+local fieldOfView = BASE_FOV
 local function applyCamera()
 	local player = Players.LocalPlayer
+	local camera = workspace.CurrentCamera
 	if enabled then
 		player.CameraMode = Enum.CameraMode.LockFirstPerson
 		player.CameraMinZoomDistance = 0.5
@@ -10738,11 +10983,28 @@ local function applyCamera()
 		player.CameraMaxZoomDistance = 24
 		player.CameraMinZoomDistance = 8
 	end
+	if camera then camera.FieldOfView = if enabled then fieldOfView else BASE_FOV end
 end
 
 function FirstPerson.setEnabled(on: boolean)
 	enabled = on
 	applyCamera()
+end
+
+-- The player's field of view in the game (the lobby keeps the default).
+function FirstPerson.setFieldOfView(fov: number)
+	fieldOfView = math.clamp(math.floor(fov + 0.5), FirstPerson.FOV_MIN, FirstPerson.FOV_MAX)
+	applyCamera()
+end
+
+function FirstPerson.fieldOfView(): number
+	return fieldOfView
+end
+
+-- `callback` runs each time a digging hand lands on the rock.
+local strikeListeners: { () -> () } = {}
+function FirstPerson.onStrike(callback: () -> ())
+	table.insert(strikeListeners, callback)
 end
 
 function FirstPerson.start()
@@ -10777,7 +11039,16 @@ function FirstPerson.start()
 		table.insert(hands, { side = side, sleeve = sleeve, hand = hand, fingers = fingers, thumb = thumb })
 	end
 	local rigFrames: { CFrame } = table.create(#rigParts, CFrame.identity)
+	local baseSizes: { Vector3 } = {}
+	for i, p in rigParts do baseSizes[i] = p.Size end
 	local skinColour = SKIN_FALLBACK
+	-- The hands are resized only when the field of view changes.
+	local fitScale = -1
+	local function refit(scale: number)
+		if math.abs(scale - fitScale) < 1e-4 then return end
+		fitScale = scale
+		for i, p in rigParts do p.Size = baseSizes[i] * (scale * VIEW_SCALE) end
+	end
 
 	local State = ReplicatedStorage:WaitForChild("DiamondRushState")
 	local DiamondShape = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("DiamondShape"))
@@ -10806,7 +11077,8 @@ function FirstPerson.start()
 	-- The held gem: anchored facets moved in one call each frame (no welds).
 	-- In the haystack skin it is a needle (see Skin).
 	local gemKind = if State:GetAttribute("Skin") == "hay" then "needle" else "diamond"
-	local gem = DiamondShape.build(GEM_SIZE, "HeldDiamond", gemKind)
+	local gemScale = VIEW_SCALE
+	local gem = DiamondShape.build(GEM_SIZE * gemScale, "HeldDiamond", gemKind)
 	local core = part("Core", Vector3.new(0.1, 0.1, 0.1), Color3.new(1, 1, 1))
 	core.Transparency = 1
 	core.Parent = gem.model
@@ -10834,17 +11106,21 @@ function FirstPerson.start()
 	outline.OutlineTransparency = 0.35
 	outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	outline.Parent = gem.model
-	-- A reskin rebuilds the held gem, carrying its light, sparkles and outline over.
-	State:GetAttributeChangedSignal("Skin"):Connect(function()
-		local kind = if State:GetAttribute("Skin") == "hay" then "needle" else "diamond"
-		if kind == gemKind then return end
+	-- A reskin, or a new field of view, rebuilds the held gem, carrying its
+	-- light, sparkles and outline over.
+	local function rebuildGem(kind: string, scale: number)
+		if kind == gemKind and math.abs(scale - gemScale) < 1e-4 then return end
 		gemKind = kind
+		gemScale = scale
 		local old = gem
-		gem = DiamondShape.build(GEM_SIZE, "HeldDiamond", kind)
+		gem = DiamondShape.build(GEM_SIZE * scale, "HeldDiamond", kind)
 		core.Parent = gem.model
 		outline.Parent = gem.model
 		gem.model.Parent = old.model.Parent
 		old.model:Destroy()
+	end
+	State:GetAttributeChangedSignal("Skin"):Connect(function()
+		rebuildGem(if State:GetAttribute("Skin") == "hay" then "needle" else "diamond", gemScale)
 	end)
 
 	local hiddenArms: { [BasePart]: number } = {}
@@ -10904,10 +11180,11 @@ function FirstPerson.start()
 		end
 	end)
 
-	local cycle = 1
-	local punchSide = 1
+	local cycle = 1 -- how far through the current swing (1 = at rest)
+	local swingSide = 1 -- the hand swinging now; the hands take turns
+	local struck = true -- whether this swing has landed yet
+	local kick = 0 -- a small jolt through both hands as one lands
 	local bob = 0
-	local digBlend = 0
 	local lift = 0 -- 0 = digging pose, 1 = diamond raised high
 
 	-- Position the hands after both Roblox's camera and our hold-camera update.
@@ -10921,9 +11198,13 @@ function FirstPerson.start()
 			sparkles.Enabled = false
 			restoreArms()
 			hideWorld(false)
+			cycle, struck = 1, true
 			return
 		end
 		rig.Parent = camera
+		if camera.FieldOfView ~= fieldOfView then camera.FieldOfView = fieldOfView end
+		local scale = FirstPerson.fovScale(camera.FieldOfView)
+		refit(scale)
 		-- Scriptable cameras bypass the normal first-person transparency controller.
 		-- Hide the real limbs so they cannot float above the custom hands.
 		for _, limb in character:GetChildren() do
@@ -10948,24 +11229,31 @@ function FirstPerson.start()
 		end
 		local moving = humanoid.MoveDirection.Magnitude > 0.1 and humanoid.FloorMaterial ~= Enum.Material.Air
 		bob += dt * (if moving then 9 else 2)
-		local sway = if moving then 0.05 else 0.015
+		-- Walking sways the hands; digging steadies them.
+		local sway = if moving then 0.04 else 0.012
 		local holding = isHolding()
 		local digging = player:GetAttribute("DiggingRock") == true and not holding
-		digBlend += ((if digging then 1 else 0) - digBlend) * (1 - math.exp(-dt * 14))
+		-- A swing always finishes once begun, so letting go never snaps the
+		-- hand back; the next one starts, with the other hand, while you dig.
 		if holding then
-			cycle = 1
-		elseif cycle < 1 then
-			cycle = math.min(1, cycle + dt / 0.46)
-		elseif digging then
-			cycle = 0
-			punchSide = -punchSide
+			cycle, struck = 1, true
+		else
+			if cycle >= 1 and digging then
+				cycle, struck = 0, false
+				swingSide = -swingSide
+			end
+			if cycle < 1 then
+				cycle = math.min(1, cycle + dt / SWING_SECONDS)
+				if not struck and cycle >= IMPACT then
+					struck = true
+					kick = 1
+					if digging then
+						for _, callback in strikeListeners do task.spawn(callback) end
+					end
+				end
+			end
 		end
-		-- Wind up, reach quickly into the stone, rake down, then pull the rubble back.
-		local wind = smooth(cycle / 0.18) * (1 - smooth((cycle - 0.18) / 0.16))
-		local reach = smooth((cycle - 0.18) / 0.20)
-		local pull = smooth((cycle - 0.48) / 0.52)
-		local extension = reach * (1 - pull) * digBlend
-		local scoop = math.sin(math.clamp((cycle - 0.38) / 0.62, 0, 1) * math.pi) * digBlend
+		kick = math.max(0, kick - dt * 9)
 		lift += ((if holding then 1 else 0) - lift) * (1 - math.exp(-dt * 8))
 		hideWorld(holding)
 		local worldLight = worldDiamond:FindFirstChildOfClass("PointLight")
@@ -10976,37 +11264,45 @@ function FirstPerson.start()
 			if worldSparkles and worldSparkles:IsA("ParticleEmitter") then worldSparkles.Enabled = false end
 		end
 
+		-- Everything below is framed in camera space at the base field of view,
+		-- then fitted to the camera (see FirstPerson.fit).
 		local index = 0
 		local function put(frame: CFrame)
 			index += 1
-			rigFrames[index] = frame
+			rigFrames[index] = camera.CFrame * FirstPerson.fit(frame, scale)
 		end
-		local base = camera.CFrame * CFrame.new(math.sin(bob * 0.5) * sway * 0.4, -0.92 + math.sin(bob) * sway * 0.45, -1.6)
+		local jolt = kick * kick * 0.035
+		local base = CFrame.new(PIVOT + Vector3.new(math.sin(bob * 0.5) * sway * 0.4, math.sin(bob) * sway * 0.45 - jolt, jolt))
+		local swing = FirstPerson.pose(cycle)
+		-- The resting hand braces a little while the other one drives in.
+		local brace = math.sin(math.clamp(cycle / 0.8, 0, 1) * math.pi)
 		local palm = CFrame.identity
 		for _, h in hands do
-			local active = if h.side == punchSide then 1 - lift else 0
-			local hit = extension * active
-			local rake = scoop * active
-			local prep = wind * digBlend * active
-			local support = if h.side ~= punchSide then extension * (1 - lift) else 0
-			local normal = base * CFrame.new(h.side * (0.58 - hit * 0.24), hit * 0.27 - rake * 0.19 + support * 0.05, -hit * 0.62 + prep * 0.12 + rake * 0.16 - support * 0.08)
-				* CFrame.Angles(math.rad(10 - hit * 22 + rake * 34 + prep * 12), math.rad(-h.side * (8 + hit * 12)), math.rad(h.side * (rake * 16 - hit * 8)))
+			local active = h.side == swingSide
+			local p = if active then swing else nil
+			local inward = if p then p.inward else 0
+			local up = if p then p.up else -0.04 * brace
+			local back = if p then p.back else 0.07 * brace
+			local pitch = if p then p.pitch else math.rad(-4) * brace
+			local normal = base * CFrame.new(h.side * (0.58 - inward * (1 - lift)), up * (1 - lift), back * (1 - lift))
+				* CFrame.Angles(math.rad(10) + pitch * (1 - lift), math.rad(-h.side * (8 + inward * 50)), math.rad(-h.side * inward * 30))
 			-- The right hand rises to the right of centre, under the countdown;
 			-- the left hand drops out of view.
 			local raised = if h.side == 1
-				then camera.CFrame * CFrame.new(0.5, -0.62, -1.7) * CFrame.Angles(math.rad(34), math.rad(-12), math.rad(-6))
+				then CFrame.new(0.5, -0.62, -1.7) * CFrame.Angles(math.rad(34), math.rad(-12), math.rad(-6))
 				else normal * CFrame.new(0, -1.6, 0.3)
 			local arm = normal:Lerp(raised, smooth(lift))
 			put(arm * CFrame.new(0, 0, 0.46))
 			local handFrame = arm * CFrame.new(0, 0, -0.35)
 			put(handFrame)
 			if h.side == 1 then palm = handFrame end
-			local grip = math.max(if h.side == 1 then lift else 0, rake * 0.85)
+			local curl = if p then p.curl else 0.15
+			local grip = math.max(if h.side == 1 then lift else 0, curl * (1 - lift))
 			for fingerIndex, _ in h.fingers do
-				local curl = grip * (0.85 + fingerIndex * 0.035)
-				local joint = handFrame * CFrame.new((fingerIndex - 2.5) * 0.09, 0, -0.20) * CFrame.Angles(math.rad(-46 * curl), 0, 0)
+				local bend = grip * (0.85 + fingerIndex * 0.035)
+				local joint = handFrame * CFrame.new((fingerIndex - 2.5) * 0.09, 0, -0.20) * CFrame.Angles(math.rad(-46 * bend), 0, 0)
 				put(joint * CFrame.new(0, 0, -0.07))
-				put(joint * CFrame.new(0, 0, -0.14) * CFrame.Angles(math.rad(-54 * curl), 0, 0) * CFrame.new(0, 0, -0.065))
+				put(joint * CFrame.new(0, 0, -0.14) * CFrame.Angles(math.rad(-54 * bend), 0, 0) * CFrame.new(0, 0, -0.065))
 			end
 			put(handFrame * CFrame.new(-h.side * 0.17, 0.015, -0.08)
 				* CFrame.Angles(math.rad(-35 * grip), math.rad(h.side * 20 * grip), math.rad(h.side * (15 + 35 * grip))))
@@ -11014,10 +11310,11 @@ function FirstPerson.start()
 		workspace:BulkMoveTo(rigParts, rigFrames, Enum.BulkMoveMode.FireCFrameChanged)
 
 		if holding then
+			rebuildGem(gemKind, scale * VIEW_SCALE)
 			local t = os.clock() - holdClock
 			-- Upright in the world, crown tipped towards you, slowly turning.
 			local spin = t * 0.9
-			local seat = palm * CFrame.new(0, 0.17 + GEM_SIZE * 0.6, -0.05)
+			local seat = camera.CFrame * FirstPerson.fit(palm * CFrame.new(0, 0.17 + GEM_SIZE * 0.6, -0.05), scale)
 			local target = CFrame.new(seat.Position) * CFrame.Angles(0, holdYaw, 0) * CFrame.Angles(math.rad(20), 0, 0) * CFrame.Angles(0, spin, 0)
 			local frame = target
 			local from = gemFrom
@@ -11047,24 +11344,154 @@ return FirstPerson
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
--- Local, non-physical spectacle. At most two sequences / 80 parts at once.
+-- Gift effects: a hand-made sequence for each gift tier, played on every
+-- client and never physical (nothing collides, is touched or blocks a click).
+--
+--   1  SPARK BURST       (1+ coins)       a crisp golden pop and a puff of dust
+--   2  SHOCKWAVE         (10+ coins)      a ground shockwave, sparks and flying rock
+--   3  DIAMOND FRACTURE  (100+ coins)     glowing cracks, then crystals burst out and shatter
+--   4  ORBITAL STRIKE    (500+ coins)     a target locks on, a beam fires from the sky
+--   5  GALAXY COLLAPSE   (1,000+ coins)   a swirling black hole pulls in stars, then goes nova
+--   6  COSMIC BURST      (10,000+ coins)  the sky darkens, meteors fall, then a comet hits
+--
+-- Built from Roblox's own particle textures (sparkles, fire, smoke, embers and
+-- shockwave rings), neon parts, trails, lights, a gentle camera shake and a
+-- brief colour grade. At most two sequences play at once, each with a capped
+-- number of parts, lights and particles, and every piece is gone within a few
+-- seconds.
+--
+-- Gifts that add stone have their own six, in greens, aimed at the summit:
+--   1  PEBBLE DROP       pebbles fall onto the peak with puffs of dust
+--   2  ROCKSLIDE         a ring of rocks rises out of the slopes and tumbles in
+--   3  STONE SURGE       green veins converge, stone pillars thrust up and sink in
+--   4  BOULDER BARRAGE   boulders are hurled in from far away and crash home
+--   5  STONE CYCLONE     rocks from the valley spiral up into a cyclone, then slam down
+--   6  MOUNTAIN RISING   the ground rumbles, a colossal boulder descends, pulling
+--                        rock up from all round, and lands with a blast of light
+local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Format = require(Shared:WaitForChild("Format"))
+
 local GiftEffects = {}
-local colours = { Color3.fromRGB(255, 208, 112), Color3.fromRGB(255, 137, 55), Color3.fromRGB(110, 245, 255), Color3.fromRGB(70, 230, 255), Color3.fromRGB(156, 90, 255), Color3.fromRGB(255, 225, 120) }
-local titles = { "SPARK BURST", "SHOCKWAVE", "DIAMOND FRACTURE", "ORBITAL STRIKE", "GALAXY COLLAPSE", "COSMIC BURST" }
+
+-- Particle textures that ship with every Roblox client.
+local TEXTURES = {
+	spark = "rbxasset://textures/particles/sparkles_main.dds",
+	fire = "rbxasset://textures/particles/fire_main.dds",
+	smoke = "rbxasset://textures/particles/smoke_main.dds",
+	ember = "rbxasset://textures/particles/fire_sparks_main.dds",
+	ring = "rbxasset://textures/particles/explosion01_shockwave_main.dds",
+	glow = "rbxasset://textures/particles/forcefield_glow_main.dds",
+}
+GiftEffects.TEXTURES = TEXTURES
+GiftEffects.TITLES = { "SPARK BURST", "SHOCKWAVE", "DIAMOND FRACTURE", "ORBITAL STRIKE", "GALAXY COLLAPSE", "COSMIC BURST" }
+GiftEffects.PART_LIMIT = 70 -- parts one sequence may create
+GiftEffects.LIGHT_LIMIT = 3 -- lights one sequence may create
+GiftEffects.LIFETIME = 9 -- seconds before a sequence is cleared, whatever happens
+
+local COLOURS = {
+	Color3.fromRGB(255, 208, 112), -- gold
+	Color3.fromRGB(255, 140, 60), -- orange
+	Color3.fromRGB(110, 235, 255), -- ice blue
+	Color3.fromRGB(90, 190, 255), -- sky blue
+	Color3.fromRGB(168, 96, 255), -- violet
+	Color3.fromRGB(255, 220, 130), -- white gold
+}
+local GREEN = Color3.fromRGB(90, 235, 170)
+-- Gifts that add stone (the griefers' gifts) get their own six sequences, in greens.
+GiftEffects.ADD_TITLES = { "PEBBLE DROP", "ROCKSLIDE", "STONE SURGE", "BOULDER BARRAGE", "STONE CYCLONE", "MOUNTAIN RISING" }
+local ADD_COLOURS = {
+	Color3.fromRGB(150, 255, 200), -- mint
+	Color3.fromRGB(90, 235, 170), -- green
+	Color3.fromRGB(60, 225, 140), -- emerald
+	Color3.fromRGB(120, 230, 90), -- moss
+	Color3.fromRGB(70, 235, 200), -- jade
+	Color3.fromRGB(140, 255, 120), -- bright green
+}
+local WHITE = Color3.new(1, 1, 1)
+local PINK = Color3.fromRGB(255, 120, 210)
+local SMOKE_DARK = Color3.fromRGB(70, 64, 60)
+local SMOKE_LIGHT = Color3.fromRGB(150, 142, 134)
+-- Flying rock and dust match the mountain's skin.
+local ROCK = {
+	stone = { colour = Color3.fromRGB(118, 114, 108), dust = Color3.fromRGB(160, 152, 142), material = Enum.Material.Slate },
+	hay = { colour = Color3.fromRGB(214, 178, 92), dust = Color3.fromRGB(226, 202, 140), material = Enum.Material.Fabric },
+}
+
 local active: { { folder: Folder, tier: number } } = {}
 local label: TextLabel? = nil
+local state: Instance? = nil
 local bannerSerial = 0
 local bannerTier = 0
 local bannerTween: Tween? = nil
 local random = Random.new()
 
-function GiftEffects.start(parent: Instance)
+-- Camera shake: a small decaying wobble added after the camera has moved, so
+-- it never builds up and the first-person hands follow it.
+local shake = 0
+local shaking = false
+local shakeTime = 0
+local function addShake(degrees: number)
+	shake = math.max(shake, degrees)
+	if shaking then return end
+	shaking = true
+	RunService:BindToRenderStep("DiamondRushGiftShake", Enum.RenderPriority.Camera.Value + 1, function(dt: number)
+		local camera = workspace.CurrentCamera
+		if shake < 0.01 or camera == nil then
+			shake = 0
+			shaking = false
+			RunService:UnbindFromRenderStep("DiamondRushGiftShake")
+			return
+		end
+		shakeTime += dt
+		local t = shakeTime * 17
+		local a = math.rad(shake) * 1.5 -- math.noise stays within about ±0.5
+		camera.CFrame *= CFrame.Angles(math.noise(t, 0.3) * a, math.noise(t, 7.1) * a, math.noise(t, 13.7) * a * 0.5)
+		shake *= math.exp(-dt * 3.5)
+	end)
+end
+GiftEffects.shaking = function(): boolean return shaking end
+
+-- A brief colour grade over the whole screen: up to `peak` and back.
+local function grade(peak: { [string]: any }, rise: number, hold: number, fall: number)
+	local effect = Instance.new("ColorCorrectionEffect")
+	effect.Name = "GiftGrade"
+	effect.Parent = Lighting
+	TweenService:Create(effect, TweenInfo.new(rise, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), peak):Play()
+	task.delay(rise + hold, function()
+		TweenService:Create(effect, TweenInfo.new(fall, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+			Brightness = 0, Contrast = 0, Saturation = 0, TintColor = WHITE,
+		}):Play()
+	end)
+	Debris:AddItem(effect, rise + hold + fall + 0.1)
+end
+
+local function sequence(...: Color3): ColorSequence
+	local colours = { ... }
+	if #colours == 1 then return ColorSequence.new(colours[1]) end
+	local keys = {}
+	for i, colour in colours do
+		table.insert(keys, ColorSequenceKeypoint.new((i - 1) / (#colours - 1), colour))
+	end
+	return ColorSequence.new(keys)
+end
+
+local function curve(...: number): NumberSequence
+	local values = { ... }
+	if #values == 1 then return NumberSequence.new(values[1]) end
+	local keys = {}
+	for i, value in values do
+		table.insert(keys, NumberSequenceKeypoint.new((i - 1) / (#values - 1), value))
+	end
+	return NumberSequence.new(keys)
+end
+
+function GiftEffects.start(parent: Instance, gameState: Instance?)
+	state = gameState
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "GiftEffects"
 	gui.ResetOnSpawn = false
@@ -11076,17 +11503,36 @@ function GiftEffects.start(parent: Instance)
 	text.Position = UDim2.fromScale(0.5, 0.30)
 	text.Size = UDim2.new(0.82, 0, 0, 64)
 	text.BackgroundTransparency = 1
-	text.Font = Enum.Font.GothamBold
+	text.Font = Enum.Font.GothamBlack
 	text.TextScaled = true
 	text.TextStrokeTransparency = 0.35
 	text.TextTransparency = 1
 	local limit = Instance.new("UITextSizeConstraint")
 	limit.MinTextSize = 12
-	limit.MaxTextSize = 23
+	limit.MaxTextSize = 24
 	limit.Parent = text
 	text.Parent = gui
 	label = text
 end
+
+-- A craggy lump of rock: its parts and where each sits in the lump.
+type Lump = { parts: { Part }, offsets: { CFrame } }
+
+export type Particles = {
+	texture: string,
+	count: number,
+	colour: ColorSequence,
+	size: NumberSequence,
+	transparency: NumberSequence?,
+	lifetime: { number },
+	speed: { number },
+	spread: number?,
+	drag: number?,
+	acceleration: Vector3?,
+	glow: number?, -- light emission, 0 to 1
+	spin: number?, -- degrees a second
+	flat: boolean?, -- lies flat on the ground (shockwave rings)
+}
 
 function GiftEffects.play(data: any)
 	if typeof(data.position) ~= "Vector3" or type(data.coins) ~= "number" then return end
@@ -11106,273 +11552,848 @@ function GiftEffects.play(data: any)
 	folder.Name = "GiftBurst"
 	folder.Parent = workspace
 	table.insert(active, { folder = folder, tier = tier })
-	Debris:AddItem(folder, 8)
-	local colour = if data.adding then Color3.fromRGB(90, 235, 170) else colours[tier]
+	Debris:AddItem(folder, GiftEffects.LIFETIME)
+	local colour = if data.adding then ADD_COLOURS[tier] else COLOURS[tier]
 	local centre: Vector3 = data.position
-	local allocated = 0
-	local function piece(shape: Enum.PartType, size: Vector3, frame: CFrame): Part?
-		if folder.Parent == nil or allocated >= 40 then return nil end
-		allocated += 1
+	local skin = if state then state:GetAttribute("Skin") else nil
+	local rock = ROCK[if type(skin) == "string" and ROCK[skin] then skin else "stone"]
+
+	local made, lights = 0, 0
+	local function alive(): boolean
+		return folder.Parent ~= nil
+	end
+	local function after(delay: number, callback: () -> ())
+		task.delay(delay, function()
+			if alive() then callback() end
+		end)
+	end
+	local function part(shape: Enum.PartType, size: Vector3, frame: CFrame, tint: Color3, material: Enum.Material?): Part?
+		if not alive() or made >= GiftEffects.PART_LIMIT then return nil end
+		made += 1
 		local p = Instance.new("Part")
 		p.Shape = shape
 		p.Size = size
 		p.CFrame = frame
-		p.Color = colour
-		p.Material = Enum.Material.Neon
+		p.Color = tint
+		p.Material = material or Enum.Material.Neon
 		p.Anchored = true
 		p.CanCollide = false
 		p.CanTouch = false
 		p.CanQuery = false
 		p.CastShadow = false
+		p.TopSurface = Enum.SurfaceType.Smooth
+		p.BottomSurface = Enum.SurfaceType.Smooth
 		p.Parent = folder
-		p.Destroying:Connect(function() allocated -= 1 end)
 		return p
 	end
-	local function animate(p: Part, seconds: number, goal: any)
-		TweenService:Create(p, TweenInfo.new(seconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), goal):Play()
+	local function animate(p: Instance, seconds: number, goal: { [string]: any }, style: Enum.EasingStyle?, direction: Enum.EasingDirection?)
+		TweenService:Create(p, TweenInfo.new(seconds, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out), goal):Play()
+	end
+	local function fade(p: Instance, seconds: number, goal: { [string]: any })
+		animate(p, seconds, goal)
 		Debris:AddItem(p, seconds + 0.05)
 	end
-	-- Each moving element owns one connection, released immediately on cleanup.
-	local function motion(p: Part, duration: number, update: (number) -> ())
+	-- One connection per moving piece, released when it ends or the sequence is cleared.
+	local function motion(duration: number, update: (number) -> (), finish: (() -> ())?)
 		local elapsed = 0
 		local connection: RBXScriptConnection? = nil
-		connection = RunService.RenderStepped:Connect(function(dt)
+		connection = RunService.RenderStepped:Connect(function(dt: number)
 			elapsed += dt
 			local t = math.clamp(elapsed / duration, 0, 1)
-			update(t)
-			if t >= 1 then p:Destroy() end
-		end)
-		p.Destroying:Connect(function()
-			if connection then connection:Disconnect(); connection = nil end
-		end)
-	end
-	local function ring(at: Vector3, radius: number, delay: number)
-		task.delay(delay, function()
-			local root = piece(Enum.PartType.Block, Vector3.one * 0.1, CFrame.new(at + Vector3.new(0, 0.15, 0)))
-			if root == nil then return end
-			root.Transparency = 1
-			local points = {}
-			local beams = {}
-			for i = 1, 16 do
-				local point = Instance.new("Attachment")
-				point.Parent = root
-				table.insert(points, point)
+			if alive() then update(t) end
+			if t >= 1 or not alive() then
+				if connection then connection:Disconnect(); connection = nil end
+				if alive() and finish then finish() end
 			end
-			for i, point in points do
-				local beam = Instance.new("Beam")
-				beam.Attachment0 = point
-				beam.Attachment1 = points[i % #points + 1]
-				beam.FaceCamera = true
-				beam.Color = ColorSequence.new(colour:Lerp(Color3.new(1, 1, 1), 0.4))
-				beam.LightEmission = 1
-				beam.Parent = root
-				table.insert(beams, beam)
-			end
-			for i, point in points do
-				local angle = i * math.pi * 2 / #points
-				local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
-				point.Position = direction * 0.5
-				TweenService:Create(point, TweenInfo.new(0.8, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Position = direction * radius }):Play()
-			end
-			for _, beam in beams do
-				beam.Width0 = 0.3 + tier * 0.08
-				beam.Width1 = beam.Width0
-				TweenService:Create(beam, TweenInfo.new(0.8), { Width0 = 0, Width1 = 0 }):Play()
-			end
-			Debris:AddItem(root, 0.85)
 		end)
 	end
-	local function pulse(at: Vector3, radius: number)
-		ring(at, radius, 0)
-		if tier >= 2 then ring(at, radius * 0.8, 0.13) end
-		local orb = piece(Enum.PartType.Ball, Vector3.one, CFrame.new(at))
-		if orb then
-			orb.Color = Color3.new(1, 0.94, 0.8)
-			orb.Transparency = 0.35
-			animate(orb, 0.3, { Size = Vector3.one * math.min(radius, 10), Transparency = 1 })
+	local function light(holder: Instance, tint: Color3, range: number, brightness: number, seconds: number)
+		if lights >= GiftEffects.LIGHT_LIMIT then return end
+		lights += 1
+		local glow = Instance.new("PointLight")
+		glow.Color = tint
+		glow.Range = range
+		glow.Brightness = brightness
+		glow.Shadows = false
+		glow.Parent = holder
+		animate(glow, seconds, { Brightness = 0 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	end
+	-- Particles come from attachments on one invisible anchor at the origin.
+	local anchor = part(Enum.PartType.Block, Vector3.one * 0.2, CFrame.identity, WHITE) :: Part
+	anchor.Transparency = 1
+	local function emitter(spec: Particles, holder: Instance): ParticleEmitter
+		local particles = Instance.new("ParticleEmitter")
+		particles.Texture = spec.texture
+		particles.Color = spec.colour
+		particles.Size = spec.size
+		particles.Transparency = spec.transparency or curve(0, 1)
+		particles.Lifetime = NumberRange.new(spec.lifetime[1], spec.lifetime[2])
+		particles.Speed = NumberRange.new(spec.speed[1], spec.speed[2])
+		local spread = spec.spread or 180
+		particles.SpreadAngle = Vector2.new(spread, spread)
+		particles.Drag = spec.drag or 0
+		particles.Acceleration = spec.acceleration or Vector3.zero
+		particles.LightEmission = spec.glow or 1
+		particles.LightInfluence = if (spec.glow or 1) > 0 then 0 else 1
+		particles.Rotation = NumberRange.new(0, 360)
+		local spin = spec.spin or 0
+		particles.RotSpeed = NumberRange.new(-spin, spin)
+		particles.EmissionDirection = Enum.NormalId.Top
+		if spec.flat then particles.Orientation = Enum.ParticleOrientation.VelocityPerpendicular end
+		particles.Enabled = false
+		particles.Parent = holder
+		return particles
+	end
+	-- A point in the world to hang particles or a light on.
+	local function point(at: Vector3, seconds: number): Attachment
+		local spot = Instance.new("Attachment")
+		spot.Position = at
+		spot.Parent = anchor
+		Debris:AddItem(spot, seconds)
+		return spot
+	end
+	local function burst(at: Vector3, spec: Particles)
+		if not alive() then return end
+		emitter(spec, point(at, spec.lifetime[2] + 0.2)):Emit(spec.count)
+	end
+	-- A shockwave ring that races out flat across the ground.
+	local function shockwave(at: Vector3, radius: number, tint: Color3, seconds: number)
+		burst(at + Vector3.new(0, 0.4, 0), {
+			texture = TEXTURES.ring, count = 1, colour = sequence(WHITE, tint),
+			size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.35, radius * 1.5), NumberSequenceKeypoint.new(1, radius * 2) }),
+			transparency = curve(0, 0.2, 1), lifetime = { seconds, seconds }, speed = { 0.01, 0.01 }, spread = 0, flat = true,
+		})
+	end
+	local function flash(at: Vector3, size: number, tint: Color3, seconds: number)
+		local orb = part(Enum.PartType.Ball, Vector3.one * 0.4, CFrame.new(at), WHITE)
+		if orb == nil then return end
+		orb.Transparency = 0.05
+		fade(orb, seconds, { Size = Vector3.one * size, Transparency = 1, Color = tint })
+	end
+	local function sparks(at: Vector3, count: number, tint: Color3, power: number)
+		burst(at, {
+			texture = TEXTURES.spark, count = count, colour = sequence(WHITE, tint), size = curve(0.55, 0.35, 0),
+			lifetime = { 0.45, 1 }, speed = { 6 * power, 14 * power }, drag = 3.5, acceleration = Vector3.new(0, -14, 0), spin = 200,
+		})
+	end
+	local function dust(at: Vector3, count: number, size: number)
+		burst(at, {
+			texture = TEXTURES.smoke, count = count, colour = sequence(rock.dust), size = curve(size, size * 2.6),
+			transparency = curve(0.35, 0.6, 1), lifetime = { 0.9, 1.5 }, speed = { 3, 7 }, spread = 80, drag = 2.5,
+			acceleration = Vector3.new(0, 1.5, 0), glow = 0, spin = 40,
+		})
+	end
+	local function embers(at: Vector3, count: number, power: number)
+		burst(at, {
+			texture = TEXTURES.ember, count = count, colour = sequence(Color3.fromRGB(255, 240, 200), Color3.fromRGB(255, 150, 60), Color3.fromRGB(200, 60, 20)),
+			size = curve(0.45, 0.3, 0), lifetime = { 0.8, 1.6 }, speed = { 10 * power, 22 * power }, spread = 55, drag = 1.5,
+			acceleration = Vector3.new(0, -22, 0), spin = 120,
+		})
+	end
+	local function fireball(at: Vector3, count: number, size: number, tint: Color3)
+		burst(at, {
+			texture = TEXTURES.fire, count = count, colour = sequence(WHITE, tint, Color3.fromRGB(255, 110, 40)), size = curve(size, size * 2.2, size * 1.6),
+			transparency = curve(0.1, 0.35, 1), lifetime = { 0.45, 0.9 }, speed = { size * 3, size * 6 }, drag = 5, glow = 0.85, spin = 90,
+		})
+	end
+	local function smokeColumn(at: Vector3, count: number, size: number, seconds: number)
+		burst(at, {
+			texture = TEXTURES.smoke, count = count, colour = sequence(SMOKE_DARK, SMOKE_LIGHT), size = curve(size, size * 2.4),
+			transparency = curve(0.25, 0.5, 1), lifetime = { seconds * 0.7, seconds }, speed = { size * 1.4, size * 2.6 }, spread = 32,
+			drag = 1.4, acceleration = Vector3.new(0, 2, 0), glow = 0, spin = 25,
+		})
+	end
+	-- Chunks of rock (or hay) thrown out of the crater, tumbling as they fall.
+	local function chunks(at: Vector3, count: number, power: number)
+		for _ = 1, count do
+			local size = random:NextNumber(0.35, 0.75) * math.sqrt(power)
+			local chunk = part(Enum.PartType.Block, Vector3.new(size, size * random:NextNumber(0.6, 1), size), CFrame.new(at), rock.colour:Lerp(rock.dust, random:NextNumber(0, 0.5)), rock.material)
+			if chunk == nil then return end
+			local angle = random:NextNumber(0, math.pi * 2)
+			local velocity = Vector3.new(math.cos(angle) * random:NextNumber(5, 11) * power, random:NextNumber(10, 18) * math.sqrt(power), math.sin(angle) * random:NextNumber(5, 11) * power)
+			local spin = Vector3.new(random:NextNumber(-12, 12), random:NextNumber(-12, 12), random:NextNumber(-12, 12))
+			local duration = random:NextNumber(0.9, 1.3)
+			motion(duration, function(t)
+				local s = t * duration
+				local position = at + velocity * s + Vector3.new(0, -30 * s * s, 0)
+				chunk.CFrame = CFrame.new(position) * CFrame.Angles(spin.X * s, spin.Y * s, spin.Z * s)
+				chunk.Transparency = math.clamp((t - 0.7) / 0.3, 0, 1)
+			end, function() chunk:Destroy() end)
 		end
-		for i = 1, 4 + tier do
-			local angle = i * math.pi * 2 / (4 + tier)
-			local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
-			local shard = piece(Enum.PartType.Block, Vector3.new(0.16, 0.16, 0.55), CFrame.new(at))
-			if shard then
-				local height = random:NextNumber(2, 6 + tier)
-				local spin = random:NextNumber(-8, 8)
-				motion(shard, random:NextNumber(0.6, 1.1), function(t)
-					local position = at + direction * radius * t + Vector3.new(0, height * 4 * t * (1 - t), 0)
-					shard.CFrame = CFrame.new(position) * CFrame.Angles(t * spin, angle, t * spin * 0.7)
-					shard.Transparency = t * t
+	end
+	-- A vertical column of light from `top` down to `bottom`.
+	local function column(bottom: Vector3, height: number, width: number, tint: Color3, seconds: number, material: Enum.Material?): Part?
+		local beam = part(Enum.PartType.Cylinder, Vector3.new(height, width * 0.2, width * 0.2), CFrame.new(bottom + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, 0, math.pi / 2), tint, material)
+		if beam == nil then return nil end
+		animate(beam, 0.08, { Size = Vector3.new(height, width, width) })
+		task.delay(0.08, function()
+			if beam.Parent then fade(beam, seconds, { Size = Vector3.new(height, width * 0.1, width * 0.1), Transparency = 1 }) end
+		end)
+		return beam
+	end
+	-- A glowing ball streaking along a curve from the sky to `target`, with a
+	-- trail and fire behind it. `land` runs when it hits.
+	local function streak(from: Vector3, target: Vector3, size: number, seconds: number, tint: Color3, withLight: boolean, land: () -> ())
+		local ball = part(Enum.PartType.Ball, Vector3.one * size, CFrame.new(from), tint:Lerp(WHITE, 0.6))
+		if ball == nil then return end
+		local a = Instance.new("Attachment")
+		a.Position = Vector3.new(0, size * 0.45, 0)
+		a.Parent = ball
+		local b = Instance.new("Attachment")
+		b.Position = Vector3.new(0, -size * 0.45, 0)
+		b.Parent = ball
+		local trail = Instance.new("Trail")
+		trail.Attachment0 = a
+		trail.Attachment1 = b
+		trail.Color = sequence(WHITE, tint, Color3.fromRGB(255, 90, 40))
+		trail.Lifetime = 0.35 + size * 0.06
+		trail.LightEmission = 1
+		trail.FaceCamera = true
+		trail.WidthScale = curve(1, 0)
+		trail.Transparency = curve(0, 1)
+		trail.Parent = ball
+		local fire = emitter({
+			texture = TEXTURES.fire, count = 0, colour = sequence(WHITE, tint, Color3.fromRGB(255, 100, 40)), size = curve(size * 0.9, 0),
+			transparency = curve(0.1, 1), lifetime = { 0.25, 0.45 }, speed = { 0.5, 1.5 }, glow = 0.9, spin = 120,
+		}, a)
+		fire.Rate = 30 + size * 20
+		fire.Enabled = true
+		if withLight then light(ball, tint, 10 + size * 4, 3, seconds + 0.3) end
+		local bend = (from + target) / 2 + Vector3.new(0, (from - target).Magnitude * 0.12, 0)
+		motion(seconds, function(t)
+			local u = t * t
+			local position = from * ((1 - u) ^ 2) + bend * (2 * (1 - u) * u) + target * (u * u)
+			ball.CFrame = CFrame.new(position)
+		end, function()
+			ball:Destroy()
+			land()
+		end)
+	end
+	local function skyPoint(at: Vector3, height: number, reach: number): Vector3
+		local angle = random:NextNumber(0, math.pi * 2)
+		return at + Vector3.new(math.cos(angle) * reach, height, math.sin(angle) * reach)
+	end
+
+	-- Where the rock surface is under a point (glowing veins and cracks lie on it).
+	local mountain = workspace:FindFirstChild("Mountain", true)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = if mountain then { mountain } else {}
+	local function surface(at: Vector3): Vector3?
+		if mountain == nil then return nil end
+		local hit = workspace:Raycast(at + Vector3.new(0, 100, 0), Vector3.new(0, -220, 0), params)
+		return if hit then hit.Position + hit.Normal * 0.09 else nil
+	end
+	-- A craggy lump of rock (or hay): one block, or three for big ones, moved together.
+	local LUMP_PIECES = {
+		{ Vector3.new(1, 0.8, 0.9), CFrame.identity },
+		{ Vector3.new(0.7, 0.6, 0.75), CFrame.new(0.25, 0.2, -0.1) * CFrame.Angles(0.5, 0.3, 0.2) },
+		{ Vector3.new(0.6, 0.55, 0.6), CFrame.new(-0.25, -0.1, 0.2) * CFrame.Angles(-0.3, 0.8, 0.4) },
+	}
+	local function lump(size: number, frame: CFrame): Lump?
+		local rocks: Lump = { parts = {}, offsets = {} }
+		for index, piece in LUMP_PIECES do
+			if index > 1 and size < 1.4 then break end
+			local offset = CFrame.new(piece[2].Position * size) * piece[2].Rotation
+			local chunk = part(Enum.PartType.Block, piece[1] * size, frame * offset, rock.colour:Lerp(rock.dust, random:NextNumber(0, 0.4)), rock.material)
+			if chunk == nil then break end
+			table.insert(rocks.parts, chunk)
+			table.insert(rocks.offsets, offset)
+		end
+		return if #rocks.parts > 0 then rocks else nil
+	end
+	local function place(rocks: Lump, frame: CFrame)
+		for index, chunk in rocks.parts do chunk.CFrame = frame * rocks.offsets[index] end
+	end
+	local function vanish(rocks: Lump)
+		for _, chunk in rocks.parts do chunk:Destroy() end
+	end
+	-- Green motes rising where rock has landed.
+	local function motes(at: Vector3, count: number, power: number)
+		burst(at, {
+			texture = TEXTURES.spark, count = count, colour = sequence(WHITE, colour), size = curve(0.5, 0.3, 0),
+			lifetime = { 0.8, 1.5 }, speed = { 3 * power, 9 * power }, spread = 45, drag = 1.5, acceleration = Vector3.new(0, 4, 0), spin = 120,
+		})
+	end
+	-- Rock arriving at `at`: a puff of dust, a green glint and a small ring.
+	local function settle(at: Vector3, power: number)
+		dust(at, math.ceil(2 * power), 0.6 * power)
+		motes(at, math.ceil(5 * power), 0.7)
+		shockwave(at, 2.5 * power, colour, 0.4)
+	end
+	-- Glowing veins along the rock from `radius` out, racing in to the centre
+	-- (inward) or out from it.
+	local function veins(origin: Vector3, branches: number, radius: number, inward: boolean, width: number, seconds: number)
+		local rotation = random:NextNumber(0, math.pi * 2)
+		for branch = 1, branches do
+			local angle = rotation + branch * math.pi * 2 / branches
+			local previous = origin
+			for step = 1, 3 do
+				local bend = angle + random:NextNumber(-0.3, 0.3)
+				local flatTarget = centre + Vector3.new(math.cos(bend), 0, math.sin(bend)) * radius * step / 3
+				local target = surface(flatTarget) or Vector3.new(flatTarget.X, origin.Y, flatTarget.Z)
+				local start = previous
+				previous = target
+				local delta = target - start
+				if delta.Magnitude < 0.05 or delta.Magnitude > radius * 0.6 then continue end
+				local delay = (if inward then 3 - step else step - 1) * seconds / 3 + branch * 0.015
+				after(delay, function()
+					local frame = if inward then CFrame.lookAt(target, start) else CFrame.lookAt(start, target)
+					local vein = part(Enum.PartType.Block, Vector3.new(width, width, 0.05), frame, colour)
+					if vein == nil then return end
+					animate(vein, seconds / 3, { Size = Vector3.new(width, width, delta.Magnitude), CFrame = frame * CFrame.new(0, 0, -delta.Magnitude / 2) }, Enum.EasingStyle.Linear)
+					task.delay(seconds + 0.25 - delay, function()
+						if vein.Parent then fade(vein, 0.3, { Color = WHITE, Transparency = 1 }) end
+					end)
 				end)
 			end
 		end
 	end
-	local function meteor(at: Vector3, delay: number)
-		task.delay(delay, function()
-			if folder.Parent == nil then return end
-			local approach = random:NextNumber(0, math.pi * 2)
-			local start = at + Vector3.new(math.cos(approach) * 28, 40 + tier * 5, math.sin(approach) * 28)
-			local control = start:Lerp(at, 0.45) + Vector3.new(0, 14, 0)
-			local rock = piece(Enum.PartType.Ball, Vector3.one * (1 + tier * 0.35), CFrame.new(start))
-			if rock == nil then return end
-			rock.Color = colour:Lerp(Color3.new(1, 1, 1), 0.6)
-			local light = Instance.new("PointLight")
-			light.Color = colour
-			light.Range = 16
-			light.Brightness = 2
-			light.Parent = rock
+	local function towards(a: Vector3, b: Vector3, t: number): Vector3
+		return a + (b - a) * t
+	end
+
+	if data.adding then
+		-- Rock coming back.
+		local summit = surface(centre) or centre
+		if tier == 1 then
+			-- PEBBLE DROP: pebbles fall onto the peak, each with a puff of dust.
+			light(point(summit + Vector3.new(0, 2, 0), 1), colour, 10, 2, 0.8)
+			for i = 1, 5 do
+				after((i - 1) * 0.08, function()
+					local angle = random:NextNumber(0, math.pi * 2)
+					local landing = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * random:NextNumber(0, 2.5)
+					local from = landing + Vector3.new(0, random:NextNumber(9, 12), 0)
+					local rocks = lump(random:NextNumber(0.5, 0.8), CFrame.new(from))
+					if rocks == nil then return end
+					local spin = random:NextNumber(4, 9)
+					motion(0.45, function(t)
+						place(rocks, CFrame.new(towards(from, landing, t * t)) * CFrame.Angles(spin * t, spin * t * 0.6, 0))
+					end, function()
+						vanish(rocks)
+						settle(landing, 1)
+					end)
+				end)
+			end
+			after(0.55, function() shockwave(summit, 5, colour, 0.5) end)
+		elseif tier == 2 then
+			-- ROCKSLIDE: a ring of rocks rises out of the slopes and tumbles in.
+			light(point(summit + Vector3.new(0, 2, 0), 1.4), colour, 16, 3, 1.2)
+			local rotation = random:NextNumber(0, math.pi * 2)
+			for i = 1, 10 do
+				local angle = rotation + i * math.pi / 5
+				local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 9
+				local rise = (surface(flat) or (flat - Vector3.new(0, 4, 0)))
+				local rocks = lump(random:NextNumber(0.7, 1.1), CFrame.new(rise))
+				if rocks == nil then break end
+				dust(rise, 2, 0.8)
+				local lifted = rise + Vector3.new(0, 3, 0)
+				local spin = random:NextNumber(5, 10)
+				motion(0.35, function(t)
+					place(rocks, CFrame.new(towards(rise, lifted, 1 - (1 - t) ^ 3)) * CFrame.Angles(0, t * 2, 0))
+				end)
+				after(0.35 + i * 0.03, function()
+					local apex = towards(lifted, summit, 0.5) + Vector3.new(0, 3, 0)
+					motion(0.45, function(t)
+						local u = t * t
+						local position = lifted * ((1 - u) ^ 2) + apex * (2 * (1 - u) * u) + summit * (u * u)
+						place(rocks, CFrame.new(position) * CFrame.Angles(spin * t, 2 + spin * t * 0.5, 0))
+					end, function()
+						vanish(rocks)
+						settle(summit, 0.8)
+					end)
+				end)
+			end
+			after(0.95, function()
+				shockwave(summit, 11, colour, 0.6)
+				motes(summit, 20, 1)
+				addShake(0.35)
+			end)
+		elseif tier == 3 then
+			-- STONE SURGE: green veins race in from all round, stone pillars
+			-- thrust up in a ring, lean in and sink into the peak.
+			veins(summit, 6, 11, true, 0.14, 0.5)
+			light(point(summit + Vector3.new(0, 2, 0), 1.6), colour, 14, 2, 1.4)
+			after(0.5, function()
+				local rotation = random:NextNumber(0, math.pi * 2)
+				for i = 1, 6 do
+					local angle = rotation + i * math.pi / 3
+					local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 4.5
+					local base = surface(flat) or (flat - Vector3.new(0, 1, 0))
+					local height = random:NextNumber(4, 6)
+					local column = part(Enum.PartType.Cylinder, Vector3.new(0.1, 1.5, 1.5), CFrame.new(base) * CFrame.Angles(0, 0, math.pi / 2), rock.colour, rock.material)
+					if column == nil then break end
+					dust(base, 2, 1)
+					animate(column, 0.22, { Size = Vector3.new(height, 1.5, 1.5), CFrame = CFrame.new(base + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, 0, math.pi / 2) }, Enum.EasingStyle.Back)
+					after(0.5, function()
+						-- Lean the top in towards the peak while sliding into it.
+						local top = base + Vector3.new(0, height / 2, 0)
+						local inward = Vector3.new(summit.X - base.X, 0, summit.Z - base.Z).Unit
+						local axis = Vector3.new(0, 1, 0):Cross(inward)
+						motion(0.3, function(t)
+							local position = towards(top, summit + Vector3.new(0, 0.5, 0), t * t)
+							column.CFrame = CFrame.new(position) * CFrame.fromAxisAngle(axis, 1.1 * t) * CFrame.Angles(0, 0, math.pi / 2)
+							column.Size = Vector3.new(height * (1 - 0.7 * t), 1.5 * (1 - 0.5 * t), 1.5 * (1 - 0.5 * t))
+						end, function() column:Destroy() end)
+					end)
+				end
+			end)
+			after(1.32, function()
+				flash(summit + Vector3.new(0, 1, 0), 8, colour, 0.35)
+				shockwave(summit, 14, colour, 0.6)
+				dust(summit, 12, 1.5)
+				motes(summit, 30, 1.2)
+				addShake(0.5)
+			end)
+		elseif tier == 4 then
+			-- BOULDER BARRAGE: boulders hurled in from far away crash home one
+			-- after another, trailing dust.
+			local rotation = random:NextNumber(0, math.pi * 2)
+			for i = 1, 6 do
+				after((i - 1) * 0.18, function()
+					local angle = rotation + i * 1.1
+					local from = summit + Vector3.new(math.cos(angle) * 75, random:NextNumber(4, 12), math.sin(angle) * 75)
+					local landing = summit + Vector3.new(random:NextNumber(-4, 4), 0, random:NextNumber(-4, 4))
+					landing = surface(landing) or landing
+					local apex = towards(from, landing, 0.5) + Vector3.new(0, 34, 0)
+					local rocks = lump(random:NextNumber(1.6, 2.2), CFrame.new(from))
+					if rocks == nil then return end
+					local trail = Instance.new("Attachment")
+					trail.Parent = rocks.parts[1]
+					local dustTrail = emitter({
+						texture = TEXTURES.smoke, count = 0, colour = sequence(rock.dust), size = curve(1.2, 2.6), transparency = curve(0.4, 1),
+						lifetime = { 0.5, 0.8 }, speed = { 0.2, 0.8 }, glow = 0, spin = 40,
+					}, trail)
+					dustTrail.Rate = 30
+					dustTrail.Enabled = true
+					local spin = random:NextNumber(3, 6)
+					motion(0.95, function(t)
+						local position = from * ((1 - t) ^ 2) + apex * (2 * (1 - t) * t) + landing * (t * t)
+						place(rocks, CFrame.new(position) * CFrame.Angles(spin * t, spin * t * 0.7, spin * t * 0.3))
+					end, function()
+						vanish(rocks)
+						settle(landing, 1.6)
+						chunks(landing, 2, 0.8)
+						addShake(0.3)
+					end)
+				end)
+			end
+			after(2, function()
+				shockwave(summit, 18, colour, 0.7)
+				motes(summit, 34, 1.3)
+				light(point(summit + Vector3.new(0, 3, 0), 1.2), colour, 22, 3, 1)
+			end)
+		elseif tier == 5 then
+			-- STONE CYCLONE: rocks from the valley spiral up into a whirling
+			-- cyclone over the peak, then slam down into it.
+			light(point(summit + Vector3.new(0, 10, 0), 2.6), colour, 26, 3, 2.4)
+			local count = 22
+			local stones: { Lump } = {}
+			local seeds: { { number } } = {}
+			for i = 1, count do
+				local angle = i / count * math.pi * 2
+				local reach = random:NextNumber(22, 32)
+				local rocks = lump(random:NextNumber(0.6, 1.1), CFrame.new(summit))
+				if rocks == nil then break end
+				table.insert(stones, rocks)
+				-- angle, reach, start height, end height, end reach, spin speed
+				table.insert(seeds, { angle, reach, summit.Y - random:NextNumber(8, 14), summit.Y + 7 + (i % 6) * 2.2, 2.5 + (i % 4) * 1.2, 4 + (i % 3) })
+			end
+			local whirl: { Attachment } = {}
+			for i = 1, 3 do
+				local spot = point(summit, 2.4)
+				local cloud = emitter({
+					texture = TEXTURES.smoke, count = 0, colour = sequence(rock.dust, colour:Lerp(rock.dust, 0.6)), size = curve(1.5, 3.5),
+					transparency = curve(0.45, 1), lifetime = { 0.6, 1 }, speed = { 0.5, 1.5 }, glow = 0, spin = 60,
+				}, spot)
+				cloud.Rate = 24
+				cloud.Enabled = true
+				table.insert(whirl, spot)
+			end
+			local positions: { Vector3 } = {}
+			motion(1.6, function(t)
+				local ease = 1 - (1 - t) ^ 2
+				for i, rocks in stones do
+					local seed = seeds[i]
+					local angle = seed[1] + t * seed[6] * 2.2
+					local reach = seed[2] + (seed[5] - seed[2]) * ease
+					local position = Vector3.new(summit.X + math.cos(angle) * reach, seed[3] + (seed[4] - seed[3]) * ease, summit.Z + math.sin(angle) * reach)
+					positions[i] = position
+					place(rocks, CFrame.new(position) * CFrame.Angles(angle * 2, angle, 0))
+				end
+				for i, spot in whirl do
+					local angle = t * 9 + i * math.pi * 2 / 3
+					spot.Position = summit + Vector3.new(math.cos(angle) * 4, 4 + i * 3 + t * 4, math.sin(angle) * 4)
+				end
+			end, function()
+				for i, rocks in stones do
+					local from = positions[i] or summit
+					local delay = (i % 5) * 0.03
+					after(delay, function()
+						motion(0.3, function(t)
+							place(rocks, CFrame.new(towards(from, summit, t * t)) * CFrame.Angles(t * 6, t * 3, 0))
+						end, function() vanish(rocks) end)
+					end)
+				end
+			end)
+			after(1.98, function()
+				flash(summit + Vector3.new(0, 1, 0), 14, colour, 0.4)
+				grade({ Brightness = 0.2, Contrast = 0.1, TintColor = colour:Lerp(WHITE, 0.65) }, 0.05, 0.1, 0.5)
+				addShake(0.9)
+				shockwave(summit, 22, colour, 0.75)
+				after(0.1, function() shockwave(summit, 15, WHITE, 0.6) end)
+				dust(summit, 16, 2.2)
+				motes(summit, 45, 1.5)
+			end)
+		else
+			-- MOUNTAIN RISING: the sky turns, the ground rumbles and green light
+			-- cracks outward, a colossal boulder descends pulling rock up from
+			-- all round, then lands on the peak with a blast of light.
+			grade({ Brightness = -0.1, Contrast = 0.18, Saturation = -0.05, TintColor = Color3.fromRGB(205, 255, 220) }, 0.6, 2.2, 1.2)
+			for i = 0, 5 do
+				after(i * 0.3, function() addShake(0.45) end)
+			end
+			veins(summit, 8, 20, false, 0.2, 0.8)
+			local sky = summit + Vector3.new(0, 70, 0)
+			local land = summit + Vector3.new(0, 5, 0)
+			local colossus = lump(8, CFrame.new(sky))
+			local carried = Vector3.zero
+			if colossus then
+				local core = colossus.parts[1]
+				light(core, colour, 40, 4, 2.4)
+				local halo = Instance.new("Attachment")
+				halo.Parent = core
+				local rings = emitter({
+					texture = TEXTURES.ring, count = 0, colour = sequence(WHITE, colour), size = curve(9, 16),
+					transparency = curve(0.3, 1), lifetime = { 0.6, 0.6 }, speed = { 0.01, 0.01 }, spread = 0, flat = true,
+				}, halo)
+				rings.Rate = 5
+				rings.Enabled = true
+				motion(1.6, function(t)
+					local u = t * t * (3 - 2 * t)
+					carried = towards(sky, land, u)
+					place(colossus, CFrame.new(carried) * CFrame.Angles(0.15, t * 1.5, 0.1))
+				end)
+				after(0.4, function()
+					-- Rock is pulled up off the slopes into it.
+					for i = 1, 14 do
+						local angle = i / 14 * math.pi * 2 + random:NextNumber(-0.2, 0.2)
+						local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * random:NextNumber(18, 30)
+						local from = surface(flat) or (flat - Vector3.new(0, 8, 0))
+						local rocks = lump(random:NextNumber(0.7, 1.2), CFrame.new(from))
+						if rocks == nil then break end
+						dust(from, 2, 1)
+						local spin = random:NextNumber(4, 8)
+						after(i * 0.04, function()
+							motion(1.1, function(t)
+								local target = if carried.Magnitude > 0 then carried else land
+								place(rocks, CFrame.new(towards(from, target, t * t) + Vector3.new(0, math.sin(t * math.pi) * 6, 0)) * CFrame.Angles(spin * t, spin * t, 0))
+							end, function()
+								vanish(rocks)
+								motes(carried, 4, 0.6)
+							end)
+						end)
+					end
+				end)
+			end
+			after(1.62, function()
+				if colossus then
+					for _, chunk in colossus.parts do fade(chunk, 0.12, { Size = chunk.Size * 0.6, Transparency = 1 }) end
+				end
+				grade({ Brightness = 0.4, Contrast = 0.1, TintColor = Color3.fromRGB(230, 255, 236) }, 0.04, 0.08, 0.6)
+				addShake(1.4)
+				flash(summit + Vector3.new(0, 2, 0), 24, colour, 0.5)
+				shockwave(summit, 30, colour, 0.9)
+				after(0.12, function() shockwave(summit, 20, WHITE, 0.7) end)
+				after(0.3, function() shockwave(summit, 40, colour:Lerp(rock.dust, 0.4), 1.1) end)
+				dust(summit, 22, 3.5)
+				motes(summit, 60, 2)
+				column(summit, 80, 5, colour, 1.3)
+				chunks(summit, 10, 1.6)
+				light(point(summit + Vector3.new(0, 4, 0), 1.6), colour, 36, 4, 1.4)
+			end)
+		end
+	elseif tier == 1 then
+		-- SPARK BURST: a crisp golden pop, sparks and a puff of dust.
+		flash(centre, 3, colour, 0.25)
+		light(point(centre + Vector3.new(0, 2, 0), 0.6), colour, 10, 2, 0.4)
+		sparks(centre, 22, colour, 0.9)
+		dust(centre, 5, 1)
+		shockwave(centre, 5, colour, 0.45)
+		chunks(centre, 3, 0.8)
+	elseif tier == 2 then
+		-- SHOCKWAVE: a double ring tears across the ground, rock and sparks fly.
+		flash(centre, 5, colour, 0.3)
+		light(point(centre + Vector3.new(0, 2, 0), 0.8), colour, 16, 3, 0.6)
+		shockwave(centre, 12, colour, 0.6)
+		after(0.09, function() shockwave(centre, 8, WHITE, 0.5) end)
+		sparks(centre, 30, colour, 1.2)
+		embers(centre, 10, 0.8)
+		dust(centre, 12, 1.4)
+		chunks(centre, 7, 1)
+		addShake(0.35)
+	elseif tier == 3 then
+		-- DIAMOND FRACTURE: glowing cracks race over the rock, crystals burst up
+		-- out of them, then shatter into glittering shards.
+		local origin = surface(centre) or centre
+		local radius = 7 + math.clamp((data.coins - 100) / 399, 0, 1) * 5
+		local rotation = random:NextNumber(0, math.pi * 2)
+		local tips: { Vector3 } = {}
+		for branch = 1, 6 do
+			local angle = rotation + branch * math.pi / 3
+			local previous = origin
+			for step = 1, 3 do
+				local bend = angle + random:NextNumber(-0.3, 0.3)
+				local flatTarget = centre + Vector3.new(math.cos(bend), 0, math.sin(bend)) * radius * step / 3
+				local target = surface(flatTarget) or Vector3.new(flatTarget.X, origin.Y, flatTarget.Z)
+				local start = previous
+				previous = target
+				local delta = target - start
+				-- No glowing bridges across a dug-out gap.
+				if delta.Magnitude < 0.05 or delta.Magnitude > 6 then continue end
+				if step == 3 then table.insert(tips, target) end
+				after((step - 1) * 0.12 + branch * 0.02, function()
+					local frame = CFrame.lookAt(start, target)
+					local crack = part(Enum.PartType.Block, Vector3.new(0.12, 0.12, 0.05), frame, colour)
+					if crack == nil then return end
+					animate(crack, 0.14, { Size = Vector3.new(0.14, 0.14, delta.Magnitude), CFrame = frame * CFrame.new(0, 0, -delta.Magnitude / 2) }, Enum.EasingStyle.Linear)
+					task.delay(0.62 - (step - 1) * 0.12, function()
+						if crack.Parent then fade(crack, 0.25, { Color = WHITE, Transparency = 1, Size = Vector3.new(0.3, 0.3, delta.Magnitude) }) end
+					end)
+				end)
+			end
+		end
+		light(point(origin + Vector3.new(0, 2, 0), 1.2), colour, 12, 1.5, 0.9)
+		burst(origin, {
+			texture = TEXTURES.glow, count = 2, colour = sequence(colour), size = curve(1, radius * 0.9), transparency = curve(0.5, 1),
+			lifetime = { 0.7, 0.7 }, speed = { 0.01, 0.01 }, spread = 0,
+		})
+		-- Crystals grow out of the crack tips and the centre.
+		after(0.62, function()
+			table.insert(tips, origin)
+			local crystals: { Part } = {}
+			for index, tip in tips do
+				local height = if index == #tips then 4.2 else random:NextNumber(2, 3.2)
+				local tilt = CFrame.Angles(random:NextNumber(-0.35, 0.35), random:NextNumber(0, math.pi), random:NextNumber(-0.35, 0.35))
+				local base = CFrame.new(tip) * tilt * CFrame.Angles(0, math.pi / 4, 0)
+				local crystal = part(Enum.PartType.Block, Vector3.new(0.7, 0.1, 0.7), base, colour:Lerp(WHITE, 0.35), Enum.Material.Glass)
+				if crystal == nil then break end
+				crystal.Transparency = 0.25
+				crystal.Reflectance = 0.25
+				table.insert(crystals, crystal)
+				animate(crystal, 0.16, { Size = Vector3.new(0.7, height, 0.7), CFrame = base * CFrame.new(0, height / 2, 0) }, Enum.EasingStyle.Back)
+			end
+			-- Then they shatter.
+			after(0.42, function()
+				flash(origin + Vector3.new(0, 1.5, 0), radius * 0.9, colour, 0.35)
+				shockwave(origin, radius * 1.4, colour, 0.6)
+				sparks(origin + Vector3.new(0, 1.5, 0), 45, colour, 1.3)
+				addShake(0.5)
+				for _, crystal in crystals do
+					local from = crystal.CFrame
+					local fromSize = crystal.Size
+					local away = Vector3.new(from.Position.X - origin.X, 0, from.Position.Z - origin.Z)
+					if away.Magnitude < 0.1 then away = Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)) end
+					local velocity = away.Unit * random:NextNumber(6, 12) + Vector3.new(0, random:NextNumber(8, 14), 0)
+					local spin = random:NextNumber(6, 14)
+					motion(0.9, function(t)
+						local s = t * 0.9
+						crystal.CFrame = CFrame.new(from.Position + velocity * s + Vector3.new(0, -26 * s * s, 0)) * from.Rotation * CFrame.Angles(spin * s, spin * s * 0.6, 0)
+						crystal.Size = fromSize:Lerp(Vector3.new(0.3, 0.6, 0.3), t)
+						crystal.Transparency = 0.25 + 0.75 * t * t
+					end, function() crystal:Destroy() end)
+				end
+			end)
+		end)
+	elseif tier == 4 then
+		-- ORBITAL STRIKE: a target ring locks on while a charge gathers high in
+		-- the sky, then a beam slams down and the ground erupts.
+		burst(centre + Vector3.new(0, 0.3, 0), {
+			texture = TEXTURES.ring, count = 1, colour = sequence(colour), size = curve(16, 3), transparency = curve(0.6, 0.1),
+			lifetime = { 0.65, 0.65 }, speed = { 0.01, 0.01 }, spread = 0, flat = true,
+		})
+		local marks: { Part } = {}
+		for _ = 1, 4 do
+			local mark = part(Enum.PartType.Block, Vector3.new(0.25, 0.12, 1.6), CFrame.new(centre), colour)
+			if mark then table.insert(marks, mark) end
+		end
+		motion(0.65, function(t)
+			local reach = 8 - 5.5 * t * t
+			for i, mark in marks do
+				local angle = i * math.pi / 2 + t * 2.2
+				local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+				mark.CFrame = CFrame.lookAt(centre + direction * reach + Vector3.new(0, 0.3, 0), centre + Vector3.new(0, 0.3, 0))
+			end
+		end, function()
+			for _, mark in marks do fade(mark, 0.15, { Transparency = 1 }) end
+		end)
+		local sky = centre + Vector3.new(0, 70, 0)
+		local charge = part(Enum.PartType.Ball, Vector3.one * 0.3, CFrame.new(sky), colour:Lerp(WHITE, 0.5))
+		if charge then
+			animate(charge, 0.6, { Size = Vector3.one * 4 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+			light(charge, colour, 30, 4, 1.2)
+			burst(sky, {
+				texture = TEXTURES.glow, count = 3, colour = sequence(colour, WHITE), size = curve(12, 2), transparency = curve(0.7, 0.2),
+				lifetime = { 0.6, 0.6 }, speed = { 0.01, 0.01 }, spread = 0,
+			})
+		end
+		after(0.65, function()
+			if charge then fade(charge, 0.2, { Size = Vector3.one * 0.5, Transparency = 1 }) end
+			column(centre, 70, 3.2, WHITE, 0.55)
+			column(centre, 70, 7, colour, 0.7, Enum.Material.ForceField)
+			flash(centre, 9, colour, 0.35)
+			grade({ Brightness = 0.25, Contrast = 0.1, TintColor = colour:Lerp(WHITE, 0.7) }, 0.04, 0.05, 0.45)
+			addShake(0.8)
+			fireball(centre, 22, 2, colour)
+			smokeColumn(centre, 10, 2.5, 2.2)
+			embers(centre, 30, 1.1)
+			shockwave(centre, 20, colour, 0.7)
+			after(0.12, function() shockwave(centre, 13, WHITE, 0.55) end)
+			chunks(centre, 10, 1.4)
+			light(point(centre + Vector3.new(0, 3, 0), 1.2), colour, 26, 4, 1)
+		end)
+	elseif tier == 5 then
+		-- GALAXY COLLAPSE: a black hole opens over the rock with a spinning
+		-- ring of stars, pulls in light from all round, then goes nova and
+		-- drives a beam into the mountain.
+		local core = centre + Vector3.new(0, 11, 0)
+		local hole = part(Enum.PartType.Ball, Vector3.one * 0.2, CFrame.new(core), Color3.new(0, 0, 0), Enum.Material.SmoothPlastic)
+		local halo = part(Enum.PartType.Ball, Vector3.one * 0.3, CFrame.new(core), colour)
+		if hole then animate(hole, 0.8, { Size = Vector3.one * 3.4 }, Enum.EasingStyle.Back) end
+		if halo then
+			halo.Transparency = 0.55
+			animate(halo, 0.8, { Size = Vector3.one * 5.2 }, Enum.EasingStyle.Back)
+			light(halo, colour, 24, 3, 1.3)
+		end
+		-- The accretion ring: stars with short trails orbiting on a tilted plane.
+		local stars: { Part } = {}
+		local tilt = CFrame.new(core) * CFrame.Angles(math.rad(18), random:NextNumber(0, math.pi), math.rad(-10))
+		for i = 1, 16 do
+			local star = part(Enum.PartType.Ball, Vector3.one * random:NextNumber(0.3, 0.55), tilt, (if i % 3 == 0 then PINK elseif i % 3 == 1 then colour else Color3.fromRGB(120, 170, 255)):Lerp(WHITE, 0.3))
+			if star == nil then break end
 			local a = Instance.new("Attachment")
-			a.Position = Vector3.new(-0.6, 0, 0)
-			a.Parent = rock
+			a.Position = Vector3.new(0, 0.2, 0)
+			a.Parent = star
 			local b = Instance.new("Attachment")
-			b.Position = Vector3.new(0.6, 0, 0)
-			b.Parent = rock
+			b.Position = Vector3.new(0, -0.2, 0)
+			b.Parent = star
 			local trail = Instance.new("Trail")
 			trail.Attachment0 = a
 			trail.Attachment1 = b
-			trail.Color = ColorSequence.new(Color3.new(1, 0.97, 0.8), colour)
-			trail.Lifetime = 0.45
+			trail.Color = sequence(WHITE, star.Color)
+			trail.Lifetime = 0.25
 			trail.LightEmission = 1
-			trail.WidthScale = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) })
-			trail.Transparency = NumberSequence.new(0.05, 1)
-			trail.Parent = rock
-			ring(at, 2.5, 0) -- Brief impact warning, followed by the main shockwave.
-			motion(rock, 0.9, function(t)
-				local u = t * t
-				local position = start * (1 - u) ^ 2 + control * (2 * (1 - u) * u) + at * u ^ 2
-				rock.CFrame = CFrame.lookAt(position, at + Vector3.new(0, -0.01, 0))
-				if t >= 1 then pulse(at, 5 + tier * 2) end
-			end)
-		end)
-	end
-	local function diamondFracture()
-		-- Project each jagged crack onto actual remaining stone, never the gem
-		-- or characters. The server has already applied the gift's damage.
-		local mountain = workspace:FindFirstChild("Mountain", true)
-		local rayParams = RaycastParams.new()
-		rayParams.FilterType = Enum.RaycastFilterType.Include
-		rayParams.FilterDescendantsInstances = if mountain then { mountain } else {}
-		local function surface(at: Vector3): Vector3?
-			if mountain == nil then return nil end
-			local hit = workspace:Raycast(at + Vector3.new(0, 100, 0), Vector3.new(0, -220, 0), rayParams)
-			return if hit then hit.Position + hit.Normal * 0.09 else nil
+			trail.FaceCamera = true
+			trail.WidthScale = curve(1, 0)
+			trail.Transparency = curve(0.1, 1)
+			trail.Parent = star
+			table.insert(stars, star)
 		end
-		local origin = surface(centre) or centre
-		local cracks: { Part } = {}
-		local fragmentOrigins: { Vector3 } = {}
-		local radius = 7 + math.clamp((data.coins - 100) / 399, 0, 1) * 5
-		local rotation = random:NextNumber(0, math.pi * 2)
-		for branch = 1, 6 do
-			local angle = rotation + branch * math.pi / 3
-			local previous: Vector3? = surface(centre)
-			for step = 1, 4 do
-				local bend = angle + random:NextNumber(-0.28, 0.28)
-				local target = surface(centre + Vector3.new(math.cos(bend), 0, math.sin(bend)) * radius * step / 4)
-				local start = previous
-				previous = target
-				if target then table.insert(fragmentOrigins, target) end
-				if start == nil or target == nil then continue end
-				local delta = target - start
-				-- Do not draw glowing bridges across an excavated cliff or gap.
-				if delta.Magnitude < 0.05 or delta.Magnitude > 7 then continue end
-				local finish = target
-				task.delay((step - 1) * 0.14 + branch * 0.018, function()
-					local frame = CFrame.lookAt(start, finish)
-					local crack = piece(Enum.PartType.Block, Vector3.new(0.09, 0.09, 0.05), frame)
-					if crack == nil then return end
-					table.insert(cracks, crack)
-					TweenService:Create(crack, TweenInfo.new(0.16, Enum.EasingStyle.Linear), {
-						Size = Vector3.new(0.10, 0.10, delta.Magnitude),
-						CFrame = frame * CFrame.new(0, 0, -delta.Magnitude / 2),
-					}):Play()
-				end)
-			end
+		local phases: { number } = {}
+		local orbits: { number } = {}
+		for i = 1, #stars do
+			phases[i] = i / #stars * math.pi * 2
+			orbits[i] = random:NextNumber(4.5, 8)
 		end
-		task.delay(0.9, function()
-			if folder.Parent == nil then return end
-			for _, crack in cracks do
-				if crack.Parent then
-					crack.Color = Color3.new(1, 1, 1)
-					animate(crack, 0.18, { Transparency = 1, Size = crack.Size + Vector3.new(0.12, 0.12, 0) })
-				end
-			end
-			ring(origin, radius * 1.6, 0)
-			local flash = piece(Enum.PartType.Ball, Vector3.one, CFrame.new(origin))
-			if flash then
-				flash.Transparency = 0.5
-				animate(flash, 0.35, { Size = Vector3.one * radius, Transparency = 1 })
-			end
-			-- 24 cracks + 12 fragments + flash + ring remain below 40 parts.
-			for i = 1, 12 do
-				local at = if #fragmentOrigins > 0 then fragmentOrigins[(i - 1) % #fragmentOrigins + 1] else origin
-				local angle = rotation + i * math.pi / 6
-				local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
-				local shard = piece(Enum.PartType.Block, Vector3.new(0.15, 0.35, 0.15), CFrame.new(at))
-				if shard == nil then continue end
-				local height = random:NextNumber(2, 5)
-				local spin = random:NextNumber(4, 10)
-				motion(shard, random:NextNumber(0.7, 1.2), function(t)
-					shard.CFrame = CFrame.new(at + direction * radius * 0.6 * t + Vector3.new(0, height * 4 * t * (1 - t), 0)) * CFrame.Angles(t * spin, angle, t * spin)
-					shard.Color = colour:Lerp(Color3.new(1, 1, 1), (math.sin(t * 35 + i) + 1) * 0.5)
-					shard.Transparency = math.clamp(t * t + 0.15 * math.sin(t * 45 + i), 0, 1)
-				end)
+		motion(0.95, function(t)
+			for i, star in stars do
+				local spin = phases[i] + t * (6 + 4 / orbits[i] * 6)
+				local reach = orbits[i] * (1 - 0.45 * t * t)
+				star.CFrame = tilt * CFrame.new(math.cos(spin) * reach, math.sin(spin * 3 + i) * 0.25, math.sin(spin) * reach)
 			end
 		end)
-	end
-	if data.adding then
-		ring(centre, 8 + tier * 2, 0)
-	elseif tier == 3 then
-		diamondFracture()
-	elseif tier == 4 then
-		-- 500 coins: six descending energy lances close in on one impact point.
-		for i = 1, 6 do
-			task.delay((i - 1) * 0.12, function()
-				if folder.Parent == nil then return end
-				local angle = i * math.pi / 3
-				local at = centre + Vector3.new(math.cos(angle) * 6, 0, math.sin(angle) * 6)
-				local lance = piece(Enum.PartType.Cylinder, Vector3.new(45, 0.35, 0.35), CFrame.new(at + Vector3.new(0, 23, 0)) * CFrame.Angles(0, 0, math.pi / 2))
-				if lance then animate(lance, 0.45, { Size = Vector3.new(45, 2.5, 2.5), Transparency = 1 }) end
-				ring(at, 9, 0.08)
-			end)
+		-- Light pulled in from a sphere round the hole.
+		local well = part(Enum.PartType.Ball, Vector3.one * 28, CFrame.new(core), WHITE)
+		if well then
+			well.Transparency = 1
+			local inward = emitter({
+				texture = TEXTURES.spark, count = 0, colour = sequence(WHITE, colour, PINK), size = curve(0.2, 0.6, 0.1),
+				transparency = curve(0.6, 0, 0.4), lifetime = { 0.45, 0.45 }, speed = { 28, 30 }, spread = 0, spin = 180,
+			}, well)
+			inward.Shape = Enum.ParticleEmitterShape.Sphere
+			inward.ShapeInOut = Enum.ParticleEmitterShapeInOut.Inward
+			inward.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
+			inward.Rate = 110
+			inward.Enabled = true
+			after(0.85, function() inward.Enabled = false end)
 		end
-		task.delay(0.85, function() if folder.Parent then pulse(centre, 26) end end)
-	elseif tier <= 2 then
-		pulse(centre, 3 + tier * 3)
-		for _ = 1, tier * 3 do
-			local spark = piece(Enum.PartType.Ball, Vector3.one * 0.22, CFrame.new(centre))
-			if spark then animate(spark, random:NextNumber(0.5, 1.2), { Position = centre + Vector3.new(random:NextNumber(-7, 7), random:NextNumber(3, 12), random:NextNumber(-7, 7)), Transparency = 1 }) end
-		end
+		-- Collapse, then nova.
+		after(0.95, function()
+			if hole then fade(hole, 0.12, { Size = Vector3.one * 0.1 }) end
+			if halo then fade(halo, 0.12, { Size = Vector3.one * 0.1, Transparency = 1 }) end
+			for _, star in stars do fade(star, 0.12, { Size = Vector3.one * 0.05 }) end
+		end)
+		after(1.08, function()
+			flash(core, 16, colour, 0.45)
+			grade({ Brightness = 0.3, Contrast = 0.15, Saturation = 0.2, TintColor = colour:Lerp(WHITE, 0.6) }, 0.05, 0.1, 0.6)
+			addShake(0.9)
+			shockwave(core, 24, colour, 0.8)
+			after(0.1, function() shockwave(core, 16, PINK, 0.7) end)
+			burst(core, {
+				texture = TEXTURES.spark, count = 70, colour = sequence(WHITE, colour, PINK), size = curve(0.7, 0.45, 0),
+				lifetime = { 0.7, 1.4 }, speed = { 14, 30 }, drag = 3, spin = 200,
+			})
+			column(centre, 11, 2.6, colour, 0.45)
+			shockwave(centre, 22, colour, 0.7)
+			dust(centre, 16, 2)
+			fireball(centre, 14, 1.6, colour)
+			chunks(centre, 10, 1.4)
+		end)
 	else
-		local count = if tier >= 5 then 4 else 5
-		for i = 1, count do
-			local offset = if i == 1 then Vector3.zero else Vector3.new(random:NextNumber(-10, 10), 0, random:NextNumber(-10, 10))
-			meteor(centre + offset, (i - 1) * 0.3)
-		end
-		if tier >= 5 then
-			task.delay(2.3, function()
-				if folder.Parent == nil then return end
-				pulse(centre, 32)
-				local pillar = piece(Enum.PartType.Cylinder, Vector3.new(65, 0.5, 0.5), CFrame.new(centre + Vector3.new(0, 30, 0)) * CFrame.Angles(0, 0, math.pi / 2))
-				if pillar then
-					pillar.Transparency = 0.35
-					animate(pillar, 1.5, { Size = Vector3.new(80, 5, 5), Transparency = 1 })
-				end
-				ring(centre + Vector3.new(0, 3, 0), 24, 0.18)
-				ring(centre + Vector3.new(0, 6, 0), 18, 0.32)
+		-- COSMIC BURST: the sky darkens, meteors rain down round the target,
+		-- then a blazing comet strikes with a mushroom of fire and smoke.
+		grade({ Brightness = -0.12, Contrast = 0.2, Saturation = 0.1, TintColor = Color3.fromRGB(255, 214, 196) }, 0.5, 2.2, 1.2)
+		for i = 1, 5 do
+			after(0.15 + (i - 1) * 0.2, function()
+				local target = centre + Vector3.new(random:NextNumber(-13, 13), 0, random:NextNumber(-13, 13))
+				streak(skyPoint(target, 60, 30), target, 1.1, 0.6, colour, false, function()
+					flash(target, 3.5, colour, 0.3)
+					shockwave(target, 6, colour, 0.5)
+					sparks(target, 14, colour, 1)
+					chunks(target, 2, 0.9)
+					addShake(0.25)
+				end)
 			end)
 		end
+		after(1.1, function()
+			streak(skyPoint(centre, 95, 60), centre, 4.5, 0.75, colour, true, function()
+				grade({ Brightness = 0.45, Contrast = 0.1, TintColor = Color3.fromRGB(255, 244, 220) }, 0.04, 0.08, 0.6)
+				addShake(1.4)
+				flash(centre, 26, colour, 0.5)
+				shockwave(centre, 34, colour, 0.9)
+				after(0.12, function() shockwave(centre, 24, WHITE, 0.7) end)
+				after(0.3, function() shockwave(centre, 42, Color3.fromRGB(255, 150, 70), 1.1) end)
+				fireball(centre, 36, 3.5, colour)
+				smokeColumn(centre, 22, 4.5, 3.4)
+				embers(centre, 60, 1.4)
+				burst(centre + Vector3.new(0, 3, 0), {
+					texture = TEXTURES.spark, count = 45, colour = sequence(WHITE, colour), size = curve(0.8, 0.5, 0),
+					lifetime = { 0.8, 1.6 }, speed = { 16, 34 }, drag = 2.5, spin = 200,
+				})
+				column(centre, 100, 6, colour, 1.4)
+				chunks(centre, 14, 1.8)
+				light(point(centre + Vector3.new(0, 4, 0), 1.8), colour, 40, 5, 1.6)
+			end)
+		end)
 	end
+
 	local text = label
 	if text and tier >= bannerTier then
 		bannerTier = tier
 		bannerSerial += 1
 		local serial = bannerSerial
-		text.Text = (if data.adding then (if data.blocks == 0 then "MOUNTAIN FULL" elseif data.blocks == nil then "REBUILDING" else "ROCKS RESTORED") else titles[tier]) .. "  •  " .. Format.commas(data.coins) .. " COINS\n" .. tostring(data.name or "Someone") .. " sent " .. tostring(data.gift or "a gift")
+		local title = if data.adding then (if data.blocks == 0 then "MOUNTAIN FULL" elseif data.blocks == nil then "REBUILDING" else GiftEffects.ADD_TITLES[tier]) else GiftEffects.TITLES[tier]
+		text.Text = title .. "  ·  " .. Format.commas(data.coins) .. " COINS\n" .. tostring(data.name or "Someone") .. " sent " .. tostring(data.gift or "a gift")
 		text.TextColor3 = colour
 		if bannerTween then bannerTween:Cancel() end
 		text.TextTransparency = 0
 		text.TextStrokeTransparency = 0.35
-		text.Position = UDim2.fromScale(0.5, 0.32)
-		TweenService:Create(text, TweenInfo.new(0.25, Enum.EasingStyle.Back), { Position = UDim2.fromScale(0.5, 0.30) }):Play()
+		text.Position = UDim2.fromScale(0.5, 0.33)
+		local grow = text:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
+		grow.Scale = 0.8
+		grow.Parent = text
+		TweenService:Create(text, TweenInfo.new(0.3, Enum.EasingStyle.Back), { Position = UDim2.fromScale(0.5, 0.30) }):Play()
+		TweenService:Create(grow, TweenInfo.new(0.3, Enum.EasingStyle.Back), { Scale = 1 }):Play()
 		task.delay(1.5 + tier * 0.35, function()
 			if serial ~= bannerSerial then return end
 			bannerTween = TweenService:Create(text, TweenInfo.new(0.45), { TextTransparency = 1, TextStrokeTransparency = 1 })
@@ -11381,6 +12402,7 @@ function GiftEffects.play(data: any)
 		end)
 	end
 end
+
 return GiftEffects
 ]]></string>
           </Properties>
@@ -11391,7 +12413,7 @@ return GiftEffects
             <string name="Source"><![CDATA[--!strict
 -- The games menu on the left of the screen, in the lobby's royal white and
 -- gold: Diamond in the Rough with its live status and a Join button, more
--- slots marked Coming soon, and Back to lobby while playing. The ◀ button
+-- slots marked Coming soon, and Back to lobby while playing. The Hide button
 -- hides it to a small tab; the tab (or G) shows it again. Also turns the
 -- lobby's giant diamond on this computer.
 local Players = game:GetService("Players")
@@ -11453,15 +12475,34 @@ local function text(parent: Instance, properties: { [string]: any }): TextLabel
 	return label
 end
 
+-- A small cut-gem mark (a square turned on its corner) at the left of a game
+-- card: filled for a game you can play, an outline for one still to come.
+local function gemMark(card: Instance, colour: Color3, hollow: number)
+	local mark = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromOffset(37, 40),
+		Size = UDim2.fromOffset(28, 28),
+		Rotation = 45,
+		BackgroundColor3 = colour,
+		BackgroundTransparency = hollow,
+		ZIndex = 2,
+	}, card)
+	rounded(mark, 5)
+	stroke(mark, if hollow > 0 then colour else Color3.new(1, 1, 1), 2, if hollow > 0 then 0.35 else 0.2)
+	if hollow == 0 then
+		make("UIGradient", { Color = ColorSequence.new(Color3.new(1, 1, 1), colour), Rotation = -45 }, mark)
+	end
+end
+
 -- What the Diamond in the Rough card says about the round going on now, in
 -- the mountain's skin ("stone" by default, or "hay": see Skin).
 function LobbyView.status(phase: string, stone: number, skin: string?): string
 	local words = Skin.words(skin)
 	local gem = words.gem
-	if phase == "Won" then return "🏆 " .. string.upper(string.sub(gem, 1, 1)) .. string.sub(gem, 2) .. " found! A new round starts soon" end
-	if phase == "Rebuilding" then return "⛰ The " .. words.heap .. " is being rebuilt" end
-	if phase == "Holding" then return words.icon .. " Someone is holding the " .. gem .. "!" end
-	return "🔴 LIVE · " .. Format.commas(stone) .. " " .. words.material .. " left"
+	if phase == "Won" then return string.upper(string.sub(gem, 1, 1)) .. string.sub(gem, 2) .. " found! A new round starts soon" end
+	if phase == "Rebuilding" then return "The " .. words.heap .. " is being rebuilt" end
+	if phase == "Holding" then return "Someone is holding the " .. gem .. "!" end
+	return "LIVE · " .. Format.commas(stone) .. " " .. words.material .. " left"
 end
 
 -- `request` sends joinGame / leaveGame; `onChange(inGame)` runs whenever the
@@ -11484,7 +12525,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		Font = Enum.Font.GothamBold,
 		TextSize = 19,
 		TextColor3 = ROYAL,
-		Text = "👑 GAMES",
+		Text = "GAMES",
 		AutoButtonColor = true,
 	}, gui)
 	rounded(tab, 14)
@@ -11511,15 +12552,15 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	}, panel)
 
 	text(panel, {
-		Size = UDim2.new(1, -48, 0, 40),
+		Size = UDim2.new(1, -72, 0, 40),
 		Font = TITLE_FONT,
 		TextSize = 30,
 		TextColor3 = ROYAL,
-		Text = "👑 GAMES",
+		Text = "Games",
 	})
 	text(panel, {
 		Position = UDim2.fromOffset(2, 40),
-		Size = UDim2.new(1, -48, 0, 20),
+		Size = UDim2.new(1, -72, 0, 20),
 		Font = Enum.Font.GothamMedium,
 		TextSize = 14,
 		TextColor3 = MUTED,
@@ -11528,14 +12569,14 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	local hide = make("TextButton", {
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, 0, 0, 2),
-		Size = UDim2.fromOffset(38, 38),
+		Size = UDim2.fromOffset(64, 30),
 		BackgroundColor3 = ROYAL,
 		Font = Enum.Font.GothamBold,
-		TextSize = 18,
+		TextSize = 13,
 		TextColor3 = Color3.new(1, 1, 1),
-		Text = "◀",
+		Text = "Hide",
 	}, panel)
-	rounded(hide, 19)
+	rounded(hide, 15)
 	make("Frame", {
 		Position = UDim2.fromOffset(0, 68),
 		Size = UDim2.new(1, 0, 0, 2),
@@ -11562,14 +12603,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	local fill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 1 }, card)
 	rounded(fill, 14)
 	make("UIGradient", { Color = ColorSequence.new(ROYAL, ROYAL_DEEP), Rotation = 35 }, fill)
-	text(card, {
-		Position = UDim2.fromOffset(8, 10),
-		Size = UDim2.fromOffset(58, 58),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		Font = Enum.Font.GothamBold,
-		TextSize = 44,
-		Text = "💎",
-	})
+	gemMark(card, Color3.fromRGB(176, 230, 255), 0)
 	text(card, {
 		Position = UDim2.fromOffset(72, 10),
 		Size = UDim2.new(1, -80, 0, 26),
@@ -11608,15 +12642,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		}, list)
 		rounded(soon, 14)
 		stroke(soon, GOLD, 1.5, 0.45)
-		text(soon, {
-			Position = UDim2.fromOffset(8, 12),
-			Size = UDim2.fromOffset(58, 58),
-			TextXAlignment = Enum.TextXAlignment.Center,
-			Font = Enum.Font.GothamBold,
-			TextSize = 34,
-			TextTransparency = 0.25,
-			Text = "🔒",
-		})
+		gemMark(soon, GOLD, 1)
 		text(soon, {
 			Position = UDim2.fromOffset(72, 18),
 			Size = UDim2.new(1, -150, 0, 24),
@@ -11656,7 +12682,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		Font = Enum.Font.GothamBold,
 		TextSize = 18,
 		TextColor3 = ROYAL,
-		Text = "🏰 Back to lobby",
+		Text = "Back to lobby",
 		Visible = false,
 	}, list)
 	rounded(back, 12)
@@ -11711,7 +12737,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		local now = player:GetAttribute("InGame") == true
 		if now == inGame then return end
 		inGame = now
-		join.Text = if now then "✓ PLAYING" else "JOIN"
+		join.Text = if now then "PLAYING" else "JOIN"
 		join.BackgroundColor3 = if now then Color3.new(1, 1, 1) else GOLD
 		join.AutoButtonColor = not now
 		back.Visible = now
@@ -11887,7 +12913,9 @@ function MountainView._makeTemplates(self: View)
 		part.CanCollide = true
 		part.CanQuery = true
 		part.CanTouch = false
-		part.CastShadow = true
+		-- Thousands of small rocks casting shadows cost more than any other
+		-- part of the scene; the mountain still takes shadows and shading.
+		part.CastShadow = false
 		part.TopSurface = Enum.SurfaceType.Smooth
 		part.BottomSurface = Enum.SurfaceType.Smooth
 		self.templates[kind] = part
@@ -12120,8 +13148,11 @@ function MountainView._refresh(self: View, key: number): BasePart?
 	end
 	local stone = part :: BasePart
 	stone.CFrame = CFrame.new(self:keyPosition(key)) * self.rotations[shape]
-	stone.Material = MATERIALS[self.skin][layer]
-	stone.Color = Color3.fromRGB(r, g, b)
+	-- A rock that only changes shape keeps its look: skip the property writes.
+	if fresh or old == nil or old // 16 ~= layer then
+		stone.Material = MATERIALS[self.skin][layer]
+		stone.Color = Color3.fromRGB(r, g, b)
+	end
 	if fresh then stone.Parent = self.folder end
 	self.codes[key] = code
 	return if fresh then stone else nil
@@ -12220,7 +13251,6 @@ function MountainView._throwDebris(self: View, parts: { BasePart }, at: Vector3?
 	for _, part in parts do
 		part.CanCollide = false
 		part.CanQuery = false
-		part.CastShadow = false
 		local away = if at then part.Position - at else Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1))
 		if away.Magnitude < 0.05 then away = Vector3.new(random:NextNumber(-1, 1), 0.5, random:NextNumber(-1, 1)) end
 		table.insert(self.debris, {
@@ -12245,7 +13275,6 @@ function MountainView._throwDebris(self: View, parts: { BasePart }, at: Vector3?
 				part.Transparency = 0
 				part.CanCollide = true
 				part.CanQuery = true
-				part.CastShadow = true
 				if part.Parent == self.folder then
 					self:_release(part, entry.kind)
 				else
@@ -12467,7 +13496,8 @@ function RebuildEffects.restore(data: any)
 		local p = Instance.new("WedgePart")
 		p.Size = stone.size * 1.6
 		p.Color = stone.colour
-		p.Material = Enum.Material.Slate
+		-- Stone or hay, like the rock it becomes.
+		p.Material = if typeof(stone.part) == "Instance" and stone.part:IsA("BasePart") then stone.part.Material else Enum.Material.Slate
 		p.Anchored = true
 		p.CanCollide = false
 		p.CanQuery = false

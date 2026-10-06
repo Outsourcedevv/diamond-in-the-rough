@@ -3,8 +3,7 @@
 -- mountain valley, where every player arrives. A ring of marble columns with
 -- gold capitals carries royal blue banners; a royal blue carpet leads from the
 -- spawn to a stepped dais where a giant diamond turns slowly (each client
--- spins it, see GamesMenu), and a crest above the far colonnade welcomes
--- players. Games are joined from the games menu on the side of the screen.
+-- spins it, see GamesMenu). Games are joined from the games menu on the side of the screen.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
@@ -53,18 +52,6 @@ end
 local function beam(parent: Instance, name: string, a: Vector3, b: Vector3, width: number, height: number, colour: Color3, material: Enum.Material, solid: boolean?): Part
 	local length = (b - a).Magnitude
 	return piece(parent, name, Vector3.new(width, height, length), CFrame.lookAt((a + b) / 2, b), colour, material, solid)
-end
-
-local function label(parent: Instance, text: string, position: UDim2, size: UDim2, colour: Color3, font: Enum.Font)
-	local line = Instance.new("TextLabel")
-	line.BackgroundTransparency = 1
-	line.Position = position
-	line.Size = size
-	line.Font = font
-	line.TextScaled = true
-	line.TextColor3 = colour
-	line.Text = text
-	line.Parent = parent
 end
 
 function Lobby.build(parent: Instance): Built
@@ -213,27 +200,20 @@ function Lobby.build(parent: Instance): Built
 			gui.PixelsPerStud = 30
 			gui.LightInfluence = 0.8
 			gui.Parent = banner
-			label(gui, "👑", UDim2.fromScale(0.1, 0.12), UDim2.fromScale(0.8, 0.3), GOLD, Enum.Font.GothamBold)
-			label(gui, "◆", UDim2.fromScale(0.3, 0.56), UDim2.fromScale(0.4, 0.2), GOLD, Enum.Font.GothamBold)
+			-- Two gold diamonds (squares turned on their corners), large over small.
+			for _, mark in { { 0.27, 0.42 }, { 0.66, 0.2 } } do
+				local gem = Instance.new("Frame")
+				gem.AnchorPoint = Vector2.new(0.5, 0.5)
+				gem.Position = UDim2.fromScale(0.5, mark[1])
+				gem.Size = UDim2.fromScale(mark[2], mark[2])
+				gem.SizeConstraint = Enum.SizeConstraint.RelativeXX
+				gem.Rotation = 45
+				gem.BackgroundColor3 = GOLD
+				gem.BorderSizePixel = 0
+				gem.Parent = gui
+			end
 		end
 	end
-
-	-- The welcome crest stands on the far colonnade, facing the spawn above the diamond.
-	local crestAt = O + Vector3.new(0, entablature + 2.8 - O.Y + 5.5, -radius)
-	local crestFrame = CFrame.lookAt(crestAt, crestAt + Vector3.new(0, 0, 1))
-	local crest = piece(model, "Crest", Vector3.new(34, 11, 1), crestFrame, MARBLE, Enum.Material.Marble)
-	for _, edge in { { 0, 5.7, 35.2, 0.6 }, { 0, -5.7, 35.2, 0.6 }, { 17.3, 0, 0.6, 11.8 }, { -17.3, 0, 0.6, 11.8 } } do
-		piece(model, "CrestFrame", Vector3.new(edge[3], edge[4], 1.2), crestFrame * CFrame.new(edge[1], edge[2], 0), GOLD, Enum.Material.Metal)
-	end
-	piece(model, "CrestCrown", Vector3.new(6, 3, 1.2), crestFrame * CFrame.new(0, 7.4, 0), GOLD, Enum.Material.Metal)
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 24
-	gui.LightInfluence = 0.7
-	gui.Parent = crest
-	label(gui, "WELCOME", UDim2.fromScale(0.05, 0.08), UDim2.fromScale(0.9, 0.52), ROYAL, Enum.Font.Merriweather)
-	label(gui, "Open  👑 GAMES  on the left to play", UDim2.fromScale(0.08, 0.64), UDim2.fromScale(0.84, 0.24), Color3.fromRGB(150, 112, 30), Enum.Font.GothamBold)
 
 	-- A marble balustrade with a gold rail rings the edge; an invisible wall
 	-- behind it stops anyone jumping off.

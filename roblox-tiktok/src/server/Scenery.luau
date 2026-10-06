@@ -28,6 +28,7 @@ local Farm = require(script.Parent.Farm)
 local Scenery = {}
 local random = Random.new(4207)
 
+local SHADOW_SIZE = 3 -- studs across: smaller parts cast no shadow
 local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
 	local p = Instance.new(kind or "Part") :: BasePart
 	p.Name = name
@@ -39,7 +40,9 @@ local function piece(parent: Instance, name: string, size: Vector3, frame: CFram
 	p.CanCollide = false
 	p.CanQuery = false
 	p.CanTouch = false
-	p.CastShadow = true
+	-- Small props (crates, firewood, flowers, trim) cast no shadow: theirs are
+	-- too small to notice and each one costs every frame.
+	p.CastShadow = size.Magnitude >= SHADOW_SIZE
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 	p.Parent = parent
@@ -716,26 +719,6 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	local leanAt = yard + Vector3.new(-2.9, 0, 0.6)
 	beam(folder, "PickaxeHandle", leanAt, leanAt + Vector3.new(0.4, 2.6, 0.5), 0.16, Color3.fromRGB(122, 84, 52), Enum.Material.Wood)
 	piece(folder, "PickaxeHead", Vector3.new(1.5, 0.22, 0.22), CFrame.new(leanAt + Vector3.new(0.4, 2.55, 0.5)) * CFrame.Angles(0, 0.9, 0.25), Color3.fromRGB(150, 154, 158), Enum.Material.Metal)
-
-	-- A trail sign points the way to the mountain.
-	local signAt = camp + Vector3.new(4.5, 0, -11)
-	beam(folder, "SignPost", signAt, signAt + Vector3.new(0, 4.2, 0), 0.35, Color3.fromRGB(92, 68, 46), Enum.Material.Wood)
-	-- The lettered face looks back towards the camp, where players spawn.
-	local board = piece(folder, "SignBoard", Vector3.new(4.4, 1.1, 0.2), CFrame.lookAt(signAt + Vector3.new(0, 3.5, 0), signAt + Vector3.new(0, 3.5, 1)), Color3.fromRGB(132, 100, 66), Enum.Material.WoodPlanks)
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 50
-	gui.LightInfluence = 1
-	gui.Parent = board
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.Font = Enum.Font.FredokaOne
-	text.TextScaled = true
-	text.TextColor3 = Color3.fromRGB(250, 236, 206)
-	text.Text = "⛏  DIAMOND MOUNTAIN"
-	text.Parent = gui
 
 	-- What only the alpine theme shows.
 	local alpine = Instance.new("Folder")

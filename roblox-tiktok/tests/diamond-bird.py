@@ -167,7 +167,7 @@ advance(20)
 check(bird.multiplier() == 2, "still doubled after 25 seconds")
 advance(6)
 check(bird.multiplier() == 1, "back to normal after 30 seconds")
-check(feed[#feed] == "💎 Double gifts are over", "the feed says the bonus ended")
+check(feed[#feed] == "Double gifts are over", "the feed says the bonus ended")
 
 -- Uncaught birds fly off when the next one arrives.
 bird.spawn()

@@ -25,11 +25,15 @@ export function createEventQueue(limit = 1000) {
   };
 }
 
+// Rebuild test presets: blocks added -> the coins that pick the game's adding
+// effect (Pebble Drop up to Mountain Rising), smallest to biggest.
+export const REBUILD_TESTS = { 100: 1, 1000: 10, 10000: 100, 50000: 500, 100000: 1000, 1500000: 10000 };
+
 export function rebuildTestEvent(blocks) {
-  if (![1000, 10000, 100000, 1500000].includes(blocks)) {
+  if (typeof blocks !== 'number' || !Object.hasOwn(REBUILD_TESTS, blocks)) {
     throw new Error('Choose a supported rebuild test amount.');
   }
-  return { type: 'gift', user: 'tester', name: 'Test viewer', gift: 'Rebuild test', coins: 1, count: 1, rocks: -blocks };
+  return { type: 'gift', user: 'tester', name: 'Test viewer', gift: 'Rebuild test', coins: REBUILD_TESTS[blocks], count: 1, rocks: -blocks };
 }
 
 // The map themes the game can show: the alpine valley, sakura in blossom, or a ranch.
