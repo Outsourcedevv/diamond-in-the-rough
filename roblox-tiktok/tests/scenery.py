@@ -210,7 +210,7 @@ for _, p in sakura:GetDescendants() do
 		assert(flat.Magnitude > 55 and (flat - camp).Magnitude > 25 and not inReserved(flat), "cherry trees stay off the arena, camp and boards")
 		if p.Name == "FallenPetals" then carpets += 1 end
 	end
-	if p.Name == "ToriiPillar" then
+	if p.Name == "ToriiPillar" and (Vector3.new(p.CFrame.Position.X, 0, p.CFrame.Position.Z) - camp).Magnitude < 20 then
 		local at = p.CFrame.Position
 		assert(at.Z < 56.4 - 7 and at.Z > 56.4 - 11, "the torii stands just past the spawn pad: " .. at.Z)
 	end
@@ -222,8 +222,37 @@ for _, p in sakura:GetDescendants() do
 	assert(p.ClassName ~= "PointLight", "the sakura theme adds no lights")
 end
 assert(trees >= 40 and trees <= 48 and carpets == trees and blossoms >= trees * 4, "cherry groves: " .. trees)
-assert(torii == 1 and lanterns == 3, "a torii and three stone lanterns")
-assert(sakuraParts < 700, "the sakura scenery stays light: " .. sakuraParts)
+assert(torii == 2 and lanterns == 5, "two torii (camp and shrine) and five stone lanterns")
+assert(sakuraParts < 850, "the sakura scenery stays light: " .. sakuraParts)
+-- The shrine: on a flat meadow off the arena, camp and boards, facing the camp,
+-- with no cherry tree inside its grounds and its plinth reaching the ground.
+local shrines = {}
+for _, p in sakura:GetDescendants() do if p.Name == "Shrine" then table.insert(shrines, p) end end
+assert(#shrines == 1, "one shrine")
+local plinth = shrines[1]:FindFirstChild("ShrinePlinth")
+local roof, pillars = 0, 0
+for _, p in shrines[1]:GetDescendants() do
+	if p.Name == "ShrineRoof" then roof += 1 end
+	if p.Name == "ShrinePillar" then pillars += 1 end
+end
+assert(plinth ~= nil and roof == 4 and pillars == 10, "plinth, curved roof and pillars")
+local centre = plinth.CFrame.Position
+local flatCentre = Vector3.new(centre.X, 0, centre.Z)
+assert(flatCentre.Magnitude > 55 + 12 and (flatCentre - camp).Magnitude > 25 + 12 and not inReserved(flatCentre), "the shrine stands clear of the arena, camp and boards")
+local facing = plinth.CFrame.LookVector
+local toCamp = (camp - flatCentre).Unit
+assert(facing.X * toCamp.X + facing.Z * toCamp.Z > 0.99, "the shrine faces the camp")
+local bottom = centre.Y - plinth.Size.Y / 2
+for _, offset in { Vector3.new(-8.5, 0, -7), Vector3.new(8.5, 0, -7), Vector3.new(-8.5, 0, 7), Vector3.new(8.5, 0, 7) } do
+	local corner = plinth.CFrame * offset
+	assert(workspace:Raycast(Vector3.new(corner.X, 300, corner.Z)).Position.Y > bottom, "the plinth reaches the ground at every corner")
+end
+for _, p in sakura:GetDescendants() do
+	if p.Name == "SakuraTrunk" then
+		local at = p.CFrame.Position
+		assert((Vector3.new(at.X, 0, at.Z) - flatCentre).Magnitude > 17, "no cherry tree grows inside the shrine grounds")
+	end
+end
 -- Switching to sakura and back is instant and exact.
 assert(Scenery.setTheme("sakura") and Scenery.theme() == "sakura", "sakura can be chosen")
 assert(sakura.Parent == workspace and festoon.Parent == ServerStorage, "the blossoms show and the festoon gives way to the torii")
