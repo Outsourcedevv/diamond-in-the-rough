@@ -1,0 +1,370 @@
+--!strict
+-- The games menu on the left of the screen, in the lobby's royal white and
+-- gold: Diamond in the Rough with its live status and a Join button, more
+-- slots marked Coming soon, and Back to lobby while playing. The ◀ button
+-- hides it to a small tab; the tab (or G) shows it again. Also turns the
+-- lobby's giant diamond on this computer.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local Format = require(Shared:WaitForChild("Format"))
+
+local LobbyView = {}
+
+local IVORY = Color3.fromRGB(250, 248, 243)
+local GOLD = Color3.fromRGB(224, 178, 72)
+local ROYAL = Color3.fromRGB(34, 52, 140)
+local ROYAL_DEEP = Color3.fromRGB(18, 28, 92)
+local MUTED = Color3.fromRGB(140, 132, 118)
+local TITLE_FONT = Enum.Font.Merriweather
+local WIDTH = 360
+local TOGGLE_KEY = Enum.KeyCode.G
+
+local open = false
+
+function LobbyView.isOpen(): boolean
+	return open
+end
+
+local function make(className: string, properties: { [string]: any }, parent: Instance?): any
+	local instance = Instance.new(className)
+	for key, value in properties do
+		(instance :: any)[key] = value
+	end
+	if parent ~= nil then
+		instance.Parent = parent
+	end
+	return instance
+end
+
+local function rounded(parent: Instance, radius: number)
+	make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+end
+
+local function stroke(parent: Instance, colour: Color3, thickness: number, transparency: number?)
+	make("UIStroke", { Color = colour, Thickness = thickness, Transparency = transparency or 0, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, parent)
+end
+
+local function text(parent: Instance, properties: { [string]: any }): TextLabel
+	local label = make("TextLabel", {
+		BackgroundTransparency = 1,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 2,
+	}, parent)
+	for key, value in properties do
+		(label :: any)[key] = value
+	end
+	return label
+end
+
+-- What the Diamond in the Rough card says about the round going on now.
+function LobbyView.status(phase: string, stone: number): string
+	if phase == "Won" then return "🏆 Diamond found! A new round starts soon" end
+	if phase == "Rebuilding" then return "⛰ The mountain is being rebuilt" end
+	if phase == "Holding" then return "💎 Someone is holding the diamond!" end
+	return "🔴 LIVE · " .. Format.commas(stone) .. " stone left"
+end
+
+-- `request` sends joinGame / leaveGame; `onChange(inGame)` runs whenever the
+-- player moves between the lobby and the game (and once at the start).
+function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boolean) -> ())
+	local player = Players.LocalPlayer
+	local gui = make("ScreenGui", {
+		Name = "GamesMenu",
+		ResetOnSpawn = false,
+		DisplayOrder = 5,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	}, player:WaitForChild("PlayerGui"))
+
+	-- The tab that brings the menu back.
+	local tab = make("TextButton", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 12, 0.5, 0),
+		Size = UDim2.fromOffset(150, 48),
+		BackgroundColor3 = IVORY,
+		Font = Enum.Font.GothamBold,
+		TextSize = 19,
+		TextColor3 = ROYAL,
+		Text = "👑 GAMES",
+		AutoButtonColor = true,
+	}, gui)
+	rounded(tab, 14)
+	stroke(tab, GOLD, 2.5)
+
+	local panel = make("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, -WIDTH - 40, 0.5, 0),
+		Size = UDim2.fromOffset(WIDTH, 556),
+		BackgroundColor3 = IVORY,
+		Visible = false,
+	}, gui)
+	rounded(panel, 18)
+	stroke(panel, GOLD, 3)
+	make("UIGradient", {
+		Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(240, 235, 222)),
+		Rotation = 90,
+	}, panel)
+	make("UIPadding", {
+		PaddingLeft = UDim.new(0, 14),
+		PaddingRight = UDim.new(0, 14),
+		PaddingTop = UDim.new(0, 12),
+		PaddingBottom = UDim.new(0, 14),
+	}, panel)
+
+	text(panel, {
+		Size = UDim2.new(1, -48, 0, 40),
+		Font = TITLE_FONT,
+		TextSize = 30,
+		TextColor3 = ROYAL,
+		Text = "👑 GAMES",
+	})
+	text(panel, {
+		Position = UDim2.fromOffset(2, 40),
+		Size = UDim2.new(1, -48, 0, 20),
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
+		TextColor3 = MUTED,
+		Text = "Pick a game to play · G hides this",
+	})
+	local hide = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 2),
+		Size = UDim2.fromOffset(38, 38),
+		BackgroundColor3 = ROYAL,
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = "◀",
+	}, panel)
+	rounded(hide, 19)
+	make("Frame", {
+		Position = UDim2.fromOffset(0, 68),
+		Size = UDim2.new(1, 0, 0, 2),
+		BackgroundColor3 = GOLD,
+		BorderSizePixel = 0,
+	}, panel)
+
+	local list = make("Frame", {
+		Position = UDim2.fromOffset(0, 80),
+		Size = UDim2.new(1, 0, 1, -80),
+		BackgroundTransparency = 1,
+	}, panel)
+	make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8) }, list)
+
+	-- Diamond in the Rough.
+	local card = make("Frame", {
+		LayoutOrder = 1,
+		Size = UDim2.new(1, 0, 0, 96),
+		BackgroundTransparency = 1,
+	}, list)
+	rounded(card, 14)
+	stroke(card, GOLD, 2)
+	-- The royal blue fill is its own layer, so its gradient leaves the gold border alone.
+	local fill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 1 }, card)
+	rounded(fill, 14)
+	make("UIGradient", { Color = ColorSequence.new(ROYAL, ROYAL_DEEP), Rotation = 35 }, fill)
+	text(card, {
+		Position = UDim2.fromOffset(8, 10),
+		Size = UDim2.fromOffset(58, 58),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Font = Enum.Font.GothamBold,
+		TextSize = 44,
+		Text = "💎",
+	})
+	text(card, {
+		Position = UDim2.fromOffset(72, 10),
+		Size = UDim2.new(1, -80, 0, 26),
+		Font = TITLE_FONT,
+		TextSize = 20,
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = "Diamond in the Rough",
+	})
+	local live = text(card, {
+		Position = UDim2.fromOffset(72, 38),
+		Size = UDim2.new(1, -80, 0, 18),
+		Font = Enum.Font.GothamMedium,
+		TextSize = 13,
+		TextColor3 = Color3.fromRGB(205, 218, 255),
+		Text = "",
+	})
+	local join = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -10, 1, -10),
+		Size = UDim2.fromOffset(120, 30),
+		BackgroundColor3 = GOLD,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 16,
+		TextColor3 = ROYAL_DEEP,
+		Text = "JOIN",
+		ZIndex = 2,
+	}, card)
+	rounded(join, 10)
+
+	-- More games to come.
+	for index = 2, 4 do
+		local soon = make("Frame", {
+			LayoutOrder = index,
+			Size = UDim2.new(1, 0, 0, 84),
+			BackgroundColor3 = Color3.fromRGB(238, 235, 228),
+		}, list)
+		rounded(soon, 14)
+		stroke(soon, GOLD, 1.5, 0.45)
+		text(soon, {
+			Position = UDim2.fromOffset(8, 12),
+			Size = UDim2.fromOffset(58, 58),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Font = Enum.Font.GothamBold,
+			TextSize = 34,
+			TextTransparency = 0.25,
+			Text = "🔒",
+		})
+		text(soon, {
+			Position = UDim2.fromOffset(72, 18),
+			Size = UDim2.new(1, -150, 0, 24),
+			Font = TITLE_FONT,
+			TextSize = 19,
+			TextColor3 = MUTED,
+			Text = "Coming soon",
+		})
+		text(soon, {
+			Position = UDim2.fromOffset(72, 44),
+			Size = UDim2.new(1, -150, 0, 18),
+			Font = Enum.Font.GothamMedium,
+			TextSize = 13,
+			TextColor3 = Color3.fromRGB(165, 156, 140),
+			Text = "A new game is on its way",
+		})
+		local badge = text(soon, {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -10, 0.5, 0),
+			Size = UDim2.fromOffset(64, 24),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			BackgroundTransparency = 0,
+			BackgroundColor3 = IVORY,
+			Font = Enum.Font.GothamBold,
+			TextSize = 12,
+			TextColor3 = GOLD,
+			Text = "SOON",
+		})
+		rounded(badge, 12)
+		stroke(badge, GOLD, 1.5)
+	end
+
+	local back = make("TextButton", {
+		LayoutOrder = 10,
+		Size = UDim2.new(1, 0, 0, 44),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		TextColor3 = ROYAL,
+		Text = "🏰 Back to lobby",
+		Visible = false,
+	}, list)
+	rounded(back, 12)
+	stroke(back, ROYAL, 2)
+
+	-- Showing and hiding: the panel slides in from the left edge.
+	local slide: Tween? = nil
+	local function setOpen(show: boolean)
+		if show == open then return end
+		open = show
+		if slide then slide:Cancel() end
+		tab.Visible = not show
+		panel.Visible = true
+		local target = if show then UDim2.new(0, 12, 0.5, 0) else UDim2.new(0, -WIDTH - 40, 0.5, 0)
+		local tween = TweenService:Create(panel, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = target })
+		slide = tween
+		tween.Completed:Connect(function(playback)
+			if playback == Enum.PlaybackState.Completed and not open then panel.Visible = false end
+		end)
+		tween:Play()
+	end
+	tab.Activated:Connect(function() setOpen(true) end)
+	hide.Activated:Connect(function() setOpen(false) end)
+
+	-- G toggles the menu, unless the streamer bound G to a test gift.
+	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+		if processed or input.KeyCode ~= TOGGLE_KEY then return end
+		local ok, bindings = pcall(function()
+			return HttpService:JSONDecode(state:GetAttribute("GiftBindings") or "{}")
+		end)
+		if ok and type(bindings) == "table" and bindings[TOGGLE_KEY.Name] ~= nil then return end
+		setOpen(not open)
+	end)
+	-- First person locks the mouse; free it while the menu is open.
+	RunService.RenderStepped:Connect(function()
+		if open then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			UserInputService.MouseIconEnabled = true
+		end
+	end)
+
+	local function refreshLive()
+		live.Text = LobbyView.status(tostring(state:GetAttribute("Phase") or "Digging"), tonumber(state:GetAttribute("Stone")) or 0)
+	end
+	state:GetAttributeChangedSignal("Phase"):Connect(refreshLive)
+	state:GetAttributeChangedSignal("Stone"):Connect(refreshLive)
+	refreshLive()
+
+	local inGame: boolean? = nil
+	local function refreshPlace()
+		local now = player:GetAttribute("InGame") == true
+		if now == inGame then return end
+		inGame = now
+		join.Text = if now then "✓ PLAYING" else "JOIN"
+		join.BackgroundColor3 = if now then Color3.new(1, 1, 1) else GOLD
+		join.AutoButtonColor = not now
+		back.Visible = now
+		-- Arriving in the lobby opens the menu; joining the game tucks it away.
+		setOpen(not now)
+		onChange(now)
+	end
+	player:GetAttributeChangedSignal("InGame"):Connect(refreshPlace)
+	refreshPlace()
+
+	join.Activated:Connect(function()
+		if inGame then
+			setOpen(false)
+		else
+			request:FireServer("joinGame", "DiamondInTheRough")
+		end
+	end)
+	back.Activated:Connect(function()
+		request:FireServer("leaveGame")
+	end)
+
+	-- The lobby's giant diamond turns slowly and bobs (only when near).
+	task.spawn(function()
+		local lobby = workspace:WaitForChild("Lobby", math.huge)
+		local gem = lobby:WaitForChild("LobbyDiamond", math.huge)
+		local centre = gem:GetAttribute("Centre")
+		if typeof(centre) ~= "Vector3" then return end
+		local origin = CFrame.new(centre)
+		local parts: { BasePart } = {}
+		local offsets: { CFrame } = {}
+		for _, item in gem:GetDescendants() do
+			if item:IsA("BasePart") then
+				table.insert(parts, item)
+				table.insert(offsets, origin:ToObjectSpace(item.CFrame))
+			end
+		end
+		local frames: { CFrame } = table.create(#parts, CFrame.identity)
+		RunService.RenderStepped:Connect(function()
+			local camera = workspace.CurrentCamera
+			if camera == nil or (camera.CFrame.Position - centre).Magnitude > 400 then return end
+			local t = os.clock()
+			local turn = CFrame.new(centre + Vector3.new(0, math.sin(t * 1.3) * 0.5, 0)) * CFrame.Angles(0, t * 0.6, 0)
+			for i, offset in offsets do
+				frames[i] = turn * offset
+			end
+			workspace:BulkMoveTo(parts, frames, Enum.BulkMoveMode.FireCFrameChanged)
+		end)
+	end)
+end
+
+return LobbyView

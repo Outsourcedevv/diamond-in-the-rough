@@ -333,10 +333,14 @@ end
 function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?, z: number, radius: number? }?, checkpoint: (() -> ())?, onAdded: ((number) -> ())?): { number }
 	-- Bucket integer squared distances so large refills avoid sorting every
 	-- missing rock. Pop nearest buckets first, leaving the gem cell reserved.
+	-- Sorting yields, and players may dig meanwhile: cells dug after this point
+	-- are added back to the refill order once it is rebuilt.
+	local source, sourceCount = self.removedOrder, #self.removedOrder
 	if focus and focus.y ~= nil then
 		local buckets = {}
 		local distances = {}
-		for index, key in self.removedOrder do
+		for index = 1, sourceCount do
+			local key = source[index]
 			local x, y, z = Grid.coords(key)
 			local distance = (x - focus.x)^2 + (y - focus.y)^2 + (z - focus.z)^2
 			if buckets[distance] == nil then
@@ -354,10 +358,12 @@ function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?,
 				if checkpoint and #ordered % 256 == 0 then checkpoint() end
 			end
 		end
+		for index = sourceCount + 1, #source do table.insert(ordered, source[index]) end
 		self.removedOrder = ordered
 	elseif focus then
 		local distant, nearby = {}, {}
-		for index, key in self.removedOrder do
+		for index = 1, sourceCount do
+			local key = source[index]
 			if checkpoint and index % 256 == 0 then checkpoint() end
 			local x, y, z = Grid.coords(key)
 			local distance = (x - focus.x) ^ 2 + (z - focus.z) ^ 2
@@ -374,6 +380,7 @@ function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?,
 			return a.key > b.key
 		end)
 		for _, cell in nearby do table.insert(distant, cell.key) end
+		for index = sourceCount + 1, #source do table.insert(distant, source[index]) end
 		self.removedOrder = distant
 	end
 	local restored = {}
@@ -392,10 +399,12 @@ function Grid.restore(self: Grid, count: number, focus: { x: number, y: number?,
 		end
 	end
 	local processed = 0
+	local pages = self.solidPages
 	for key in affected do
 		processed += 1
 		if checkpoint and processed % 256 == 0 then checkpoint() end
-		if self:isExposed(key) then self:_expose(key) else self:_unexpose(key) end
+		-- A player may have dug this cell again while the refill was working.
+		if hasBit(pages, key) and self:isExposed(key) then self:_expose(key) else self:_unexpose(key) end
 	end
 	if #restored > 0 then self.growthHeap = nil; self.growthScores = nil; self.growthQueued = nil end
 	return restored

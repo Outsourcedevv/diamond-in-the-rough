@@ -129,7 +129,10 @@ spawn.Size = Vector3.new(14, 1, 14)
 spawn.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, spawnDistance), Vector3.new(0, 0.5, 0))
 spawn.Material = Enum.Material.WoodPlanks
 spawn.Color = Color3.fromRGB(129, 105, 79)
+-- Everyone arrives in the royal lobby; joining the game brings them here.
+spawn.Enabled = false
 spawn.Parent = workspace
+local lobby = require(script.Lobby).build(workspace)
 
 -- Leaderboards stand behind the mountain; the scenery keeps their ground clear.
 local Leaderboards = require(script.Leaderboards)
@@ -246,7 +249,11 @@ local holdWeld: WeldConstraint? = nil
 local mineCooldown: { [Player]: number } = {}
 local admins: { [Player]: boolean } = {}
 local settling: Tween? = nil
+-- Gift and rebuild work runs one job at a time (stoneBusy). Players keep
+-- digging and can grab an uncovered diamond while a gift blasts; only a
+-- rebuild refilling rock (stoneWork == "restore") holds the grab back.
 local stoneBusy = false
+local stoneWork: string? = nil
 local requestedRound: boolean? = nil
 
 local function stopSettling()
@@ -365,7 +372,9 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 		local capacity = growthCapacity()
 		local interrupted = if current:remaining() < capacity then cancelHoldForRebuild() else nil
 		local checkpoint = workCheckpoint(function() interruptRebuildHold(0, interrupted) end, "restore")
+		stoneWork = "restore"
 		local restored, at = current:restore(-amount, capacity, checkpoint)
+		stoneWork = nil
 		flushMountain("restore", at)
 		if restored > 0 then interruptRebuildHold(restored, interrupted) end
 		refreshStone()
@@ -376,7 +385,9 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 		return at, -restored
 	end
 	local count = math.min(amount, current:remaining())
+	stoneWork = "blast"
 	local centre = current:blast(count, workCheckpoint(nil, "blast"), centreKey)
+	stoneWork = nil
 	flushMountain("blast", centre)
 	-- Gift spectacle is rendered by GiftEffects on each client. Never create a
 	-- physics Explosion: blasts may remove grid stones, never the diamond or rigs.
@@ -386,6 +397,8 @@ local function applyStone(amount: number, centreKey: number?): (Vector3?, number
 end
 
 local function teleportHome(player: Player)
+	-- Players in the lobby stay there.
+	if player:GetAttribute("InGame") ~= true then return end
 	local character = player.Character
 	if character ~= nil then
 		character:PivotTo(spawn.CFrame + Vector3.new(0, 4, 0))
@@ -509,16 +522,25 @@ local function newRound(animated: boolean?)
 	setPhase("Digging")
 	roundStart = workspace:GetServerTimeNow()
 	State:SetAttribute("RoundStart", roundStart)
+	-- Gifts sent during the win screen apply now, one job at a time: a gift
+	-- that started meanwhile finishes first, so the two never overlap.
+	while stoneBusy do task.wait() end
 	local carried = pendingChanges
 	pendingChanges = {}
 	stoneBusy = true
-	for _, change in carried do applyStone(change) end
+	for _, change in carried do
+		local ok, problem = pcall(function() applyStone(change) end)
+		if not ok then warn("[DiamondRush] queued gift failed: " .. tostring(problem)) end
+	end
+	stoneWork = nil
 	stoneBusy = false
 end
 
 -- Holding the diamond -----------------------------------------------------------
 local function grab(player: Player)
-	if stoneBusy or phase ~= "Revealed" then
+	-- A blasting gift may still be running: the diamond can be taken as soon
+	-- as it shows. Not while a rebuild is refilling the rock around it.
+	if stoneWork == "restore" or phase ~= "Revealed" then
 		return
 	end
 	local character = player.Character
@@ -597,6 +619,7 @@ interruptRebuildHold = function(restored: number, interrupted: Player?)
 	-- The former holder goes to the highest restored surface after a big rebuild.
 	local summit = if interrupted and restored >= 10000 then current:summit() else nil
 	for _, player in Players:GetPlayers() do
+		if player:GetAttribute("InGame") ~= true then continue end
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -859,12 +882,16 @@ local function onTikTok(event: TikTokFeed.Event)
 			stoneBusy = true
 			State:SetAttribute("GiftProcessing", true)
 			local ok, problem = pcall(processTikTok, nextEvent)
+			stoneWork = nil
 			stoneBusy = false
 			if not ok then warn("[DiamondRush] gift failed: " .. tostring(problem)) end
+			-- Digs made during the gift reach the players now if no gift change carried them.
+			if mountain and mountain:hasChanges() then flushMountain() end
 			if requestedRound ~= nil then
 				local animated = requestedRound
 				requestedRound = nil
-				newRound(animated)
+				local roundOk, roundProblem = pcall(newRound, animated)
+				if not roundOk then warn("[DiamondRush] new round failed: " .. tostring(roundProblem)) end
 			end
 			State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
 			if os.clock() - workerFrameStart >= 0.003 then
@@ -977,6 +1004,66 @@ local function placeStatue(player: Player, value: any)
 	notice(player, "Gold statue placed for " .. clean .. "!")
 end
 
+local function removeStatue(player: Player, index: number)
+	local statue = settings.statues[index]
+	if statue == nil then return end
+	table.remove(settings.statues, index)
+	buildStatues()
+	saveSettings()
+	notice(player, "Removed the statue for " .. statue.n .. ".")
+end
+
+-- Removes the statue the streamer is standing next to.
+local STATUE_REACH = 30
+local function removeNearestStatue(player: Player)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if root == nil or not root:IsA("BasePart") then return end
+	local index = Statue.nearest(settings.statues, root.Position, STATUE_REACH)
+	if index == nil then
+		notice(player, if #settings.statues == 0 then "There are no statues to remove."
+			else "Walk up to the statue you want to remove, then press the button again.")
+		return
+	end
+	removeStatue(player, index)
+end
+
+-- The lobby and the game ------------------------------------------------------------
+-- Players arrive in the lobby and join Diamond in the Rough from the games
+-- menu; "Back to lobby" returns them. Respawns follow where they are.
+local lastMove: { [Player]: number } = {}
+local function placeFor(player: Player): SpawnLocation
+	return if player:GetAttribute("InGame") == true then spawn else lobby.spawn
+end
+local function setInGame(player: Player, joining: boolean)
+	if (player:GetAttribute("InGame") == true) == joining then return end
+	if not joining and holder == player then
+		notice(player, "You're holding the diamond! Win or lose it first, then go back to the lobby.")
+		return
+	end
+	local now = os.clock()
+	if now - (lastMove[player] or -math.huge) < 1 then return end
+	lastMove[player] = now
+	player:SetAttribute("InGame", joining)
+	local target = placeFor(player)
+	player.RespawnLocation = target
+	local character = player.Character
+	if character then
+		character:PivotTo(target.CFrame + Vector3.new(0, 4, 0))
+	end
+end
+-- A new character starts at the lobby or the camp, whichever the player is in.
+local function placeCharacter(player: Player, character: Model)
+	local root = character:WaitForChild("HumanoidRootPart", 10)
+	if root == nil or not root:IsA("BasePart") then return end
+	task.wait()
+	if character.Parent == nil then return end
+	local target = placeFor(player)
+	if (root.Position - target.Position).Magnitude > 30 then
+		character:PivotTo(target.CFrame + Vector3.new(0, 4, 0))
+	end
+end
+
 local function applySetting(player: Player, action: string, value: any)
 	if action == "setWins" and type(value) == "number" then
 		settings.wins = math.clamp(math.floor(value), 0, 999999)
@@ -1023,10 +1110,21 @@ local function applySetting(player: Player, action: string, value: any)
 		placeStatue(player, value)
 		return
 	elseif action == "removeStatue" and type(value) == "number" then
-		local index = math.floor(value)
-		if settings.statues[index] == nil then return end
-		table.remove(settings.statues, index)
+		removeStatue(player, math.floor(value))
+		return
+	elseif action == "removeNearestStatue" then
+		removeNearestStatue(player)
+		return
+	elseif action == "removeAllStatues" then
+		if #settings.statues == 0 then
+			notice(player, "There are no statues to remove.")
+			return
+		end
+		table.clear(settings.statues)
 		buildStatues()
+		saveSettings()
+		notice(player, "All statues removed.")
+		return
 	elseif action == "resetBoard" and (value == "gifts" or value == "likes") then
 		if value == "gifts" then giftTally.reset() else likeTally.reset() end
 		boardsDirty = true
@@ -1068,8 +1166,9 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
 		-- DigPerSecond allows for the time since the last dig.
 		-- The client names the rock cell it is aiming at (rock parts are local).
+		-- Digging carries on while a gift blasts or rebuilds the mountain.
 		local current = mountain
-		if stoneBusy or current == nil or phase == "Won" or phase == "Rebuilding" or holder == player
+		if current == nil or phase == "Won" or phase == "Rebuilding" or holder == player
 			or type(value) ~= "number" or value ~= math.floor(value) or value < 0 or value >= 2 ^ 32 then
 			return
 		end
@@ -1091,7 +1190,8 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		mineCooldown[player] = now
 		if current:dig(key, allowed) > 0 then
-			flushMountain("dig", at)
+			-- During a gift its own updates (every 0.05 s) carry the dig too.
+			if not stoneBusy then flushMountain("dig", at) end
 			refreshStone()
 			settleDiamond()
 		end
@@ -1109,6 +1209,10 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		if current then
 			sendMessages(current:snapshot(false), player)
 		end
+		return
+	end
+	if action == "joinGame" or action == "leaveGame" then
+		setInGame(player, action == "joinGame")
 		return
 	end
 	if admins[player] then
@@ -1172,6 +1276,14 @@ if modernChat then
 end
 
 local function onPlayer(player: Player)
+	player:SetAttribute("InGame", false)
+	player.RespawnLocation = lobby.spawn
+	player.CharacterAdded:Connect(function(character)
+		placeCharacter(player, character)
+	end)
+	if player.Character then
+		task.spawn(placeCharacter, player, player.Character)
+	end
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
 	if not modernChat then
@@ -1187,11 +1299,12 @@ for _, player in Players:GetPlayers() do
 end
 Players.PlayerRemoving:Connect(function(player)
 	admins[player] = nil
+	lastMove[player] = nil
 	mineCooldown[player] = nil
 	synced[player] = nil
 	readyAt[player] = nil
 end)
 
 publishSettings()
-State:SetAttribute("TikTok", "Startingâ€¦")
+State:SetAttribute("TikTok", "Starting…")
 newRound()

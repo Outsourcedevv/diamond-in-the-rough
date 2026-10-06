@@ -124,6 +124,63 @@ end)
 deliver({ view }, server, "blast")
 verify(view, server, "streamed blast")
 
+-- Every listed surface rock is solid and exposed, and every exposed rock is listed.
+local function surfaceListed(grid: any, label: string)
+	for index, key in grid.exposedList do
+		check(grid.exposedIndex[key] == index and grid:isSolid(key) and grid:isExposed(key), label .. ": surface list holds only exposed rock")
+	end
+	local exposed = 0
+	grid:eachSolid(function(key)
+		if grid:isExposed(key) then exposed += 1 end
+	end)
+	check(exposed == #grid.exposedList, label .. ": every exposed rock is on the surface list")
+end
+
+-- A rebuild and a blast that overlap within one batch (a gift blasting rock
+-- the rebuild has only just added): the clients must end up without it.
+server:blast(6000, nil)
+deliver({ view }, server, "blast")
+server:restore(3000, 60000)
+local freshRock = nil
+for index = #server.addedKeys, 1, -1 do
+	local candidate = server.addedKeys[index]
+	if server:isExposed(candidate) then
+		freshRock = candidate
+		break
+	end
+end
+check(freshRock ~= nil, "fixture: the rebuild left exposed rock")
+server:blast(2000, nil, freshRock)
+local added = {}
+for _, k in server.addedKeys do added[k] = true end
+local overlap = 0
+for _, k in server.removedKeys do if added[k] then overlap += 1 end end
+check(overlap > 0, "fixture: the blast took rock the rebuild had just added")
+deliver({ view }, server, "blast")
+verify(view, server, "rebuild and blast in one batch")
+surfaceListed(server.grid, "rebuild and blast in one batch")
+
+-- Players dig while a gift blasts or rebuilds; changes stream as they happen.
+local digs = 0
+local function digDuring()
+	local target = server.grid:randomExposed()
+	if target and server:dig(target, 3) > 0 then digs += 1 end
+	if digs % 5 == 0 then deliver({ view }, server, "blast") end
+end
+server:blast(8000, digDuring)
+deliver({ view }, server, "blast")
+verify(view, server, "digging during a blast")
+surfaceListed(server.grid, "digging during a blast")
+server:restore(7000, 60000, digDuring)
+deliver({ view }, server, "restore")
+verify(view, server, "digging during a rebuild")
+surfaceListed(server.grid, "digging during a rebuild")
+server:restore(server:total() - server:remaining() + 3000, 60000, digDuring)
+deliver({ view }, server, "restore")
+verify(view, server, "digging during refill and growth")
+surfaceListed(server.grid, "digging during refill and growth")
+check(digs > 40, "players dug while the gifts ran: " .. digs)
+
 -- A player joining mid-round gets the current rock, then follows changes.
 local late = MountainView.new()
 snapshot(late, server)
@@ -148,6 +205,18 @@ probe:_syncDiamond()
 check(probe.revealed and events[3] == true, "digging can announce it again")
 probe:_syncDiamond()
 check(#events == 3, "unchanged exposure does not repeat announcements")
+
+-- A long gift shows the diamond the moment it uncovers it, then carries on
+-- (the diamond can be picked up while the rest of the gift is still blasting).
+local midway = Mountain.new(25000, 0.4, function(open) table.insert(events, open) end)
+table.clear(events)
+local slices, shownAt = 0, nil
+midway:blast(22000, function()
+	slices += 1
+	if shownAt == nil and #events > 0 then shownAt = slices end
+end)
+check(shownAt ~= nil and shownAt < slices - 5 and events[1] == true, "a long blast shows the diamond before it finishes: " .. tostring(shownAt) .. " of " .. slices)
+check(midway:total() - midway:remaining() == 22000, "the rest of the gift still blasts after the diamond shows")
 
 -- Server-side checks that replace raycasts against server parts.
 local gem = probe:keyPosition(probe.diamondKey)

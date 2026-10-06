@@ -39,11 +39,29 @@ local function smooth(value: number): number
 	return value * value * (3 - 2 * value)
 end
 
+-- In the lobby the view is a normal third-person camera and the hands hide.
+local enabled = true
+local function applyCamera()
+	local player = Players.LocalPlayer
+	if enabled then
+		player.CameraMode = Enum.CameraMode.LockFirstPerson
+		player.CameraMinZoomDistance = 0.5
+		player.CameraMaxZoomDistance = 0.5
+	else
+		player.CameraMode = Enum.CameraMode.Classic
+		player.CameraMaxZoomDistance = 24
+		player.CameraMinZoomDistance = 8
+	end
+end
+
+function FirstPerson.setEnabled(on: boolean)
+	enabled = on
+	applyCamera()
+end
+
 function FirstPerson.start()
 	local player = Players.LocalPlayer
-	player.CameraMode = Enum.CameraMode.LockFirstPerson
-	player.CameraMinZoomDistance = 0.5
-	player.CameraMaxZoomDistance = 0.5
+	applyCamera()
 
 	local rig = Instance.new("Model")
 	rig.Name = "FirstPersonHands"
@@ -197,7 +215,7 @@ function FirstPerson.start()
 		local camera = workspace.CurrentCamera
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if camera == nil or character == nil or humanoid == nil or humanoid.Health <= 0 then
+		if not enabled or camera == nil or character == nil or humanoid == nil or humanoid.Health <= 0 then
 			rig.Parent = nil
 			gem.model.Parent = nil
 			sparkles.Enabled = false

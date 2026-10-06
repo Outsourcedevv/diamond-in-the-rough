@@ -133,6 +133,13 @@ end
 check(gold == 6 and facets == 64 and plaque, "gold figure, a full diamond and a plaque are built")
 shown = texts()
 check(shown["DiamondDave"] and shown["34,999 COINS"], "the plaque shows the name and coins")
+
+-- "Remove the statue nearest me" picks the closest statue within reach.
+local saved = { { x = 0, z = 80 }, { x = 20, z = 80 }, { x = 60, z = 80 } }
+check(Statue.nearest(saved, Vector3.new(17, 9, 78), 30) == 2, "the closest statue is chosen")
+check(Statue.nearest(saved, Vector3.new(4, 50, 80), 30) == 1, "height does not matter, only distance across the ground")
+check(Statue.nearest(saved, Vector3.new(0, 0, 0), 30) == nil, "nothing is removed when no statue is in reach")
+check(Statue.nearest({}, Vector3.new(0, 0, 80), 30) == nil, "nothing to remove when there are no statues")
 print(string.format("PASS: %d leaderboard and statue checks", passed))
 '''
 

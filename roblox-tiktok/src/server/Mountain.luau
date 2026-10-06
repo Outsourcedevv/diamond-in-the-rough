@@ -107,21 +107,49 @@ function Mountain.snapshot(self: Mountain, animated: boolean?, start: number?): 
 	return messages
 end
 
+-- The net change since the last flush. When work overlaps (a gift blasting
+-- rock a rebuild has only just added, or a player digging during a gift), a
+-- cell can change both ways in one batch. Clients apply removals before
+-- additions, so each cell is sent once, by what it is now: otherwise a rock
+-- added and blasted again would reach them as removed-then-added and stay on
+-- screen after the server destroyed it.
+local function netChanges(grid: Grid.Grid, removedKeys: { number }, addedKeys: { number }): ({ number }, { number })
+	-- One-way batches need no filtering: a cell is only removed while solid
+	-- and only added while empty, so without the other list nothing repeats.
+	if #removedKeys == 0 or #addedKeys == 0 then return removedKeys, addedKeys end
+	local pages = grid.solidPages
+	local seen, seenPages = Grid.cellMap()
+	local removed, added = {}, {}
+	for _, key in removedKeys do
+		if not Grid.hasBit(seenPages, key) and not Grid.hasBit(pages, key) then
+			seen[key] = true
+			table.insert(removed, key)
+		end
+	end
+	for _, key in addedKeys do
+		if not Grid.hasBit(seenPages, key) and Grid.hasBit(pages, key) then
+			seen[key] = true
+			table.insert(added, key)
+		end
+	end
+	return removed, added
+end
+
 -- Change lists since the last flush, at most one encoded chunk each, or an
 -- empty list when nothing changed.
 function Mountain.flush(self: Mountain, effect: string?, at: Vector3?): { any }
 	local diffs: { any } = {}
-	if #self.removedKeys > 0 then
-		for _, chunk in Codec.encode(self.removedKeys) do
+	local removed, added = netChanges(self.grid, self.removedKeys, self.addedKeys)
+	self.removedKeys, self.addedKeys = {}, {}
+	if #removed > 0 then
+		for _, chunk in Codec.encode(removed) do
 			table.insert(diffs, { round = self.round, removed = { chunk }, effect = effect, at = at })
 		end
-		self.removedKeys = {}
 	end
-	if #self.addedKeys > 0 then
-		for _, chunk in Codec.encode(self.addedKeys) do
+	if #added > 0 then
+		for _, chunk in Codec.encode(added) do
 			table.insert(diffs, { round = self.round, added = { chunk }, effect = effect, at = at })
 		end
-		self.addedKeys = {}
 	end
 	return diffs
 end
@@ -142,7 +170,17 @@ end
 
 -- Refills dug cells from the diamond outward, then grows new rock up to
 -- `capacity`. Returns how many rocks were added and where the refill started.
+-- Long work checks the diamond as it goes, so it shows the moment a gift
+-- uncovers it (and hides again when a rebuild covers it), not only at the end.
+function Mountain._watching(self: Mountain, checkpoint: (() -> ())?): () -> ()
+	return function()
+		self:_syncDiamond()
+		if checkpoint then checkpoint() end
+	end
+end
+
 function Mountain.restore(self: Mountain, count: number, capacity: number?, checkpoint: (() -> ())?): (number, Vector3?)
+	checkpoint = self:_watching(checkpoint)
 	local dx, dy, dz = Grid.coords(self.diamondKey)
 	-- Look the list up on every call: a flush during the work replaces it.
 	local function record(key: number) table.insert(self.addedKeys, key) end
@@ -182,7 +220,7 @@ function Mountain.blast(self: Mountain, count: number, checkpoint: (() -> ())?, 
 		return nil
 	end
 	-- Look the list up on every call: a flush during the work replaces it.
-	local _, actualCentre = self.grid:blast(count, centreKey, checkpoint, function(key) table.insert(self.removedKeys, key) end)
+	local _, actualCentre = self.grid:blast(count, centreKey, self:_watching(checkpoint), function(key) table.insert(self.removedKeys, key) end)
 	self.grid:takeFresh()
 	self:_syncDiamond()
 	return if actualCentre then self:keyPosition(actualCentre) else nil
