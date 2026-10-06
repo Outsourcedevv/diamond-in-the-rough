@@ -58,7 +58,7 @@ local settings = {
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	leaderboards = { gifts = {}, likes = {} } :: { gifts: { any }, likes: { any } },
 	statues = {} :: { any },
-	theme = "default", -- the map's look: "default" (alpine) or "sakura"
+	theme = "default", -- the map's look: "default" (alpine), "sakura" or "farm"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 }
 local saved = Store.load()
@@ -148,7 +148,7 @@ local reserved = {}
 for _, spot in boardSpots do table.insert(reserved, { at = spot.at, radius = 30 }) end
 
 -- Hills, distant peaks, a lake, a pine forest, boulders and a campfire, in the
--- saved theme (alpine or sakura).
+-- saved theme (alpine, sakura or farm).
 local Scenery = require(script.Scenery)
 if Scenery.LOOKS[settings.theme] == nil then settings.theme = "default" end
 Scenery.build(mountainRadius, spawn.Position, reserved, settings.theme)

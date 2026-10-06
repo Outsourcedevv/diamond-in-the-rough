@@ -603,11 +603,12 @@ panelLabel("MAP THEME (changes for everyone straight away)")
 local themeButtons = panelButtons({
 	{ "⛰ Alpine", function() send("setTheme", "default") end },
 	{ "🌸 Sakura", function() send("setTheme", "sakura") end },
+	{ "🚜 Farm", function() send("setTheme", "farm") end },
 })
 -- The theme showing now is lit up.
 local function refreshTheme()
 	local theme = attr("Theme", "default")
-	for i, name in { "default", "sakura" } do
+	for i, name in { "default", "sakura", "farm" } do
 		themeButtons[i].BackgroundColor3 = if theme == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
 	end
 end

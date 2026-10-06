@@ -9,11 +9,13 @@
 -- low-poly wedge trees. The look relies on the place's Future lighting and
 -- 2022 materials (see default.project.json).
 --
--- Two themes can be switched live (Scenery.setTheme): the alpine default, and
--- sakura, which adds blossoming cherry trees, a torii gate and stone lanterns
--- (see Sakura) under a soft pink spring light. The alpine theme has a few
--- things of its own, the camp's festoon lights and a watchtower (see
--- Watchtower), which make way for sakura.
+-- Three themes can be switched live (Scenery.setTheme): the alpine default;
+-- sakura, which adds blossoming cherry trees, a torii gate, stone lanterns and
+-- a shrine (see Sakura) under a soft pink spring light; and farm, which fences
+-- the arena in as a ranch corral with a gate on the trail and adds a barn,
+-- silo, cornfield and cows (see Farm) under a warm harvest sun. The alpine
+-- theme has a few things of its own, the camp's festoon lights and a
+-- watchtower (see Watchtower), which make way for the others.
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
@@ -21,6 +23,7 @@ local PartShapes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitFor
 local ScenePack = require(script.Parent.ScenePack)
 local Sakura = require(script.Parent.Sakura)
 local Watchtower = require(script.Parent.Watchtower)
+local Farm = require(script.Parent.Farm)
 
 local Scenery = {}
 local random = Random.new(4207)
@@ -261,7 +264,7 @@ export type Look = {
 	water: Color3,
 }
 
-Scenery.THEMES = { "default", "sakura" }
+Scenery.THEMES = { "default", "sakura", "farm" }
 Scenery.LOOKS = {
 	-- A clear late-afternoon alpine sun, soft sky light, aerial haze and a
 	-- gentle filmic grade.
@@ -311,21 +314,46 @@ Scenery.LOOKS = {
 		},
 		water = Color3.fromRGB(56, 102, 116),
 	},
+	-- Harvest time on the ranch: a warm, low summer sun through a golden
+	-- haze, sun-ripened meadows and creamy clouds.
+	farm = {
+		clock = 16.9,
+		brightness = 2.7,
+		ambient = Color3.fromRGB(86, 78, 70),
+		outdoorAmbient = Color3.fromRGB(142, 130, 114),
+		colorShiftTop = Color3.fromRGB(50, 30, 8),
+		exposure = 0.12,
+		atmosphere = { density = 0.28, offset = 0.2, color = Color3.fromRGB(234, 214, 180), decay = Color3.fromRGB(150, 120, 90), glare = 0.4, haze = 1.7 },
+		grade = { contrast = 0.08, saturation = 0.12, tint = Color3.fromRGB(255, 244, 226) },
+		bloom = { intensity = 0.5, size = 26, threshold = 1.25 },
+		rays = 0.08,
+		clouds = { cover = 0.35, density = 0.45, color = Color3.fromRGB(255, 246, 230) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(126, 138, 66),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(110, 124, 58),
+			[Enum.Material.Ground] = Color3.fromRGB(134, 104, 70),
+			[Enum.Material.Mud] = Color3.fromRGB(96, 76, 56),
+			[Enum.Material.Rock] = Color3.fromRGB(126, 120, 110),
+			[Enum.Material.Snow] = Color3.fromRGB(244, 240, 232),
+		},
+		water = Color3.fromRGB(52, 96, 98),
+	},
 } :: { [string]: Look }
 
 -- Scenery that belongs to one theme: shown with it, kept in ServerStorage otherwise.
-local themed: { alpine: Instance?, home: Instance?, sakura: Instance? } = {}
+local themed: { alpine: Instance?, home: Instance?, sakura: Instance?, farm: Instance? } = {}
 local effects: { atmosphere: Atmosphere, grade: ColorCorrectionEffect, bloom: BloomEffect, rays: SunRaysEffect, clouds: Clouds }? = nil
 local current: string? = nil
 
--- Switches the valley to a theme ("default" or "sakura") straight away.
+-- Switches the valley to a theme ("default", "sakura" or "farm") straight away.
 -- Returns false for an unknown theme, or before the scenery is built.
 function Scenery.setTheme(name: string): boolean
 	local look = Scenery.LOOKS[name]
 	if look == nil or effects == nil then return false end
 	local fx = effects :: any
-	if themed.alpine then themed.alpine.Parent = if name == "sakura" then ServerStorage else themed.home end
+	if themed.alpine then themed.alpine.Parent = if name == "default" then themed.home else ServerStorage end
 	if themed.sakura then themed.sakura.Parent = if name == "sakura" then workspace else ServerStorage end
+	if themed.farm then themed.farm.Parent = if name == "farm" then workspace else ServerStorage end
 	local terrain = workspace.Terrain
 	for material, colour in look.terrain do
 		terrain:SetMaterialColor(material, colour)
@@ -714,7 +742,7 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	alpine.Name = "AlpineOnly"
 	alpine.Parent = folder
 	-- Festoon lights over the camp, without a light per bulb. The sakura theme's
-	-- torii takes their place.
+	-- torii and the farm's ranch gate take their place.
 	local festoon = Instance.new("Folder")
 	festoon.Name = "Festoon"
 	festoon.Parent = alpine
@@ -789,8 +817,12 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	local sakura = Sakura.build(kit)
 	sakura.Parent = ServerStorage
 	themed.sakura = sakura
+	-- The farm theme's ranch, likewise.
+	local farm = Farm.build(kit)
+	farm.Parent = ServerStorage
+	themed.farm = farm
 
-	-- Light that both themes share; each theme sets the rest (see LOOKS).
+	-- Light that every theme shares; each theme sets the rest (see LOOKS).
 	-- Technology is Future (set in the place file).
 	Lighting.GeographicLatitude = 38
 	Lighting.GlobalShadows = true

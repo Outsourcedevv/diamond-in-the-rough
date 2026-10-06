@@ -346,7 +346,7 @@ for (const blocks of [1000, 10000, 100000, 1500000]) {
   };
   document.getElementById('rebuildTests').append(button);
 }
-for (const [theme, icon, name] of [['default', '⛰', 'Alpine'], ['sakura', '🌸', 'Sakura']]) {
+for (const [theme, icon, name] of [['default', '⛰', 'Alpine'], ['sakura', '🌸', 'Sakura'], ['farm', '🚜', 'Farm']]) {
   const button = document.createElement('button');
   button.textContent = `${icon} ${name}`;
   button.className = 'gift';
@@ -467,7 +467,7 @@ function describe(event) {
   if (event.type === 'gift' && event.rocks < 0) return `${event.name} sent ${event.gift} · rebuild up to ${Math.abs(event.rocks * event.count).toLocaleString()} blocks`;
   if (event.type === 'gift') return `${event.name} sent ${event.gift} x${event.count} · ${event.coins * event.count} coins`;
   if (event.type === 'like') return `${event.name} liked x${event.likes}`;
-  if (event.type === 'theme') return `Map theme: ${event.theme === 'sakura' ? 'Sakura' : 'Alpine'}`;
+  if (event.type === 'theme') return `Map theme: ${({ sakura: 'Sakura', farm: 'Farm' })[event.theme] ?? 'Alpine'}`;
   if (event.type === 'skin') return `Mountain skin: ${event.skin === 'hay' ? 'Hay & needle' : 'Stone & diamond'}`;
   return `${event.name} ${event.type === 'follow' ? 'followed' : 'shared the live'}`;
 }

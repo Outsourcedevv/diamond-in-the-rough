@@ -23,6 +23,7 @@ def module(path: str) -> str:
     source = source.replace("require(script.Parent.ScenePack)", "ScenePack")
     source = source.replace("require(script.Parent.Sakura)", "Sakura")
     source = source.replace("require(script.Parent.Watchtower)", "Watchtower")
+    source = source.replace("require(script.Parent.Farm)", "Farm")
     source = source.replace('require(script.Parent:WaitForChild("Inflate"))', "Inflate")
     source = source.replace('local Shared = ReplicatedStorage:WaitForChild("DiamondRush")\n', "")
     source = source.replace('require(Shared:WaitForChild("MeshPack"))', "MeshPack")
@@ -287,9 +288,85 @@ for _, p in sakura:GetDescendants() do
 		assert((Vector3.new(at.X, 0, at.Z) - flatCentre).Magnitude > 17, "no cherry tree grows inside the shrine grounds")
 	end
 end
+-- The farm theme: a ranch fence round the arena, open only where the trail
+-- comes in under the gate, and a barn with its yard beyond it.
+local farm = ServerStorage:FindFirstChild("FarmScenery")
+assert(farm ~= nil, "the farm scenery waits out of view")
+local ranch = farm:FindFirstChild("RanchFence")
+local posts, gateposts, farmParts, farmLights, signs = {}, {}, 0, 0, 0
+for _, p in farm:GetDescendants() do
+	if p.ClassName == "Part" or p.ClassName == "WedgePart" then
+		farmParts += 1
+		assert(p.Anchored and p.CanQuery == false and p.CanTouch == false, "farm scenery must not interfere with mining/physics: " .. tostring(p.Name))
+		if p.Name == "FencePost" then table.insert(posts, p.CFrame.Position) end
+		if p.Name == "GatePost" then table.insert(gateposts, p.CFrame.Position) end
+		if p.Name == "FencePost" or p.Name == "FenceRail" or p.Name == "GatePost" then assert(p.CanCollide, "the fence can be bumped into") end
+		local flat = Vector3.new(p.CFrame.Position.X, 0, p.CFrame.Position.Z)
+		if p.Parent ~= ranch then assert(flat.Magnitude > 55, "only the fence stands in the arena: " .. tostring(p.Name)) end
+	end
+	if p.ClassName == "PointLight" then farmLights += 1 end
+	if p.Name == "RanchSign" then signs += 1 end
+end
+assert(#gateposts == 2 and signs == 1, "a gate arch with its sign")
+assert(#posts > 40, "posts all the way round: " .. #posts)
+local ring = {}
+for _, at in posts do table.insert(ring, at) end
+for _, at in gateposts do table.insert(ring, at) end
+for _, at in ring do
+	local r = Vector3.new(at.X, 0, at.Z).Magnitude
+	assert(math.abs(r - 52) < 0.5, "the fence circles the arena inside its edge: " .. r)
+end
+table.sort(ring, function(a, b) return math.atan2(a.X, a.Z) < math.atan2(b.X, b.Z) end)
+local wide = 0
+for i, at in ring do
+	local nextAt = ring[i % #ring + 1]
+	local gap = (Vector3.new(at.X, 0, at.Z) - Vector3.new(nextAt.X, 0, nextAt.Z)).Magnitude
+	if gap > 7.5 then
+		wide += 1
+		assert(math.abs(gap - 9) < 0.6, "the one opening is the gate: " .. gap)
+	end
+end
+assert(wide == 1, "the fence is closed but for the gate: " .. wide)
+-- The trail runs through the gate, and the spawn is outside it.
+local g1, g2 = gateposts[1], gateposts[2]
+local middle = (g1 + g2) / 2
+local trailX = math.sin(math.clamp((56.4 - middle.Z) / (56.4 - 26), 0, 1) * math.pi) * 4
+assert(math.abs(middle.X - trailX) < 0.6 and middle.Z > 50, "the gate is on the trail, in front of the spawn")
+assert(Vector3.new(0, 0, 56.4).Magnitude > 52, "players spawn outside the corral and walk in")
+-- The barn: clear of the arena, camp and boards, facing the camp, its
+-- foundation reaching the ground, with a silo, corn, cows and a light.
+local barns = {}
+for _, p in farm:GetDescendants() do if p.Name == "Barn" then table.insert(barns, p) end end
+assert(#barns == 1, "one barn")
+local foundation = barns[1]:FindFirstChild("BarnFoundation")
+assert(foundation ~= nil and barns[1]:FindFirstChild("Silo") ~= nil and barns[1]:FindFirstChild("SiloDome") ~= nil, "a barn with a silo")
+local barnAt = foundation.CFrame.Position
+local barnFlat = Vector3.new(barnAt.X, 0, barnAt.Z)
+assert(barnFlat.Magnitude > 55 + 15 and (barnFlat - camp).Magnitude > 25 + 15 and not inReserved(barnFlat), "the barn stands clear of the arena, camp and boards")
+local barnLook = foundation.CFrame.LookVector
+local barnToCamp = (camp - barnFlat).Unit
+assert(barnLook.X * barnToCamp.X + barnLook.Z * barnToCamp.Z > 0.99, "the barn faces the camp")
+assert(math.atan2(math.abs(barnFlat.X - camp.X), camp.Z - barnFlat.Z) > math.rad(30), "the barn stands to one side, where the mountain does not hide it from the spawn")
+local barnBottom = barnAt.Y - foundation.Size.Y / 2
+for _, offset in { Vector3.new(-7.5, 0, -10.5), Vector3.new(7.5, 0, -10.5), Vector3.new(-7.5, 0, 10.5), Vector3.new(7.5, 0, 10.5) } do
+	local corner = foundation.CFrame * offset
+	assert(workspace:Raycast(Vector3.new(corner.X, 300, corner.Z)).Position.Y > barnBottom, "the barn's foundation reaches the ground at every corner")
+end
+local corn, cows = 0, 0
+for _, p in farm:GetDescendants() do
+	if p.Name == "Corn" then corn += 1 end
+	if p.Name == "Cow" then cows += 1 end
+end
+assert(corn >= 6 and cows >= 2, "a cornfield and cows: " .. corn .. " " .. cows)
+assert(farmLights == 1, "one warm lamp over the barn doors")
+assert(farmParts < 900, "the farm scenery stays light: " .. farmParts)
+assert(Scenery.setTheme("farm") and Scenery.theme() == "farm", "farm can be chosen")
+assert(farm.Parent == workspace and sakura.Parent == ServerStorage and alpineOnly.Parent == ServerStorage, "the ranch shows; the festoon and watchtower make way")
+assert(Lighting.ClockTime == Scenery.LOOKS.farm.clock and atmosphere.Color == Scenery.LOOKS.farm.atmosphere.color
+	and materialColours["Material.Grass"] == Scenery.LOOKS.farm.terrain["Material.Grass"], "the farm light and colours apply")
 -- Switching to sakura and back is instant and exact.
 assert(Scenery.setTheme("sakura") and Scenery.theme() == "sakura", "sakura can be chosen")
-assert(sakura.Parent == workspace and alpineOnly.Parent == ServerStorage, "the blossoms show; the festoon and watchtower make way")
+assert(sakura.Parent == workspace and alpineOnly.Parent == ServerStorage and farm.Parent == ServerStorage, "the blossoms show; the ranch, festoon and watchtower make way")
 assert(Lighting.ClockTime == Scenery.LOOKS.sakura.clock and atmosphere.Color == Scenery.LOOKS.sakura.atmosphere.color
 	and materialColours["Material.Grass"] == Scenery.LOOKS.sakura.terrain["Material.Grass"], "the sakura light and colours apply")
 assert(not Scenery.setTheme("winter") and Scenery.theme() == "sakura", "unknown themes are refused")
@@ -305,7 +382,7 @@ for _, centre in { Vector3.new(0, 6, 56), Vector3.new(-300, 80, 120) } do
 		assert(math.abs(at.X) <= 40 and math.abs(at.Y) <= 20 and math.abs(at.Z) <= 40, "petals stay round the camera")
 	end
 end
-print(string.format("themes: %d cherry trees, %d blossoms, %d sakura parts", trees, blossoms, sakuraParts))
+print(string.format("themes: %d cherry trees, %d blossoms, %d sakura parts; farm: %d fence posts, %d corn rows, %d cows, %d farm parts", trees, blossoms, sakuraParts, #posts, corn, cows, farmParts))
 local published = Replicated:FindFirstChild("DiamondRushSceneryPlacements")
 if PACK_MODE == "generated" then
 	-- The server only lays the pack out; each player's game builds it.
@@ -455,6 +532,7 @@ try:
             + "\nlocal SceneryView = " + module("src/client/SceneryView.luau")
             + "\nlocal Sakura = " + module("src/server/Sakura.luau")
             + "\nlocal Watchtower = " + module("src/server/Watchtower.luau")
+            + "\nlocal Farm = " + module("src/server/Farm.luau")
             + "\nlocal PetalView = " + module("src/client/PetalView.luau")
             + "\nlocal Scenery = " + module("src/server/Scenery.luau")
             + "\n" + checks
