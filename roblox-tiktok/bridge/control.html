@@ -5,46 +5,227 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Diamond Rush Bridge</title>
 <style>
-  :root { --bg: #17131f; --panel: #241e33; --line: #3a3150; --text: #f3f0f8; --muted: #b3aac6; --accent: #8be9ff; --gold: #ffcd46; --ok: #7dffa0; --bad: #ff8f8f; }
+  :root {
+    --p: 0; /* scroll progress through the shrine scene, 0 to 1 (set by the script) */
+    --ink: #3e2431; --muted: #7a5867; --line: rgba(196, 104, 138, .28);
+    --card: rgba(255, 250, 248, .9); --field: #fffaf8;
+    --vermilion: #c8323c; --vermilion-deep: #9b1f2b; --gold: #c99a45;
+    --blush: #fde9ef; --blush-deep: #f5c4d3; --jade: #2e7a60;
+    --ok: #23804f; --wait: #a35f0c; --bad: #b8322f;
+    --serif: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Songti SC", "Noto Serif SC", "Microsoft YaHei", serif;
+    --flower: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-20 -20 40 40'%3E%3Cg fill='%23f49ab4' stroke='%23e07c9a' stroke-width='.8'%3E%3Cpath d='M0 0C-5-4-7-12-3-17L0-14.5 3-17C7-12 5-4 0 0Z'/%3E%3Cpath transform='rotate(72)' d='M0 0C-5-4-7-12-3-17L0-14.5 3-17C7-12 5-4 0 0Z'/%3E%3Cpath transform='rotate(144)' d='M0 0C-5-4-7-12-3-17L0-14.5 3-17C7-12 5-4 0 0Z'/%3E%3Cpath transform='rotate(216)' d='M0 0C-5-4-7-12-3-17L0-14.5 3-17C7-12 5-4 0 0Z'/%3E%3Cpath transform='rotate(288)' d='M0 0C-5-4-7-12-3-17L0-14.5 3-17C7-12 5-4 0 0Z'/%3E%3C/g%3E%3Ccircle r='3.4' fill='%23ffe08a'/%3E%3Ccircle r='1.4' fill='%23d9536f'/%3E%3C/svg%3E");
+    --petal: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-10 -12 20 24'%3E%3Cpath d='M0 10C8 6 7-5 3-10L0-7-3-10C-7-5-8 6 0 10Z' fill='%23f7a8bf'/%3E%3C/svg%3E");
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 "Segoe UI", system-ui, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { margin: 0 0 4px; font-size: 28px; }
-  h2 { margin: 0 0 12px; font-size: 18px; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; color: var(--ink); background: #fbe7ee; font: 16px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; }
+
+  /* The shrine scene stays behind the page; each layer drifts at its own pace. */
+  .scene { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .scene > svg, .scene > .wash { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .scene > * { will-change: transform, opacity; }
+  .hills { transform: translate3d(0, calc(var(--p) * 60px), 0); }
+  .shrine { transform: translate3d(0, calc(var(--p) * -110px), 0); opacity: calc(1 - var(--p) * .82); }
+  .wash {
+    opacity: calc(var(--p) * .9);
+    background:
+      radial-gradient(1100px 520px at 50% -8%, rgba(255, 255, 255, .85), transparent 62%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' viewBox='0 0 240 240'%3E%3Cg fill='%23f2a3bb' opacity='.16'%3E%3Cg transform='translate(60 70) rotate(12)'%3E%3Cpath d='M0 0C-7-6-10-17-4-24L0-20.5 4-24C10-17 7-6 0 0Z'/%3E%3Cpath transform='rotate(72)' d='M0 0C-7-6-10-17-4-24L0-20.5 4-24C10-17 7-6 0 0Z'/%3E%3Cpath transform='rotate(144)' d='M0 0C-7-6-10-17-4-24L0-20.5 4-24C10-17 7-6 0 0Z'/%3E%3Cpath transform='rotate(216)' d='M0 0C-7-6-10-17-4-24L0-20.5 4-24C10-17 7-6 0 0Z'/%3E%3Cpath transform='rotate(288)' d='M0 0C-7-6-10-17-4-24L0-20.5 4-24C10-17 7-6 0 0Z'/%3E%3C/g%3E%3Cg transform='translate(180 170) rotate(-20) scale(.7)'%3E%3Cpath d='M0 0C-7-6-10-17-4-24L0-20.5 4-24C10-17 7-6 0 0Z'/%3E%3Cpath transform='rotate(72)' d='M0 0C-7-6-10-17-4-24L0-20.5 4-24C10-17 7-6 0 0Z'/%3E%3Cpath transform='rotate(144)' d='M0 0C-7-6-10-17-4-24L0-20.5 4-24C10-17 7-6 0 0Z'/%3E%3Cpath transform='rotate(216)' d='M0 0C-7-6-10-17-4-24L0-20.5 4-24C10-17 7-6 0 0Z'/%3E%3Cpath transform='rotate(288)' d='M0 0C-7-6-10-17-4-24L0-20.5 4-24C10-17 7-6 0 0Z'/%3E%3C/g%3E%3Cpath d='M150 40c6 3 6 9 2 12l-2-2-2 2c-4-3-4-9 2-12z'/%3E%3Cpath d='M40 190c5 4 4 10-1 12l-1-3-2 1c-3-4-1-10 4-10z'/%3E%3C/g%3E%3C/svg%3E"),
+      linear-gradient(180deg, #fff4f7 0%, #fde7ef 55%, #f9d8e4 100%);
+  }
+  .scene > .tree-left, .scene > .tree-right { inset: 0 0 auto 0; height: calc(100% + 90px); }
+  .tree-left { transform: translate3d(calc(var(--p) * -11vw), calc(var(--p) * -36px), 0); }
+  .tree-right { transform: translate3d(calc(var(--p) * 11vw), calc(var(--p) * -36px), 0); }
+  .scene > .branch { position: absolute; inset: 0 auto auto 0; width: min(46vw, 620px); height: auto; transform: translate3d(0, calc(var(--p) * -28px), 0); }
+  .scene > .branch.right { left: auto; right: 0; transform: translate3d(0, calc(var(--p) * -28px), 0) scaleX(-1); }
+
+  /* Petals fall over everything, words included, without catching clicks. */
+  #petals { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 30; pointer-events: none; }
+
+  .hero { position: relative; z-index: 10; min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; align-items: center; text-align: center; padding: clamp(26px, 6vh, 64px) 16px 26px; }
+  .eyebrow { margin: 0 0 6px; font-family: var(--serif); font-size: 15px; letter-spacing: .34em; color: var(--vermilion); text-shadow: 0 1px 10px rgba(255, 255, 255, .9); }
+  .hero h1 { margin: 0 0 10px; font-family: var(--serif); font-weight: 700; font-size: clamp(30px, 4.4vw, 50px); line-height: 1.1; color: var(--ink); text-shadow: 0 2px 22px rgba(255, 255, 255, .95), 0 0 2px rgba(255, 255, 255, .8); }
+  .hero .lede { max-width: 580px; margin: 0; color: #5d3d4b; text-shadow: 0 1px 12px rgba(255, 255, 255, .95); }
+  .scroll-hint { margin-top: auto; display: inline-flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; color: var(--vermilion-deep); font-family: var(--serif); font-weight: 600; text-decoration: none; background: rgba(255, 250, 248, .78); box-shadow: 0 8px 24px -12px rgba(160, 50, 80, .55), inset 0 0 0 1px rgba(201, 154, 69, .45); backdrop-filter: blur(6px); }
+  .scroll-hint span { display: inline-block; animation: nudge 1.8s ease-in-out infinite; }
+  @keyframes nudge { 0%, 100% { transform: translateY(-2px); } 50% { transform: translateY(4px); } }
+
+  main { position: relative; z-index: 10; max-width: 820px; margin: 0 auto; padding: 0 16px 72px; }
+  section { position: relative; margin-top: 22px; padding: 24px 22px 20px; border-radius: 20px; background: var(--card); border: 1px solid var(--line); box-shadow: 0 14px 34px -16px rgba(170, 60, 100, .45), inset 0 1px 0 rgba(255, 255, 255, .85); backdrop-filter: blur(10px) saturate(1.1); }
+  section::before { content: ""; position: absolute; left: 22px; right: 22px; top: 0; height: 3px; border-radius: 0 0 3px 3px; background: linear-gradient(90deg, transparent, var(--vermilion) 18%, var(--gold) 50%, var(--vermilion) 82%, transparent); }
+  section::after { content: ""; position: absolute; top: -12px; right: 18px; width: 30px; height: 30px; background: var(--flower) center / contain no-repeat; filter: drop-shadow(0 3px 4px rgba(200, 80, 120, .25)); }
+  h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-family: var(--serif); font-size: 20px; color: var(--vermilion-deep); }
+  h2::before { content: ""; flex: none; width: 20px; height: 20px; background: var(--flower) center / contain no-repeat; }
   p { margin: 0 0 12px; color: var(--muted); }
-  section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-top: 16px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
-  input { flex: 1 1 220px; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #1b1626; color: var(--text); font: inherit; }
-  button { padding: 10px 14px; border: 0; border-radius: 10px; background: #6b4fd8; color: white; font: inherit; font-weight: 600; cursor: pointer; }
-  button:hover { filter: brightness(1.12); }
-  button.gift { background: #3a2f55; }
+  input, select { padding: 10px 12px; border-radius: 12px; border: 1px solid var(--blush-deep); background: var(--field); color: var(--ink); font: inherit; }
+  input { flex: 1 1 220px; min-width: 0; }
+  input::placeholder { color: #b693a2; }
+  button { padding: 10px 16px; border: 0; border-radius: 12px; background: linear-gradient(180deg, #d9454f, #b5262f); color: #fff; font: inherit; font-weight: 600; cursor: pointer; box-shadow: 0 6px 14px -8px rgba(150, 25, 40, .75), inset 0 0 0 1px rgba(255, 214, 150, .4); transition: transform .15s, filter .15s, background-color .15s; }
+  button:hover { filter: brightness(1.07); transform: translateY(-1px); }
+  button:active { transform: translateY(0); }
+  button:disabled { opacity: .55; cursor: progress; transform: none; }
+  button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, .scroll-hint:focus-visible { outline: 3px solid rgba(200, 50, 60, .38); outline-offset: 2px; }
+  button.gift { background: var(--blush); color: var(--ink); box-shadow: inset 0 0 0 1px var(--blush-deep); }
+  button.gift:hover { background: #fbd9e4; filter: none; }
+  button.rebuild { background: linear-gradient(180deg, #38906f, #266a52); box-shadow: 0 6px 14px -8px rgba(25, 85, 60, .75), inset 0 0 0 1px rgba(214, 240, 224, .35); }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
-  .status { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; }
+  .status { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; }
   .status b { color: var(--muted); font-weight: 600; }
-  .good { color: var(--ok); } .wait { color: var(--gold); }
+  .good { color: var(--ok); font-weight: 600; } .wait { color: var(--wait); font-weight: 600; }
   ul { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; }
-  li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+  li { position: relative; padding: 7px 0 7px 22px; border-bottom: 1px dashed var(--line); font-size: 15px; }
+  li::before { content: ""; position: absolute; left: 2px; top: 12px; width: 12px; height: 14px; background: var(--petal) center / contain no-repeat; }
   li:last-child { border: 0; }
   small { color: var(--muted); }
-  select { padding:10px; border-radius:8px; background:#1b1626; color:var(--text); border:1px solid var(--line); font:inherit; }
-  .catalogue { max-height:340px; overflow:auto; margin:12px 0; }
-  .catalogue button { text-align:left; min-height:72px; background:#302940; border:2px solid transparent; }
-  .catalogue button[aria-pressed="true"] { border-color:var(--accent); background:#254250; }
-  .catalogue small { display:block; }
-  .editor { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; padding:14px 0; }
-  .editor label { display:flex; flex-direction:column; gap:6px; }
-  .editor input { flex:initial; width:100%; }
-  #catalogueMessage { min-height:24px; margin-top:10px; }
-  @media(max-width:540px) { .editor { grid-template-columns:1fr; } }
-  details summary { cursor: pointer; font-weight: 600; }
+  .catalogue { max-height: 340px; overflow: auto; margin: 12px 0; padding: 2px; }
+  .catalogue button { text-align: left; min-height: 72px; background: #fff; color: var(--ink); border: 2px solid var(--blush-deep); box-shadow: none; }
+  .catalogue button:hover { background: #fff4f7; filter: none; }
+  .catalogue button[aria-pressed="true"] { border-color: var(--vermilion); background: #fff0f3; }
+  .catalogue small { display: block; }
+  .editor { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 14px 0; }
+  .editor label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-weight: 600; font-size: 14px; }
+  .editor input { flex: initial; width: 100%; }
+  #catalogueMessage { min-height: 24px; margin-top: 10px; }
+  details summary { cursor: pointer; font-family: var(--serif); font-weight: 700; color: var(--vermilion-deep); }
+  footer { position: relative; z-index: 10; text-align: center; padding: 0 16px 40px; font-family: var(--serif); color: var(--muted); }
+  @media (max-width: 540px) { .editor { grid-template-columns: 1fr; } section { padding: 22px 16px 18px; } }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .scene > * { transform: none !important; }
+    .scroll-hint span { animation: none; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <h1>💎 Diamond Rush · TikTok Bridge</h1>
-  <p>Keep this window and the black bridge window open while you stream.</p>
+<!-- Shared shapes and paints for the scene layers. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6c9d8"/><stop offset=".45" stop-color="#fcdfe6"/><stop offset=".75" stop-color="#ffefe9"/><stop offset="1" stop-color="#fff7f1"/>
+    </linearGradient>
+    <radialGradient id="sun"><stop offset="0" stop-color="#fffaf2"/><stop offset=".45" stop-color="#fff1e4" stop-opacity=".9"/><stop offset="1" stop-color="#ffe9e4" stop-opacity="0"/></radialGradient>
+    <linearGradient id="mist" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".55" stop-color="#fff6f6" stop-opacity=".8"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7d3de"/><stop offset="1" stop-color="#f0b9cb"/></linearGradient>
+    <linearGradient id="pillar" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8f1b24"/><stop offset=".4" stop-color="#cf3540"/><stop offset="1" stop-color="#8f1b24"/></linearGradient>
+    <linearGradient id="roof" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a5a70"/><stop offset="1" stop-color="#303d50"/></linearGradient>
+    <radialGradient id="lantern" cx=".4" cy=".35"><stop offset="0" stop-color="#ff8a6a"/><stop offset=".6" stop-color="#d7323a"/><stop offset="1" stop-color="#99161f"/></radialGradient>
+    <radialGradient id="glow"><stop offset="0" stop-color="#ffd08a" stop-opacity=".55"/><stop offset="1" stop-color="#ffd08a" stop-opacity="0"/></radialGradient>
+    <linearGradient id="bark" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#4a2c2e"/><stop offset=".5" stop-color="#6b4243"/><stop offset="1" stop-color="#3d2426"/></linearGradient>
+    <pattern id="tiles" width="11" height="40" patternUnits="userSpaceOnUse"><path d="M5.5 0V40" stroke="#5f7089" stroke-width="2.2"/></pattern>
+    <pattern id="lattice" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="#f3dfbb"/><path d="M0 6H12M6 0V12" stroke="#b5813a" stroke-width="1.5"/></pattern>
+    <pattern id="studs" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="6" cy="6" r="1.7" fill="#e7b75c"/></pattern>
+    <pattern id="band" width="16" height="8" patternUnits="userSpaceOnUse"><rect width="16" height="8" fill="#2f6f73"/><circle cx="8" cy="4" r="2" fill="#e3b45b"/></pattern>
+    <pattern id="posts" width="22" height="24" patternUnits="userSpaceOnUse"><rect x="8" width="6" height="24" fill="#f7f1ea" stroke="#dacdbf"/></pattern>
+    <g id="flower">
+      <g fill="#ffc9d7" stroke="#ef94ae" stroke-width=".7">
+        <path d="M0 0C-5-4-7-12-3-17L0-14.5 3-17C7-12 5-4 0 0Z"/>
+        <path transform="rotate(72)" d="M0 0C-5-4-7-12-3-17L0-14.5 3-17C7-12 5-4 0 0Z"/>
+        <path transform="rotate(144)" d="M0 0C-5-4-7-12-3-17L0-14.5 3-17C7-12 5-4 0 0Z"/>
+        <path transform="rotate(216)" d="M0 0C-5-4-7-12-3-17L0-14.5 3-17C7-12 5-4 0 0Z"/>
+        <path transform="rotate(288)" d="M0 0C-5-4-7-12-3-17L0-14.5 3-17C7-12 5-4 0 0Z"/>
+      </g>
+      <circle r="3" fill="#ffe7a3"/><circle r="1.2" fill="#d9536f"/>
+    </g>
+  </defs>
+</svg>
 
-  <section>
+<div class="scene" aria-hidden="true">
+  <svg class="sky" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice">
+    <rect width="1600" height="1000" fill="url(#sky)"/>
+    <circle cx="800" cy="330" r="230" fill="url(#sun)"/>
+    <g fill="#fff" opacity=".55">
+      <ellipse cx="310" cy="190" rx="150" ry="22"/><ellipse cx="380" cy="176" rx="90" ry="18"/>
+      <ellipse cx="1240" cy="150" rx="170" ry="20"/><ellipse cx="1180" cy="138" rx="80" ry="15"/>
+      <ellipse cx="760" cy="110" rx="120" ry="14" opacity=".7"/>
+    </g>
+  </svg>
+
+  <svg class="hills" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice">
+    <path d="M0 640C120 560 240 600 330 540C420 480 520 560 620 520C720 480 800 430 900 470C1000 510 1100 450 1220 490C1320 520 1440 470 1600 520V1000H0Z" fill="#efcddb"/>
+    <g id="pagoda" fill="#dcaec2"></g>
+    <path d="M0 730C160 670 280 710 420 670C560 630 640 690 780 660C920 630 1040 690 1180 650C1320 610 1460 670 1600 640V1000H0Z" fill="#e6b9cb"/>
+    <rect y="600" width="1600" height="200" fill="url(#mist)"/>
+  </svg>
+
+  <svg class="shrine" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice">
+    <path d="M0 884C260 862 520 892 800 880C1080 868 1340 896 1600 872V1000H0Z" fill="url(#ground)"/>
+    <g transform="translate(0 30)">
+      <ellipse cx="800" cy="858" rx="390" ry="20" fill="#d792ab" opacity=".35"/>
+      <!-- Stone terrace, balustrades and steps -->
+      <rect x="512" y="760" width="576" height="98" fill="#e6d9ce"/>
+      <path d="M512 784H1088M512 808H1088M512 832H1088" stroke="#d6c6b9" stroke-width="1.2"/>
+      <rect x="500" y="748" width="600" height="14" rx="3" fill="#f3ebe3"/>
+      <rect x="506" y="724" width="190" height="24" fill="url(#posts)"/>
+      <rect x="904" y="724" width="190" height="24" fill="url(#posts)"/>
+      <rect x="502" y="720" width="196" height="7" rx="3" fill="#f7f1ea" stroke="#dacdbf"/>
+      <rect x="902" y="720" width="196" height="7" rx="3" fill="#f7f1ea" stroke="#dacdbf"/>
+      <g id="steps"></g>
+      <!-- The hall: red columns, lattice windows, doors with gold studs -->
+      <rect x="590" y="604" width="420" height="146" fill="#f5e6d1"/>
+      <rect x="618" y="632" width="44" height="84" fill="url(#lattice)" stroke="#a57732" stroke-width="2"/>
+      <rect x="698" y="632" width="44" height="84" fill="url(#lattice)" stroke="#a57732" stroke-width="2"/>
+      <rect x="858" y="632" width="44" height="84" fill="url(#lattice)" stroke="#a57732" stroke-width="2"/>
+      <rect x="938" y="632" width="44" height="84" fill="url(#lattice)" stroke="#a57732" stroke-width="2"/>
+      <rect x="770" y="626" width="60" height="124" fill="#8f1d25"/>
+      <rect x="770" y="626" width="60" height="124" fill="url(#studs)"/>
+      <path d="M800 626V750" stroke="#5e1016" stroke-width="2"/>
+      <g fill="url(#pillar)">
+        <rect x="591" y="600" width="18" height="150"/><rect x="671" y="600" width="18" height="150"/><rect x="751" y="600" width="18" height="150"/>
+        <rect x="831" y="600" width="18" height="150"/><rect x="911" y="600" width="18" height="150"/><rect x="991" y="600" width="18" height="150"/>
+      </g>
+      <rect x="582" y="586" width="436" height="20" fill="#a51f29"/>
+      <rect x="582" y="590" width="436" height="9" fill="url(#band)"/>
+      <!-- Lower roof with sweeping, upturned eaves -->
+      <path id="lowerRoof" d="M456 518Q540 580 620 584L980 584Q1060 580 1144 518Q1080 548 1012 542L960 508H640L588 542Q520 548 456 518Z" fill="url(#roof)"/>
+      <path d="M456 518Q540 580 620 584L980 584Q1060 580 1144 518Q1080 548 1012 542L960 508H640L588 542Q520 548 456 518Z" fill="url(#tiles)" opacity=".75"/>
+      <path d="M456 518Q540 580 620 584L980 584Q1060 580 1144 518" fill="none" stroke="#273244" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="456" cy="517" r="5" fill="#d9a441"/><circle cx="1144" cy="517" r="5" fill="#d9a441"/>
+      <!-- Upper storey and plaque -->
+      <rect x="650" y="452" width="300" height="60" fill="#f5e6d1"/>
+      <g fill="url(#pillar)"><rect x="652" y="450" width="14" height="62"/><rect x="934" y="450" width="14" height="62"/></g>
+      <rect x="732" y="472" width="136" height="34" rx="3" fill="#22314d" stroke="#d9a441" stroke-width="3"/>
+      <text x="800" y="497" text-anchor="middle" font-size="22" font-weight="700" fill="#e9bf62" font-family="'Microsoft YaHei','PingFang SC','Noto Sans SC','Songti SC',serif" letter-spacing="4">樱花殿</text>
+      <!-- Upper roof, ridge, pearl and dragon-tail ends -->
+      <path d="M544 416Q610 466 690 466L910 466Q990 466 1056 416Q990 436 930 428L872 362H728L670 428Q610 436 544 416Z" fill="url(#roof)"/>
+      <path d="M544 416Q610 466 690 466L910 466Q990 466 1056 416Q990 436 930 428L872 362H728L670 428Q610 436 544 416Z" fill="url(#tiles)" opacity=".75"/>
+      <path d="M544 416Q610 466 690 466L910 466Q990 466 1056 416" fill="none" stroke="#273244" stroke-width="5" stroke-linecap="round"/>
+      <path d="M728 362L560 420M872 362L1040 420" stroke="#273244" stroke-width="4" stroke-linecap="round"/>
+      <rect x="714" y="352" width="172" height="12" rx="3" fill="#273244"/>
+      <path d="M716 354C700 342 704 324 718 328C712 334 714 342 724 350Z M884 354C900 342 896 324 882 328C888 334 886 342 876 350Z" fill="#d9a441"/>
+      <circle cx="800" cy="344" r="8" fill="#e9bf62"/><path d="M800 326C805 332 806 337 800 340C794 337 795 332 800 326Z" fill="#f08a4b"/>
+      <circle cx="544" cy="415" r="4.5" fill="#d9a441"/><circle cx="1056" cy="415" r="4.5" fill="#d9a441"/>
+      <!-- Red lanterns hanging from the eaves -->
+      <g id="lanterns"></g>
+      <!-- Stone lanterns either side of the steps -->
+      <g fill="#ece3da" stroke="#cdbfb2" stroke-width="1.2">
+        <rect x="622" y="842" width="34" height="10"/><rect x="632" y="806" width="14" height="36"/><rect x="620" y="792" width="38" height="16" rx="2"/><path d="M614 794L639 774L664 794Z"/>
+        <rect x="944" y="842" width="34" height="10"/><rect x="954" y="806" width="14" height="36"/><rect x="942" y="792" width="38" height="16" rx="2"/><path d="M936 794L961 774L986 794Z"/>
+      </g>
+      <rect x="630" y="796" width="18" height="8" fill="#ffd08a"/><rect x="952" y="796" width="18" height="8" fill="#ffd08a"/>
+      <!-- Blossom drifts on the roofs and petals on the stones -->
+      <g id="roofBlossom"></g>
+      <g id="fallen"></g>
+    </g>
+  </svg>
+
+  <div class="wash"></div>
+
+  <svg class="tree-left" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice"><g id="treeLeft"></g></svg>
+  <svg class="tree-right" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice"><g id="treeRight" transform="translate(1600 0) scale(-1 1)"></g></svg>
+  <svg class="branch left" viewBox="0 0 620 380"><g id="branchLeft"></g></svg>
+  <svg class="branch right" viewBox="0 0 620 380"><g id="branchRight"></g></svg>
+</div>
+
+<header class="hero">
+  <p class="eyebrow">樱花 · SAKURA SHRINE</p>
+  <h1>💎 Diamond Rush · TikTok Bridge</h1>
+  <p class="lede">Keep this window and the black bridge window open while you stream.</p>
+  <a class="scroll-hint" href="#status">Scroll down to the controls <span aria-hidden="true">↓</span></a>
+</header>
+
+<main>
+  <section id="status">
     <h2>Status</h2>
     <div class="status">
       <b>TikTok</b><span id="tiktok">…</span>
@@ -56,7 +237,7 @@
     <h2>1 · Connect your TikTok LIVE</h2>
     <p>Go live on TikTok first, then enter your username (the part after @).</p>
     <form class="row" id="connect">
-      <input id="username" placeholder="your_tiktok_username" autocomplete="off">
+      <input id="username" placeholder="your_tiktok_username" autocomplete="off" aria-label="TikTok username">
       <button>Connect</button>
     </form>
   </section>
@@ -102,14 +283,18 @@
       <summary>Published game (optional): Roblox Open Cloud</summary>
       <p style="margin-top:12px">Only needed when you play the published game instead of pressing Play in Roblox Studio. See the README for how to make the key.</p>
       <form class="row" id="cloud">
-        <input id="universe" placeholder="Universe ID (Experience ID)" autocomplete="off">
-        <input id="apikey" placeholder="Open Cloud API key" type="password" autocomplete="off">
+        <input id="universe" placeholder="Universe ID (Experience ID)" autocomplete="off" aria-label="Universe ID">
+        <input id="apikey" placeholder="Open Cloud API key" type="password" autocomplete="off" aria-label="Open Cloud API key">
         <button>Save</button>
       </form>
       <p id="cloudState" style="margin-top:10px"></p>
     </details>
   </section>
 </main>
+<footer>🌸 May your mountain crumble and your diamond shine 🌸</footer>
+
+<canvas id="petals" aria-hidden="true"></canvas>
+
 <script>
 const tests = [
   ['🌹 Rose', { gift: 'Rose', coins: 1 }],
@@ -132,7 +317,7 @@ const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-typ
 for (const blocks of [1000, 10000, 100000, 1500000]) {
   const button = document.createElement('button');
   button.textContent = blocks === 1500000 ? 'Grow to limit' : `+${blocks.toLocaleString()} blocks`;
-  button.style.background = '#24734b';
+  button.className = 'rebuild';
   button.onclick = async () => {
     button.disabled = true;
     const message = document.getElementById('testMessage');
@@ -261,6 +446,270 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, 1500);
+</script>
+
+<script>
+// The sakura shrine: blossoms, lanterns and steps are drawn once at load
+// (seeded, so the scene looks the same every time).
+(() => {
+  const NS = 'http://www.w3.org/2000/svg';
+  const make = (tag, attrs, parent) => {
+    const node = document.createElementNS(NS, tag);
+    for (const key in attrs) node.setAttribute(key, attrs[key]);
+    parent.append(node);
+    return node;
+  };
+  const seeded = (seed) => () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const PINKS = ['#ffd6e0', '#ffc6d5', '#ffb4c8', '#f9a3bb', '#ffe4ec', '#fff2f6'];
+  const fixed = (n) => n.toFixed(1);
+
+  // A drift of blossom: shaded underside, soft blooms, then crisp flowers on top.
+  function blossom(group, cx, cy, radius, count, rand, squash = 0.78) {
+    const spot = (spread) => {
+      const angle = rand() * Math.PI * 2, distance = Math.sqrt(rand()) * radius * spread;
+      return [cx + Math.cos(angle) * distance, cy + Math.sin(angle) * distance * squash];
+    };
+    for (let i = 0; i < count * 0.45; i++) {
+      const [x, y] = spot(0.95);
+      make('circle', { cx: fixed(x), cy: fixed(y + 6), r: fixed(6 + rand() * 8), fill: '#e88eaa', opacity: '.5' }, group);
+    }
+    for (let i = 0; i < count; i++) {
+      const [x, y] = spot(1);
+      make('circle', { cx: fixed(x), cy: fixed(y), r: fixed(5 + rand() * 9), fill: PINKS[(rand() * PINKS.length) | 0] }, group);
+    }
+    for (let i = 0; i < count * 0.18; i++) {
+      const [x, y] = spot(0.8);
+      make('circle', { cx: fixed(x - 2), cy: fixed(y - 4), r: fixed(3 + rand() * 4), fill: '#fff', opacity: '.55' }, group);
+    }
+    for (let i = 0; i < count * 0.32; i++) {
+      const [x, y] = spot(0.95);
+      make('use', { href: '#flower', transform: `translate(${fixed(x)} ${fixed(y - 3)}) rotate(${(rand() * 72) | 0}) scale(${(0.5 + rand() * 0.5).toFixed(2)})` }, group);
+    }
+  }
+  function limb(group, d, width) {
+    make('path', { d, fill: 'none', stroke: 'url(#bark)', 'stroke-width': width, 'stroke-linecap': 'round' }, group);
+  }
+
+  // Two old sakura trees frame the shrine, their crowns spilling over its eaves.
+  function tree(group, seed) {
+    const rand = seeded(seed);
+    make('path', { d: 'M150 1000C190 860 222 720 256 600C266 556 300 518 332 500L352 514C320 540 300 582 292 624C266 742 258 862 268 1000Z', fill: 'url(#bark)' }, group);
+    limb(group, 'M298 566C380 470 470 432 604 412', 15);
+    limb(group, 'M330 506C362 404 424 332 524 300', 11);
+    limb(group, 'M282 612C206 524 150 472 84 452', 11);
+    limb(group, 'M326 508C298 404 262 332 222 262', 8);
+    limb(group, 'M470 434C520 470 566 504 610 526', 5);
+    limb(group, 'M424 344C470 330 520 342 566 370', 4);
+    const crowns = [
+      [604, 408, 74, 74], [548, 330, 78, 72], [452, 300, 64, 54], [386, 404, 72, 62], [232, 268, 66, 56],
+      [118, 444, 72, 60], [198, 378, 60, 46], [584, 512, 46, 36], [302, 470, 56, 42], [668, 452, 42, 28], [330, 330, 52, 40],
+    ];
+    for (const [x, y, r, n] of crowns) blossom(group, x, y, r, n, rand);
+  }
+  tree(document.getElementById('treeLeft'), 11);
+  tree(document.getElementById('treeRight'), 29);
+
+  // Branches reaching in from the top corners.
+  function cornerBranch(group, seed) {
+    const rand = seeded(seed);
+    limb(group, 'M-20 40C120 70 250 110 380 170C450 202 510 238 560 280', 13);
+    limb(group, 'M180 92C220 140 240 190 250 250', 6);
+    limb(group, 'M320 150C350 120 400 100 460 98', 5);
+    limb(group, 'M460 222C470 260 466 300 452 340', 4);
+    for (const [x, y, r, n] of [[60, 50, 54, 40], [190, 100, 56, 44], [250, 236, 40, 30], [330, 160, 58, 46], [452, 102, 40, 30], [470, 236, 52, 40], [556, 284, 44, 32], [452, 330, 30, 20]]) {
+      blossom(group, x, y, r, n, rand);
+    }
+  }
+  cornerBranch(document.getElementById('branchLeft'), 41);
+  cornerBranch(document.getElementById('branchRight'), 57);
+
+  // Sakura drifts along the shrine's roofs.
+  const roofRand = seeded(73);
+  const roof = document.getElementById('roofBlossom');
+  for (const [x, y, r, n] of [[640, 368, 30, 18], [960, 368, 30, 18], [520, 532, 40, 26], [1080, 532, 40, 26], [728, 356, 18, 10], [872, 356, 18, 10]]) {
+    blossom(roof, x, y, r, n, roofRand, 0.55);
+  }
+
+  // Stone steps up to the hall.
+  const steps = document.getElementById('steps');
+  for (let i = 0; i < 6; i++) {
+    const half = 110 + i * 16, y = 762 + i * 18;
+    make('rect', { x: 800 - half, y, width: half * 2, height: 18, fill: i % 2 ? '#efe6de' : '#f5eee7' }, steps);
+    make('path', { d: `M${800 - half} ${y + 17.5}H${800 + half}`, stroke: '#d8c9bc', 'stroke-width': 1.5 }, steps);
+  }
+
+  // Red lanterns with warm glows.
+  const lanterns = document.getElementById('lanterns');
+  for (const [x, top] of [[548, 562], [1052, 562], [690, 584], [910, 584]]) {
+    make('circle', { cx: x, cy: top + 44, r: 40, fill: 'url(#glow)' }, lanterns);
+    make('path', { d: `M${x} ${top}V${top + 20}`, stroke: '#5e1016', 'stroke-width': 1.5 }, lanterns);
+    make('rect', { x: x - 9, y: top + 18, width: 18, height: 6, rx: 2, fill: '#d9a441' }, lanterns);
+    make('ellipse', { cx: x, cy: top + 44, rx: 18, ry: 22, fill: 'url(#lantern)' }, lanterns);
+    make('path', { d: `M${x - 10} ${top + 30}Q${x} ${top + 44} ${x - 10} ${top + 58}M${x + 10} ${top + 30}Q${x} ${top + 44} ${x + 10} ${top + 58}`, fill: 'none', stroke: '#9a1a22', 'stroke-width': 1.2, opacity: '.6' }, lanterns);
+    make('rect', { x: x - 8, y: top + 64, width: 16, height: 5, rx: 2, fill: '#d9a441' }, lanterns);
+    make('path', { d: `M${x} ${top + 69}V${top + 86}`, stroke: '#d9a441', 'stroke-width': 2.5, 'stroke-linecap': 'round' }, lanterns);
+  }
+
+  // Fallen petals on the steps, terrace and ground.
+  const fallenRand = seeded(97);
+  const fallen = document.getElementById('fallen');
+  for (let i = 0; i < 170; i++) {
+    const onGround = i < 110;
+    const x = onGround ? 380 + fallenRand() * 840 : 700 + fallenRand() * 200;
+    const y = onGround ? 858 + fallenRand() * 70 : 764 + fallenRand() * 106;
+    make('ellipse', { cx: fixed(x), cy: fixed(y), rx: fixed(2.5 + fallenRand() * 3), ry: fixed(1.5 + fallenRand() * 1.6), transform: `rotate(${(fallenRand() * 180) | 0} ${fixed(x)} ${fixed(y)})`, fill: PINKS[(fallenRand() * 4) | 0], opacity: '.9' }, fallen);
+  }
+
+  // A distant pagoda on the far hills.
+  const pagoda = document.getElementById('pagoda');
+  const px = 1262, base = 506;
+  for (let i = 0; i < 5; i++) {
+    const w = 64 * (1 - i * 0.14), y = base - i * 21;
+    make('rect', { x: fixed(px - w * 0.3), y: y - 13, width: fixed(w * 0.6), height: 13 }, pagoda);
+    make('path', { d: `M${fixed(px - w / 2 - 6)} ${y - 11}Q${fixed(px - w / 2)} ${y - 14} ${fixed(px - w * 0.34)} ${y - 19}H${fixed(px + w * 0.34)}Q${fixed(px + w / 2)} ${y - 14} ${fixed(px + w / 2 + 6)} ${y - 11}Z` }, pagoda);
+  }
+  make('path', { d: `M${px} ${base - 5 * 21 - 19}V${base - 5 * 21 - 44}`, stroke: '#dcaec2', 'stroke-width': 3 }, pagoda);
+})();
+
+// As the page scrolls, the scene follows: the shrine drifts up and fades,
+// the trees part, and everything settles into a soft sakura background.
+(() => {
+  const root = document.documentElement;
+  let queued = false;
+  const update = () => {
+    queued = false;
+    const progress = Math.min(1, Math.max(0, scrollY / (innerHeight * 0.85)));
+    root.style.setProperty('--p', progress.toFixed(3));
+  };
+  addEventListener('scroll', () => { if (!queued) { queued = true; requestAnimationFrame(update); } }, { passive: true });
+  addEventListener('resize', update);
+  update();
+})();
+
+// Falling petals, drawn over the whole page. They tumble, sway in a gentle
+// wind and drift with the scroll. Off when the system asks for less motion.
+(() => {
+  const canvas = document.getElementById('petals');
+  const context = canvas.getContext('2d');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  const BASE = 22; // petal sprite length, CSS pixels
+  const TINTS = [['#fff6f8', '#ffc0d0'], ['#ffe6ee', '#f7a2bb'], ['#ffffff', '#ffd2de'], ['#ffdbe5', '#ee8eab']];
+  let width = 0, height = 0, ratio = 1, sprites = [], petals = [], running = false, last = 0, clock = 0;
+  let lastScroll = scrollY, scrolled = 0;
+
+  function sprite([inner, outer]) {
+    const size = Math.ceil(BASE * 1.25 * ratio);
+    const image = document.createElement('canvas');
+    image.width = image.height = size;
+    const g = image.getContext('2d');
+    g.translate(size / 2, size / 2);
+    g.scale(ratio, ratio);
+    const L = BASE, W = BASE * 0.62;
+    const shape = new Path2D();
+    shape.moveTo(0, L * 0.5);
+    shape.bezierCurveTo(W * 0.9, L * 0.3, W * 0.85, -L * 0.32, W * 0.28, -L * 0.5);
+    shape.lineTo(0, -L * 0.36);
+    shape.lineTo(-W * 0.28, -L * 0.5);
+    shape.bezierCurveTo(-W * 0.85, -L * 0.32, -W * 0.9, L * 0.3, 0, L * 0.5);
+    shape.closePath();
+    const paint = g.createLinearGradient(0, L * 0.5, 0, -L * 0.5);
+    paint.addColorStop(0, inner);
+    paint.addColorStop(1, outer);
+    g.fillStyle = paint;
+    g.fill(shape);
+    g.lineWidth = 0.7;
+    g.strokeStyle = 'rgba(214, 110, 140, .35)';
+    g.stroke(shape);
+    g.beginPath();
+    g.moveTo(0, L * 0.4);
+    g.lineTo(0, -L * 0.18);
+    g.strokeStyle = 'rgba(232, 140, 165, .5)';
+    g.stroke();
+    return image;
+  }
+  function spawn(petal, anywhere) {
+    const depth = Math.random();
+    petal.depth = depth;
+    petal.scale = 0.5 + depth * 0.75;
+    petal.x = Math.random() * (width + 200) - 100;
+    petal.y = anywhere ? Math.random() * height : -30 - Math.random() * 80;
+    petal.fall = 26 + depth * 46 + Math.random() * 14;
+    petal.drift = -6 + Math.random() * 22;
+    petal.swayAmount = 10 + Math.random() * 28;
+    petal.swaySpeed = 0.6 + Math.random();
+    petal.phase = Math.random() * Math.PI * 2;
+    petal.angle = Math.random() * Math.PI * 2;
+    petal.spin = (Math.random() - 0.5) * 2.2;
+    petal.flip = Math.random() * Math.PI * 2;
+    petal.flipSpeed = 1 + Math.random() * 2.2;
+    petal.alpha = 0.55 + depth * 0.4;
+    petal.image = sprites[(Math.random() * sprites.length) | 0];
+    return petal;
+  }
+  function resize() {
+    ratio = Math.min(2, window.devicePixelRatio || 1);
+    width = innerWidth;
+    height = innerHeight;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    sprites = TINTS.map(sprite);
+    const count = Math.round(Math.min(90, Math.max(28, (width * height) / 16000)));
+    while (petals.length < count) petals.push(spawn({}, true));
+    petals.length = count;
+    for (const petal of petals) petal.image = sprites[(Math.random() * sprites.length) | 0];
+  }
+  function frame(now) {
+    if (!running) return;
+    const dt = Math.min(0.05, (now - last) / 1000 || 0);
+    last = now;
+    clock += dt;
+    const wind = 14 + 12 * Math.sin(clock * 0.23) + 7 * Math.sin(clock * 0.71 + 1.3);
+    const shift = scrolled;
+    scrolled = 0;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    for (const petal of petals) {
+      petal.y += petal.fall * dt - shift * (0.2 + petal.depth * 0.45);
+      petal.x += (petal.drift + wind * (0.5 + petal.depth) + Math.sin(clock * petal.swaySpeed + petal.phase) * petal.swayAmount) * dt;
+      petal.angle += petal.spin * dt;
+      petal.flip += petal.flipSpeed * dt;
+      if (petal.y > height + 40 || petal.x > width + 120 || petal.x < -140) spawn(petal, false);
+      else if (petal.y < -160) petal.y = height + 30;
+      const turn = Math.cos(petal.flip);
+      const flatten = Math.sign(turn || 1) * Math.max(0.18, Math.abs(turn));
+      const cos = Math.cos(petal.angle), sin = Math.sin(petal.angle), k = petal.scale;
+      context.globalAlpha = petal.alpha;
+      context.setTransform(ratio * k * flatten * cos, ratio * k * flatten * sin, -ratio * k * sin, ratio * k * cos, ratio * petal.x, ratio * petal.y);
+      const size = petal.image.width / ratio;
+      context.drawImage(petal.image, -size / 2, -size / 2, size, size);
+    }
+    requestAnimationFrame(frame);
+  }
+  function start() {
+    if (running || reduced.matches) return;
+    running = true;
+    canvas.hidden = false;
+    last = performance.now();
+    requestAnimationFrame(frame);
+  }
+  function stop() {
+    running = false;
+    canvas.hidden = true;
+  }
+  addEventListener('resize', resize);
+  addEventListener('scroll', () => {
+    scrolled += scrollY - lastScroll;
+    lastScroll = scrollY;
+  }, { passive: true });
+  reduced.addEventListener('change', () => (reduced.matches ? stop() : start()));
+  resize();
+  if (reduced.matches) stop(); else start();
+})();
 </script>
 </body>
 </html>
