@@ -110,6 +110,8 @@ LobbyView.start(Request, State, function(inGame: boolean)
 end)
 -- The diamond bird flies round the mountain; catching it doubles gifts.
 require(script:WaitForChild("BirdView")).start(gui, State)
+-- Cherry petals fall round the camera when the map shows the sakura theme.
+require(script:WaitForChild("PetalView")).start(State)
 
 -- Stone left (top centre) -------------------------------------------------------
 local stoneBox = make("Frame", {
@@ -395,7 +397,7 @@ local function panelBox(text: string, onSubmit: (string) -> ()): TextBox
 	return box
 end
 
-local function panelButtons(buttons: { { any } })
+local function panelButtons(buttons: { { any } }): { TextButton }
 	panelOrder += 1
 	local row = make("Frame", {
 		LayoutOrder = panelOrder,
@@ -404,6 +406,7 @@ local function panelButtons(buttons: { { any } })
 		ZIndex = 11,
 	}, panel)
 	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6) }, row)
+	local made: { TextButton } = {}
 	for _, spec in buttons do
 		local button = make("TextButton", {
 			Size = UDim2.new(1 / #buttons, -6, 1, 0),
@@ -416,7 +419,9 @@ local function panelButtons(buttons: { { any } })
 		}, row)
 		rounded(button, 8)
 		button.Activated:Connect(spec[2])
+		table.insert(made, button)
 	end
+	return made
 end
 
 local function send(action: string, value: any)
@@ -591,6 +596,21 @@ panelLabel("DIAMOND BIRD (every 5 to 7½ minutes)")
 panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
+
+panelLabel("MAP THEME (changes for everyone straight away)")
+local themeButtons = panelButtons({
+	{ "⛰ Alpine", function() send("setTheme", "default") end },
+	{ "🌸 Sakura", function() send("setTheme", "sakura") end },
+})
+-- The theme showing now is lit up.
+local function refreshTheme()
+	local theme = attr("Theme", "default")
+	for i, name in { "default", "sakura" } do
+		themeButtons[i].BackgroundColor3 = if theme == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+	end
+end
+State:GetAttributeChangedSignal("Theme"):Connect(refreshTheme)
+refreshTheme()
 
 panelLabel("REBUILD TEST GIFTS (adds blocks)")
 panelLabel("Tests refill dug spaces, then grow new mountain rock.")

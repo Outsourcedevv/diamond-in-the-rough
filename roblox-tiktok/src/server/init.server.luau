@@ -57,6 +57,7 @@ local settings = {
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	leaderboards = { gifts = {}, likes = {} } :: { gifts: { any }, likes: { any } },
 	statues = {} :: { any },
+	theme = "default", -- the map's look: "default" (alpine) or "sakura"
 }
 local saved = Store.load()
 if saved then
@@ -103,6 +104,7 @@ local function publishSettings()
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
+	State:SetAttribute("Theme", settings.theme)
 end
 
 local function saveSettings()
@@ -142,8 +144,19 @@ local boardSpots = Leaderboards.spots(arenaRadius, mountainRadius, spawn.Positio
 local reserved = {}
 for _, spot in boardSpots do table.insert(reserved, { at = spot.at, radius = 30 }) end
 
--- Hills, distant peaks, a lake, a pine forest, boulders and a campfire.
-require(script.Scenery).build(mountainRadius, spawn.Position, reserved)
+-- Hills, distant peaks, a lake, a pine forest, boulders and a campfire, in the
+-- saved theme (alpine or sakura).
+local Scenery = require(script.Scenery)
+if Scenery.LOOKS[settings.theme] == nil then settings.theme = "default" end
+Scenery.build(mountainRadius, spawn.Position, reserved, settings.theme)
+
+-- Switches the map's theme live for everyone and remembers it.
+local function setTheme(name: string): boolean
+	if name == settings.theme or not Scenery.setTheme(name) then return false end
+	settings.theme = name
+	saveSettings()
+	return true
+end
 
 -- Every player carries a pickaxe to chip at the rock themselves.
 local function makePickaxe(): Tool
@@ -884,6 +897,12 @@ local giftQueue: { TikTokFeed.Event } = {}
 local giftHead = 1
 local giftWorkerRunning = false
 local function onTikTok(event: TikTokFeed.Event)
+	if event.type == "theme" then
+		-- From the bridge control page's theme buttons: it changes the
+		-- scenery straight away, without waiting behind queued gifts.
+		if event.theme then setTheme(event.theme) end
+		return
+	end
 	-- While the diamond bird's bonus runs, a gift counts as if it were sent
 	-- twice: double the stone blasted or added, the effect and the leaderboard
 	-- coins. It is decided on arrival, so gifts still queued keep their bonus.
@@ -1174,6 +1193,9 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
+		return
+	elseif action == "setTheme" and type(value) == "string" then
+		setTheme(value)
 		return
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1

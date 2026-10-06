@@ -10,7 +10,7 @@ local RunService = game:GetService("RunService")
 
 export type Event = {
 	id: string,
-	type: string, -- "gift" | "like" | "follow" | "share"
+	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "theme"
 	user: string?,
 	name: string?,
 	gift: string?,
@@ -19,6 +19,7 @@ export type Event = {
 	likes: number?,
 	rocks: number?,
 	keybind: string?,
+	theme: string?, -- "theme" events: the map theme the control page chose
 }
 
 local TikTokFeed = {}
@@ -41,6 +42,7 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 	local event: Event = {
 		rocks = if type(raw.rocks) == "number" and raw.rocks == raw.rocks then math.clamp(raw.rocks, -1500000, 1500000) else nil,
 		keybind = if type(raw.keybind) == "string" then string.sub(raw.keybind, 1, 16) else nil,
+		theme = if type(raw.theme) == "string" then string.sub(raw.theme, 1, 16) else nil,
 		id = raw.id,
 		type = raw.type,
 		user = if type(raw.user) == "string" then string.sub(raw.user, 1, 40) else nil,

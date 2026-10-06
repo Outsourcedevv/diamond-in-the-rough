@@ -8,10 +8,16 @@
 -- (see ScenePack); without it, from smooth terrain (peaks, boulders) and
 -- low-poly wedge trees. The look relies on the place's Future lighting and
 -- 2022 materials (see default.project.json).
+--
+-- Two themes can be switched live (Scenery.setTheme): the alpine default, and
+-- sakura, which adds blossoming cherry trees, a torii gate and stone lanterns
+-- (see Sakura) under a soft pink spring light.
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local PartShapes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))
 local ScenePack = require(script.Parent.ScenePack)
+local Sakura = require(script.Parent.Sakura)
 
 local Scenery = {}
 local random = Random.new(4207)
@@ -156,10 +162,14 @@ local function terrainHeight(x: number, z: number, site: Site): number
 	return height
 end
 
-local function onPath(x: number, z: number, site: Site): boolean
+-- The trail from the camp to the mountain bends gently; its centre at `z`.
+local function pathCentre(z: number, site: Site): number
 	local camp = site.camp
-	local pathX = math.sin(math.clamp((camp.Z - z) / (camp.Z - 26), 0, 1) * math.pi) * 4
-	return z >= 26 and z <= camp.Z + 5 and math.abs(x - pathX) < 3.3 + math.noise(z / 7, 0, 3) * 0.8
+	return math.sin(math.clamp((camp.Z - z) / (camp.Z - 26), 0, 1) * math.pi) * 4
+end
+
+local function onPath(x: number, z: number, site: Site): boolean
+	return z >= 26 and z <= site.camp.Z + 5 and math.abs(x - pathCentre(z, site)) < 3.3 + math.noise(z / 7, 0, 3) * 0.8
 end
 
 local EXTENT = 384 -- terrain reaches this far from the mountain in every direction
@@ -231,8 +241,127 @@ local function landscape(terrain: Terrain, site: Site)
 	end
 end
 
+-- Each theme's light, haze, grade and terrain colours.
+export type Look = {
+	clock: number,
+	brightness: number,
+	ambient: Color3,
+	outdoorAmbient: Color3,
+	colorShiftTop: Color3,
+	exposure: number,
+	atmosphere: { density: number, offset: number, color: Color3, decay: Color3, glare: number, haze: number },
+	grade: { contrast: number, saturation: number, tint: Color3 },
+	bloom: { intensity: number, size: number, threshold: number },
+	rays: number,
+	clouds: { cover: number, density: number, color: Color3 },
+	terrain: { [Enum.Material]: Color3 },
+	water: Color3,
+}
+
+Scenery.THEMES = { "default", "sakura" }
+Scenery.LOOKS = {
+	-- A clear late-afternoon alpine sun, soft sky light, aerial haze and a
+	-- gentle filmic grade.
+	default = {
+		clock = 15.6,
+		brightness = 2.6,
+		ambient = Color3.fromRGB(74, 78, 88),
+		outdoorAmbient = Color3.fromRGB(126, 130, 140),
+		colorShiftTop = Color3.fromRGB(30, 18, 6),
+		exposure = 0.1,
+		atmosphere = { density = 0.3, offset = 0.22, color = Color3.fromRGB(198, 214, 230), decay = Color3.fromRGB(110, 126, 150), glare = 0.35, haze = 1.6 },
+		grade = { contrast = 0.08, saturation = 0.08, tint = Color3.fromRGB(255, 249, 240) },
+		bloom = { intensity = 0.45, size = 24, threshold = 1.3 },
+		rays = 0.05,
+		clouds = { cover = 0.42, density = 0.5, color = Color3.fromRGB(250, 248, 242) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(102, 126, 64),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(86, 110, 56),
+			[Enum.Material.Ground] = Color3.fromRGB(112, 94, 70),
+			[Enum.Material.Mud] = Color3.fromRGB(84, 72, 58),
+			[Enum.Material.Rock] = Color3.fromRGB(116, 116, 112),
+			[Enum.Material.Snow] = Color3.fromRGB(238, 242, 247),
+		},
+		water = Color3.fromRGB(46, 92, 96),
+	},
+	-- Spring in blossom: a lower golden sun through a pink haze, fresh green
+	-- meadows and blush-tinted clouds and snow, like the control page's shrine.
+	sakura = {
+		clock = 16.3,
+		brightness = 2.45,
+		ambient = Color3.fromRGB(88, 76, 88),
+		outdoorAmbient = Color3.fromRGB(142, 126, 138),
+		colorShiftTop = Color3.fromRGB(42, 18, 16),
+		exposure = 0.14,
+		atmosphere = { density = 0.32, offset = 0.2, color = Color3.fromRGB(242, 208, 222), decay = Color3.fromRGB(156, 116, 146), glare = 0.45, haze = 1.9 },
+		grade = { contrast = 0.06, saturation = 0.14, tint = Color3.fromRGB(255, 242, 246) },
+		bloom = { intensity = 0.55, size = 28, threshold = 1.2 },
+		rays = 0.07,
+		clouds = { cover = 0.38, density = 0.45, color = Color3.fromRGB(255, 233, 240) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(114, 142, 74),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(98, 126, 64),
+			[Enum.Material.Ground] = Color3.fromRGB(122, 98, 80),
+			[Enum.Material.Mud] = Color3.fromRGB(90, 74, 64),
+			[Enum.Material.Rock] = Color3.fromRGB(124, 118, 118),
+			[Enum.Material.Snow] = Color3.fromRGB(250, 240, 245),
+		},
+		water = Color3.fromRGB(56, 102, 116),
+	},
+} :: { [string]: Look }
+
+-- Scenery that belongs to one theme: shown with it, kept in ServerStorage otherwise.
+local themed: { alpine: Instance?, home: Instance?, sakura: Instance? } = {}
+local effects: { atmosphere: Atmosphere, grade: ColorCorrectionEffect, bloom: BloomEffect, rays: SunRaysEffect, clouds: Clouds }? = nil
+local current: string? = nil
+
+-- Switches the valley to a theme ("default" or "sakura") straight away.
+-- Returns false for an unknown theme, or before the scenery is built.
+function Scenery.setTheme(name: string): boolean
+	local look = Scenery.LOOKS[name]
+	if look == nil or effects == nil then return false end
+	local fx = effects :: any
+	if themed.alpine then themed.alpine.Parent = if name == "sakura" then ServerStorage else themed.home end
+	if themed.sakura then themed.sakura.Parent = if name == "sakura" then workspace else ServerStorage end
+	local terrain = workspace.Terrain
+	for material, colour in look.terrain do
+		terrain:SetMaterialColor(material, colour)
+	end
+	terrain.WaterColor = look.water
+	Lighting.ClockTime = look.clock
+	Lighting.Brightness = look.brightness
+	Lighting.Ambient = look.ambient
+	Lighting.OutdoorAmbient = look.outdoorAmbient
+	Lighting.ColorShift_Top = look.colorShiftTop
+	Lighting.ExposureCompensation = look.exposure
+	fx.atmosphere.Density = look.atmosphere.density
+	fx.atmosphere.Offset = look.atmosphere.offset
+	fx.atmosphere.Color = look.atmosphere.color
+	fx.atmosphere.Decay = look.atmosphere.decay
+	fx.atmosphere.Glare = look.atmosphere.glare
+	fx.atmosphere.Haze = look.atmosphere.haze
+	fx.grade.Contrast = look.grade.contrast
+	fx.grade.Saturation = look.grade.saturation
+	fx.grade.TintColor = look.grade.tint
+	fx.bloom.Intensity = look.bloom.intensity
+	fx.bloom.Size = look.bloom.size
+	fx.bloom.Threshold = look.bloom.threshold
+	fx.rays.Intensity = look.rays
+	fx.clouds.Cover = look.clouds.cover
+	fx.clouds.Density = look.clouds.density
+	fx.clouds.Color = look.clouds.color
+	current = name
+	return true
+end
+
+-- The theme showing now ("default" until the scenery is built).
+function Scenery.theme(): string
+	return current or "default"
+end
+
 -- `reserved` keeps trees and boulders out of circles (the leaderboards stand there).
-function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved: { { at: Vector3, radius: number } }?)
+-- `theme` is the theme to show once it is built (see Scenery.setTheme).
+function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved: { { at: Vector3, radius: number } }?, theme: string?)
 	-- Animated grass is enabled in the place/project: Decoration and GrassLength
 	-- are editor-only properties. LeafyGrass keeps the central arena blade-free.
 	local terrain = workspace.Terrain
@@ -283,15 +412,9 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 			+ math.abs(terrainHeight(x, z + 3, site) - terrainHeight(x, z - 3, site)) / 6
 	end
 
-	terrain:SetMaterialColor(Enum.Material.Grass, Color3.fromRGB(102, 126, 64))
-	terrain:SetMaterialColor(Enum.Material.LeafyGrass, Color3.fromRGB(86, 110, 56))
-	terrain:SetMaterialColor(Enum.Material.Ground, Color3.fromRGB(112, 94, 70))
-	terrain:SetMaterialColor(Enum.Material.Mud, Color3.fromRGB(84, 72, 58))
-	terrain:SetMaterialColor(Enum.Material.Rock, Color3.fromRGB(116, 116, 112))
-	terrain:SetMaterialColor(Enum.Material.Snow, Color3.fromRGB(238, 242, 247))
+	-- Terrain colours, like the light, come from the theme (see LOOKS).
 	terrain:FillBlock(CFrame.new(0, -8, 0), Vector3.new(EXTENT * 4, 16, EXTENT * 4), Enum.Material.Grass)
 	landscape(terrain, site)
-	terrain.WaterColor = Color3.fromRGB(46, 92, 96)
 	terrain.WaterTransparency = 0.62
 	terrain.WaterReflectance = 0.45
 	terrain.WaterWaveSize = 0.06
@@ -583,19 +706,23 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	text.Text = "⛏  DIAMOND MOUNTAIN"
 	text.Parent = gui
 
-	-- Festoon lights over the camp, without a light per bulb.
+	-- Festoon lights over the camp, without a light per bulb. The sakura theme's
+	-- torii takes their place.
+	local festoon = Instance.new("Folder")
+	festoon.Name = "Festoon"
+	festoon.Parent = folder
 	for i = 0, 14 do
 		local t = i / 14
 		local at = camp + Vector3.new(-10 + t * 20, 7 - 1.4 * math.sin(t * math.pi), -6)
-		local wire = piece(folder, "FestoonWire", Vector3.new(1.5, 0.035, 0.035), CFrame.new(at), Color3.fromRGB(48, 44, 35), Enum.Material.Metal)
+		local wire = piece(festoon, "FestoonWire", Vector3.new(1.5, 0.035, 0.035), CFrame.new(at), Color3.fromRGB(48, 44, 35), Enum.Material.Metal)
 		wire.CastShadow = false
 		if i % 2 == 0 then
-			local bulb = piece(folder, "FestoonBulb", Vector3.new(0.18, 0.27, 0.18), CFrame.new(at + Vector3.new(0, -0.2, 0)), Color3.fromRGB(255, 191, 102), Enum.Material.Neon)
+			local bulb = piece(festoon, "FestoonBulb", Vector3.new(0.18, 0.27, 0.18), CFrame.new(at + Vector3.new(0, -0.2, 0)), Color3.fromRGB(255, 191, 102), Enum.Material.Neon)
 			bulb.CastShadow = false
 		end
 	end
 	for _, x in { -10, 10 } do
-		beam(folder, "FestoonPost", camp + Vector3.new(x, 0, -6), camp + Vector3.new(x, 7.2, -6), 0.25, Color3.fromRGB(96, 70, 48), Enum.Material.Wood)
+		beam(festoon, "FestoonPost", camp + Vector3.new(x, 0, -6), camp + Vector3.new(x, 7.2, -6), 0.25, Color3.fromRGB(96, 70, 48), Enum.Material.Wood)
 	end
 
 	-- The campfire: a stone ring, crossed logs and log benches.
@@ -632,53 +759,52 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	lantern(folder, camp + Vector3.new(-9, 0, -8))
 	lantern(folder, camp + Vector3.new(9, 0, -8))
 
-	-- Light: a clear late-afternoon sun, soft sky light, aerial haze and a
-	-- gentle filmic grade. Technology is Future (set in the place file).
-	Lighting.ClockTime = 15.6
+	-- The sakura theme's scenery, kept out of view until it is chosen.
+	themed.alpine = festoon
+	themed.home = folder
+	local sakura = Sakura.build({
+		piece = piece,
+		beam = beam,
+		solid = solid,
+		ground = ground,
+		clear = clear,
+		spaced = spaced,
+		steepness = steepness,
+		pathCentre = function(z: number): number return pathCentre(z, site) end,
+		camp = camp,
+		lake = lake,
+		radius = clearRadius,
+	})
+	sakura.Parent = ServerStorage
+	themed.sakura = sakura
+
+	-- Light that both themes share; each theme sets the rest (see LOOKS).
+	-- Technology is Future (set in the place file).
 	Lighting.GeographicLatitude = 38
-	Lighting.Brightness = 2.6
 	Lighting.GlobalShadows = true
 	Lighting.ShadowSoftness = 0.22
-	Lighting.Ambient = Color3.fromRGB(74, 78, 88)
-	Lighting.OutdoorAmbient = Color3.fromRGB(126, 130, 140)
-	Lighting.ColorShift_Top = Color3.fromRGB(30, 18, 6)
 	Lighting.ColorShift_Bottom = Color3.fromRGB(0, 0, 0)
 	Lighting.EnvironmentDiffuseScale = 1
 	Lighting.EnvironmentSpecularScale = 0.85
-	Lighting.ExposureCompensation = 0.1
 	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
-	atmosphere.Density = 0.3
-	atmosphere.Offset = 0.22
-	atmosphere.Color = Color3.fromRGB(198, 214, 230)
-	atmosphere.Decay = Color3.fromRGB(110, 126, 150)
-	atmosphere.Glare = 0.35
-	atmosphere.Haze = 1.6
 	atmosphere.Parent = Lighting
 	local grade = Instance.new("ColorCorrectionEffect")
 	grade.Name = "AlpineGrade"
 	grade.Brightness = 0
-	grade.Contrast = 0.08
-	grade.Saturation = 0.08
-	grade.TintColor = Color3.fromRGB(255, 249, 240)
 	grade.Parent = Lighting
 	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.45
-	bloom.Size = 24
-	bloom.Threshold = 1.3
 	bloom.Parent = Lighting
 	local rays = Instance.new("SunRaysEffect")
-	rays.Intensity = 0.05
 	rays.Spread = 0.75
 	rays.Parent = Lighting
 	local clouds = terrain:FindFirstChildOfClass("Clouds") or Instance.new("Clouds")
-	clouds.Cover = 0.42
-	clouds.Density = 0.5
-	clouds.Color = Color3.fromRGB(250, 248, 242)
 	clouds.Parent = terrain
 	local sky = Lighting:FindFirstChildOfClass("Sky") or Instance.new("Sky")
 	sky.SunAngularSize = 12
 	sky.CelestialBodiesShown = true
 	sky.Parent = Lighting
+	effects = { atmosphere = atmosphere, grade = grade, bloom = bloom, rays = rays, clouds = clouds }
+	Scenery.setTheme(theme or "default")
 end
 
 return Scenery

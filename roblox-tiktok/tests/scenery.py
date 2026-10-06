@@ -21,6 +21,7 @@ def module(path: str) -> str:
     source = (root / path).read_text(encoding="utf-8")
     source = source.replace('require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))', "PartShapes")
     source = source.replace("require(script.Parent.ScenePack)", "ScenePack")
+    source = source.replace("require(script.Parent.Sakura)", "Sakura")
     source = source.replace('require(script.Parent:WaitForChild("Inflate"))', "Inflate")
     source = source.replace('local Shared = ReplicatedStorage:WaitForChild("DiamondRush")\n', "")
     source = source.replace('require(Shared:WaitForChild("MeshPack"))', "MeshPack")
@@ -86,7 +87,8 @@ local DUMP = os.getenv and os.getenv("SCENERY_DUMP") ~= nil or false
 local surface = {}
 local terrain = Instance.new("Terrain")
 local fills, balls, chunks, snow, rockSteep, water, air = 0, 0, 0, 0, 0, 0, 0
-terrain.SetMaterialColor = function() end
+local materialColours = {}
+terrain.SetMaterialColor = function(_, material, colour) materialColours[material] = colour end
 terrain.FillBlock = function() fills += 1 end
 terrain.FillBall = function(_, centre, radius, material)
 	balls += 1
@@ -163,6 +165,84 @@ if PACK_MODE == "studs" or PACK_MODE == "tiny-zup" then
 	end
 end
 Scenery.build(26.4, Vector3.new(0, 0.5, 56.4), reserved)
+
+-- Themes: the alpine default, and sakura switched on and off live.
+local sceneryFolder = workspace:FindFirstChild("Scenery")
+local festoon = sceneryFolder:FindFirstChild("Festoon")
+local sakura = ServerStorage:FindFirstChild("SakuraScenery")
+assert(Scenery.theme() == "default" and festoon ~= nil and festoon.Parent == sceneryFolder, "the valley starts alpine, festoon lights up")
+assert(sakura ~= nil, "the sakura scenery waits out of view")
+local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+local grade = Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+local bloom = Lighting:FindFirstChildOfClass("BloomEffect")
+local rays = Lighting:FindFirstChildOfClass("SunRaysEffect")
+local clouds = terrain:FindFirstChildOfClass("Clouds")
+local function look()
+	return {
+		Lighting.ClockTime, Lighting.Brightness, Lighting.Ambient, Lighting.OutdoorAmbient, Lighting.ColorShift_Top, Lighting.ExposureCompensation,
+		atmosphere.Density, atmosphere.Offset, atmosphere.Color, atmosphere.Decay, atmosphere.Glare, atmosphere.Haze,
+		grade.Contrast, grade.Saturation, grade.TintColor, bloom.Intensity, bloom.Size, bloom.Threshold, rays.Intensity,
+		clouds.Cover, clouds.Density, clouds.Color, terrain.WaterColor,
+		materialColours["Material.Grass"], materialColours["Material.LeafyGrass"], materialColours["Material.Ground"],
+		materialColours["Material.Mud"], materialColours["Material.Rock"], materialColours["Material.Snow"],
+	}
+end
+local alpine = look()
+-- The alpine look is the one the valley always had.
+assert(Lighting.ClockTime == 15.6 and atmosphere.Density == 0.3 and atmosphere.Haze == 1.6 and grade.TintColor == Color3.fromRGB(255, 249, 240)
+	and bloom.Threshold == 1.3 and clouds.Cover == 0.42 and terrain.WaterColor == Color3.fromRGB(46, 92, 96)
+	and materialColours["Material.Grass"] == Color3.fromRGB(102, 126, 64) and materialColours["Material.Snow"] == Color3.fromRGB(238, 242, 247),
+	"the alpine look is unchanged")
+for i = 1, 29 do assert(alpine[i] ~= nil, "every themed setting is set: " .. i) end
+-- What the sakura theme brings.
+local camp = Vector3.new(0, 0, 56.4)
+local trees, blossoms, carpets, torii, lanterns, sakuraParts = 0, 0, 0, 0, 0, 0
+for _, p in sakura:GetDescendants() do
+	if p.Name == "SakuraTree" then trees += 1 end
+	if p.Name == "Blossom" then
+		blossoms += 1
+		assert(p.Shape == "PartType.Ball" and p.Size.X > 3, "blossoms are round puffs")
+	end
+	if p.Name == "Torii" then torii += 1 end
+	if p.Name == "StoneLantern" then lanterns += 1 end
+	if p.Name == "SakuraTrunk" or p.Name == "FallenPetals" then
+		local flat = Vector3.new(p.CFrame.Position.X, 0, p.CFrame.Position.Z)
+		assert(flat.Magnitude > 55 and (flat - camp).Magnitude > 25 and not inReserved(flat), "cherry trees stay off the arena, camp and boards")
+		if p.Name == "FallenPetals" then carpets += 1 end
+	end
+	if p.Name == "ToriiPillar" then
+		local at = p.CFrame.Position
+		assert(at.Z < 56.4 - 7 and at.Z > 56.4 - 11, "the torii stands just past the spawn pad: " .. at.Z)
+	end
+	if p.ClassName == "Part" then
+		sakuraParts += 1
+		assert(p.Anchored and p.CanQuery == false and p.CanTouch == false, "sakura scenery must not interfere with mining/physics: " .. tostring(p.Name))
+		assert(p.Size.X > 0 and p.Size.Y > 0 and p.Size.Z > 0, "positive size: " .. tostring(p.Name))
+	end
+	assert(p.ClassName ~= "PointLight", "the sakura theme adds no lights")
+end
+assert(trees >= 40 and trees <= 48 and carpets == trees and blossoms >= trees * 4, "cherry groves: " .. trees)
+assert(torii == 1 and lanterns == 3, "a torii and three stone lanterns")
+assert(sakuraParts < 700, "the sakura scenery stays light: " .. sakuraParts)
+-- Switching to sakura and back is instant and exact.
+assert(Scenery.setTheme("sakura") and Scenery.theme() == "sakura", "sakura can be chosen")
+assert(sakura.Parent == workspace and festoon.Parent == ServerStorage, "the blossoms show and the festoon gives way to the torii")
+assert(Lighting.ClockTime == Scenery.LOOKS.sakura.clock and atmosphere.Color == Scenery.LOOKS.sakura.atmosphere.color
+	and materialColours["Material.Grass"] == Scenery.LOOKS.sakura.terrain["Material.Grass"], "the sakura light and colours apply")
+assert(not Scenery.setTheme("winter") and Scenery.theme() == "sakura", "unknown themes are refused")
+assert(Scenery.setTheme("default") and Scenery.theme() == "default", "alpine can be chosen again")
+assert(sakura.Parent == ServerStorage and festoon.Parent == sceneryFolder, "the sakura scenery goes back out of view")
+local back = look()
+for i = 1, 29 do assert(back[i] == alpine[i], "the alpine look comes back exactly: " .. i) end
+-- Petals stay in the box round the camera, wherever it is and however long they fall.
+for _, centre in { Vector3.new(0, 6, 56), Vector3.new(-300, 80, 120) } do
+	for _, t in { 0, 1.5, 60, 4000.25 } do
+		local petal = { seed = Vector3.new(12, 30, 70), fall = 2.4, sway = 1, phase = 0.5, spin = Vector3.new(1, 1, 1) }
+		local at = PetalView.frame(petal, t, centre).Position - centre
+		assert(math.abs(at.X) <= 40 and math.abs(at.Y) <= 20 and math.abs(at.Z) <= 40, "petals stay round the camera")
+	end
+end
+print(string.format("themes: %d cherry trees, %d blossoms, %d sakura parts", trees, blossoms, sakuraParts))
 local published = Replicated:FindFirstChild("DiamondRushSceneryPlacements")
 if PACK_MODE == "generated" then
 	-- The server only lays the pack out; each player's game builds it.
@@ -310,6 +390,8 @@ try:
             + "\nlocal ScenePackData = " + module("src/shared/ScenePackData.luau")
             + "\nlocal ScenePack = " + module("src/server/ScenePack.luau")
             + "\nlocal SceneryView = " + module("src/client/SceneryView.luau")
+            + "\nlocal Sakura = " + module("src/server/Sakura.luau")
+            + "\nlocal PetalView = " + module("src/client/PetalView.luau")
             + "\nlocal Scenery = " + module("src/server/Scenery.luau")
             + "\n" + checks
         )

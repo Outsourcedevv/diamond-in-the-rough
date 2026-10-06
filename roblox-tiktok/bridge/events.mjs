@@ -32,6 +32,16 @@ export function rebuildTestEvent(blocks) {
   return { type: 'gift', user: 'tester', name: 'Test viewer', gift: 'Rebuild test', coins: 1, count: 1, rocks: -blocks };
 }
 
+// The map themes the game can show: the alpine valley, or sakura in blossom.
+export const THEMES = { default: 'Alpine', sakura: 'Sakura' };
+
+export function themeEvent(theme) {
+  if (!Object.hasOwn(THEMES, theme)) {
+    throw new Error('Choose the alpine or the sakura theme.');
+  }
+  return { type: 'theme', name: 'Control page', theme };
+}
+
 function who(user) {
   return {
     user: String(user?.uniqueId ?? user?.userId ?? 'someone').slice(0, 40),

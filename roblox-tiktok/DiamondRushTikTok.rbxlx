@@ -4427,6 +4427,7 @@ local settings = {
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	leaderboards = { gifts = {}, likes = {} } :: { gifts: { any }, likes: { any } },
 	statues = {} :: { any },
+	theme = "default", -- the map's look: "default" (alpine) or "sakura"
 }
 local saved = Store.load()
 if saved then
@@ -4473,6 +4474,7 @@ local function publishSettings()
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
+	State:SetAttribute("Theme", settings.theme)
 end
 
 local function saveSettings()
@@ -4512,8 +4514,19 @@ local boardSpots = Leaderboards.spots(arenaRadius, mountainRadius, spawn.Positio
 local reserved = {}
 for _, spot in boardSpots do table.insert(reserved, { at = spot.at, radius = 30 }) end
 
--- Hills, distant peaks, a lake, a pine forest, boulders and a campfire.
-require(script.Scenery).build(mountainRadius, spawn.Position, reserved)
+-- Hills, distant peaks, a lake, a pine forest, boulders and a campfire, in the
+-- saved theme (alpine or sakura).
+local Scenery = require(script.Scenery)
+if Scenery.LOOKS[settings.theme] == nil then settings.theme = "default" end
+Scenery.build(mountainRadius, spawn.Position, reserved, settings.theme)
+
+-- Switches the map's theme live for everyone and remembers it.
+local function setTheme(name: string): boolean
+	if name == settings.theme or not Scenery.setTheme(name) then return false end
+	settings.theme = name
+	saveSettings()
+	return true
+end
 
 -- Every player carries a pickaxe to chip at the rock themselves.
 local function makePickaxe(): Tool
@@ -5254,6 +5267,12 @@ local giftQueue: { TikTokFeed.Event } = {}
 local giftHead = 1
 local giftWorkerRunning = false
 local function onTikTok(event: TikTokFeed.Event)
+	if event.type == "theme" then
+		-- From the bridge control page's theme buttons: it changes the
+		-- scenery straight away, without waiting behind queued gifts.
+		if event.theme then setTheme(event.theme) end
+		return
+	end
 	-- While the diamond bird's bonus runs, a gift counts as if it were sent
 	-- twice: double the stone blasted or added, the effect and the leaderboard
 	-- coins. It is decided on arrival, so gifts still queued keep their bonus.
@@ -5544,6 +5563,9 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
+		return
+	elseif action == "setTheme" and type(value) == "string" then
+		setTheme(value)
 		return
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
@@ -6831,6 +6853,193 @@ return Mountain
       </Item>
       <Item class="ModuleScript" referent="24">
         <Properties>
+          <string name="Name">Sakura</string>
+          <string name="Source"><![CDATA[--!strict
+-- The sakura theme's own scenery: cherry trees in blossom across the meadows,
+-- with fallen petals beneath them, a vermilion torii gate at the camp's
+-- entrance framing the mountain, and stone lanterns. Scenery builds it once,
+-- alongside the alpine valley, and keeps it out of view until the theme is
+-- chosen (see Scenery.setTheme). Like the rest of the scenery, nothing here
+-- takes part in mining raycasts or touch events.
+local Sakura = {}
+
+-- What Scenery lends the theme: its part makers and where things may go.
+export type Kit = {
+	piece: (parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, kind: string?) -> BasePart,
+	beam: (parent: Instance, name: string, a: Vector3, b: Vector3, width: number, colour: Color3, material: Enum.Material) -> BasePart,
+	solid: (BasePart) -> BasePart,
+	ground: (x: number, z: number) -> Vector3,
+	clear: (at: Vector3, margin: number) -> boolean, -- arena, camp, lake, path or leaderboards
+	spaced: (at: Vector3, gap: number) -> boolean, -- clear of the valley's trees and rocks
+	steepness: (x: number, z: number) -> number,
+	pathCentre: (z: number) -> number,
+	camp: Vector3,
+	lake: Vector3,
+	radius: number, -- the arena's clear radius
+}
+
+-- Blossom pinks from pale to deep, a shade richer than the control page's so
+-- they stay pink under the game's bright sun and bloom.
+local PINKS = {
+	Color3.fromRGB(255, 212, 226),
+	Color3.fromRGB(255, 194, 214),
+	Color3.fromRGB(252, 176, 202),
+	Color3.fromRGB(246, 158, 190),
+	Color3.fromRGB(236, 140, 176),
+}
+local BARK = Color3.fromRGB(78, 56, 54)
+local VERMILION = Color3.fromRGB(200, 50, 60)
+local LACQUER = Color3.fromRGB(34, 28, 30)
+local STONE = Color3.fromRGB(150, 146, 138)
+
+-- A cherry tree: a dark leaning trunk forking into three or four branches,
+-- each ending in a puff of blossom, with a crown over the middle and a carpet
+-- of fallen petals on the ground.
+local function tree(kit: Kit, parent: Instance, at: Vector3, height: number, random: Random)
+	local model = Instance.new("Model")
+	model.Name = "SakuraTree"
+	model.Parent = parent
+	local lean = Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)) * height * 0.06
+	local fork = at + Vector3.new(0, height * 0.4, 0) + lean
+	kit.beam(model, "SakuraTrunk", at - Vector3.new(0, 0.6, 0), fork, height * 0.08, BARK, Enum.Material.Wood)
+	local tone = random:NextInteger(1, #PINKS - 1)
+	local branches = random:NextInteger(3, 4)
+	local yaw = random:NextNumber(0, math.pi * 2)
+	local spread = height * 0.3
+	for k = 1, branches do
+		local angle = yaw + k / branches * math.pi * 2 + random:NextNumber(-0.3, 0.3)
+		local tip = fork + Vector3.new(math.cos(angle) * spread, height * random:NextNumber(0.2, 0.32), math.sin(angle) * spread)
+		kit.beam(model, "SakuraBranch", fork, tip, height * 0.04, BARK, Enum.Material.Wood)
+		local size = height * random:NextNumber(0.4, 0.5)
+		local colour = PINKS[math.clamp(tone + random:NextInteger(-1, 1), 1, #PINKS)]
+		local blossom = kit.piece(model, "Blossom", Vector3.one * size, CFrame.new(tip + Vector3.new(0, size * 0.12, 0)), colour, Enum.Material.LeafyGrass)
+		;(blossom :: Part).Shape = Enum.PartType.Ball
+	end
+	local crown = height * 0.56
+	local top = kit.piece(model, "Blossom", Vector3.one * crown, CFrame.new(fork + Vector3.new(0, height * 0.42, 0)), PINKS[tone], Enum.Material.LeafyGrass)
+	;(top :: Part).Shape = Enum.PartType.Ball
+	-- Fallen petals: a thin pink disc, a little wider than the crown.
+	local width = height * random:NextNumber(0.85, 1.05)
+	local carpet = kit.piece(model, "FallenPetals", Vector3.new(0.1, width, width), CFrame.new(at + Vector3.new(0, 0.04, 0)) * CFrame.Angles(0, 0, math.pi / 2),
+		PINKS[math.min(tone + 1, #PINKS)], Enum.Material.Sand)
+	;(carpet :: Part).Shape = Enum.PartType.Cylinder
+	carpet.CastShadow = false
+end
+
+-- A torii gate across the trail, beams along X, its plaque facing the camp.
+local function torii(kit: Kit, parent: Instance, centre: Vector3, span: number)
+	local model = Instance.new("Model")
+	model.Name = "Torii"
+	model.Parent = parent
+	local tall = 8.6
+	for _, side in { -1, 1 } do
+		local foot = centre + Vector3.new(side * span / 2, 0, 0)
+		kit.solid(kit.beam(model, "ToriiPillar", foot - Vector3.new(0, 0.5, 0), foot + Vector3.new(0, tall, 0), 0.8, VERMILION, Enum.Material.SmoothPlastic))
+		kit.beam(model, "ToriiBase", foot - Vector3.new(0, 0.5, 0), foot + Vector3.new(0, 0.9, 0), 1.05, LACQUER, Enum.Material.SmoothPlastic)
+	end
+	-- The lower tie beam (nuki) runs through the pillars and out past them.
+	kit.piece(model, "ToriiNuki", Vector3.new(span + 2.2, 0.5, 0.45), CFrame.new(centre + Vector3.new(0, tall - 2.1, 0)), VERMILION, Enum.Material.SmoothPlastic)
+	-- The top: a vermilion beam (shimaki) under a black lintel (kasagi) whose
+	-- two halves sweep up towards their ends.
+	kit.piece(model, "ToriiShimaki", Vector3.new(span + 2.8, 0.5, 0.75), CFrame.new(centre + Vector3.new(0, tall + 0.25, 0)), VERMILION, Enum.Material.SmoothPlastic)
+	local half = span / 2 + 2.1
+	for _, side in { -1, 1 } do
+		local frame = CFrame.new(centre + Vector3.new(side * half / 2, tall + 0.78, 0)) * CFrame.Angles(0, 0, side * math.rad(3.5))
+		kit.piece(model, "ToriiKasagi", Vector3.new(half + 0.15, 0.6, 1.05), frame, LACQUER, Enum.Material.SmoothPlastic)
+	end
+	-- The central strut carries a plaque with the diamond on it.
+	kit.piece(model, "ToriiStrut", Vector3.new(0.45, 1.6, 0.4), CFrame.new(centre + Vector3.new(0, tall - 1.05, 0)), VERMILION, Enum.Material.SmoothPlastic)
+	local plaque = kit.piece(model, "ToriiPlaque", Vector3.new(1.1, 1.3, 0.12),
+		CFrame.lookAt(centre + Vector3.new(0, tall - 1.05, 0.26), centre + Vector3.new(0, tall - 1.05, 1)), LACQUER, Enum.Material.SmoothPlastic)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 60
+	gui.LightInfluence = 1
+	gui.Parent = plaque
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.TextScaled = true
+	text.Text = "💎"
+	text.Parent = gui
+end
+
+-- A stone lantern (tōrō) with a softly glowing fire box; no light of its own.
+local function lantern(kit: Kit, parent: Instance, at: Vector3)
+	local model = Instance.new("Model")
+	model.Name = "StoneLantern"
+	model.Parent = parent
+	kit.solid(kit.piece(model, "LanternFoot", Vector3.new(1.5, 0.4, 1.5), CFrame.new(at + Vector3.new(0, 0.15, 0)), STONE, Enum.Material.Slate))
+	kit.solid(kit.beam(model, "LanternPost", at + Vector3.new(0, 0.3, 0), at + Vector3.new(0, 2.1, 0), 0.6, STONE, Enum.Material.Slate))
+	kit.piece(model, "LanternShelf", Vector3.new(1.3, 0.3, 1.3), CFrame.new(at + Vector3.new(0, 2.2, 0)), STONE, Enum.Material.Slate)
+	kit.piece(model, "LanternBox", Vector3.new(0.95, 0.9, 0.95), CFrame.new(at + Vector3.new(0, 2.8, 0)), STONE, Enum.Material.Slate)
+	-- The glow shows through windows on all four sides.
+	local glow = kit.piece(model, "LanternGlow", Vector3.new(1.0, 0.5, 0.5), CFrame.new(at + Vector3.new(0, 2.82, 0)), Color3.fromRGB(255, 196, 128), Enum.Material.Neon)
+	glow.CastShadow = false
+	local across = kit.piece(model, "LanternGlow", Vector3.new(0.5, 0.5, 1.0), CFrame.new(at + Vector3.new(0, 2.82, 0)), Color3.fromRGB(255, 196, 128), Enum.Material.Neon)
+	across.CastShadow = false
+	kit.piece(model, "LanternRoof", Vector3.new(1.9, 0.3, 1.9), CFrame.new(at + Vector3.new(0, 3.38, 0)), STONE, Enum.Material.Slate)
+	kit.piece(model, "LanternCap", Vector3.new(1.1, 0.3, 1.1), CFrame.new(at + Vector3.new(0, 3.66, 0)), STONE, Enum.Material.Slate)
+	local jewel = kit.piece(model, "LanternJewel", Vector3.one * 0.5, CFrame.new(at + Vector3.new(0, 4.0, 0)), STONE, Enum.Material.Slate)
+	;(jewel :: Part).Shape = Enum.PartType.Ball
+end
+
+-- Builds the theme's scenery into a new folder (not yet parented).
+function Sakura.build(kit: Kit): Folder
+	local folder = Instance.new("Folder")
+	folder.Name = "SakuraScenery"
+	-- Its own seed, so the alpine valley is laid out the same with or without it.
+	local random = Random.new(3903)
+	local planted: { Vector3 } = {}
+	local function roomy(at: Vector3, gap: number): boolean
+		for _, other in planted do
+			if (Vector3.new(at.X - other.X, 0, at.Z - other.Z)).Magnitude < gap then return false end
+		end
+		return kit.spaced(at, 6)
+	end
+	local function plant(at: Vector3)
+		tree(kit, folder, at, random:NextNumber(11, 16), random)
+		table.insert(planted, at)
+	end
+	-- A ring of blossom just outside the camp frames the view from the spawn.
+	for attempt = 1, 160 do
+		if #planted >= 12 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(30, 46)
+		local at = kit.ground(kit.camp.X + math.cos(angle) * distance, kit.camp.Z + math.sin(angle) * distance)
+		if not kit.clear(at, 4) and at.Y < 20 and kit.steepness(at.X, at.Z) < 0.6 and roomy(at, 10) then plant(at) end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	-- Groves over the low meadows and round the lake.
+	for attempt = 1, 2400 do
+		if #planted >= 48 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(kit.radius + 10, 210)
+		local at = kit.ground(math.cos(angle) * distance, math.sin(angle) * distance)
+		local grove = math.noise(at.X / 70, at.Z / 70, 61) > -0.2
+		if grove and not kit.clear(at, 4) and at.Y < 32 and kit.steepness(at.X, at.Z) < 0.6 and roomy(at, 9) then plant(at) end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	-- The torii stands just past the spawn, where the trail leaves the camp,
+	-- so it frames the mountain from the camp; its pillars stay beside the trail.
+	local gateZ = kit.camp.Z - 9
+	torii(kit, folder, kit.ground(kit.pathCentre(gateZ), gateZ), 8)
+	-- Stone lanterns at the camp's edge and on the lake dock.
+	for _, offset in { Vector3.new(-13, 0, -3), Vector3.new(13, 0, -4) } do
+		local spot = kit.camp + offset
+		lantern(kit, folder, kit.ground(spot.X, spot.Z))
+	end
+	lantern(kit, folder, kit.lake + Vector3.new(-17, 0.65, 2.3))
+	return folder
+end
+
+return Sakura
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="25">
+        <Properties>
           <string name="Name">ScenePack</string>
           <string name="Source"><![CDATA[--!strict
 -- The scenery pack made in Blender (art/scenery_assets.py): mesh mountains,
@@ -6983,7 +7192,7 @@ return ScenePack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="25">
+      <Item class="ModuleScript" referent="26">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -6996,10 +7205,16 @@ return ScenePack
 -- (see ScenePack); without it, from smooth terrain (peaks, boulders) and
 -- low-poly wedge trees. The look relies on the place's Future lighting and
 -- 2022 materials (see default.project.json).
+--
+-- Two themes can be switched live (Scenery.setTheme): the alpine default, and
+-- sakura, which adds blossoming cherry trees, a torii gate and stone lanterns
+-- (see Sakura) under a soft pink spring light.
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local PartShapes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))
 local ScenePack = require(script.Parent.ScenePack)
+local Sakura = require(script.Parent.Sakura)
 
 local Scenery = {}
 local random = Random.new(4207)
@@ -7144,10 +7359,14 @@ local function terrainHeight(x: number, z: number, site: Site): number
 	return height
 end
 
-local function onPath(x: number, z: number, site: Site): boolean
+-- The trail from the camp to the mountain bends gently; its centre at `z`.
+local function pathCentre(z: number, site: Site): number
 	local camp = site.camp
-	local pathX = math.sin(math.clamp((camp.Z - z) / (camp.Z - 26), 0, 1) * math.pi) * 4
-	return z >= 26 and z <= camp.Z + 5 and math.abs(x - pathX) < 3.3 + math.noise(z / 7, 0, 3) * 0.8
+	return math.sin(math.clamp((camp.Z - z) / (camp.Z - 26), 0, 1) * math.pi) * 4
+end
+
+local function onPath(x: number, z: number, site: Site): boolean
+	return z >= 26 and z <= site.camp.Z + 5 and math.abs(x - pathCentre(z, site)) < 3.3 + math.noise(z / 7, 0, 3) * 0.8
 end
 
 local EXTENT = 384 -- terrain reaches this far from the mountain in every direction
@@ -7219,8 +7438,127 @@ local function landscape(terrain: Terrain, site: Site)
 	end
 end
 
+-- Each theme's light, haze, grade and terrain colours.
+export type Look = {
+	clock: number,
+	brightness: number,
+	ambient: Color3,
+	outdoorAmbient: Color3,
+	colorShiftTop: Color3,
+	exposure: number,
+	atmosphere: { density: number, offset: number, color: Color3, decay: Color3, glare: number, haze: number },
+	grade: { contrast: number, saturation: number, tint: Color3 },
+	bloom: { intensity: number, size: number, threshold: number },
+	rays: number,
+	clouds: { cover: number, density: number, color: Color3 },
+	terrain: { [Enum.Material]: Color3 },
+	water: Color3,
+}
+
+Scenery.THEMES = { "default", "sakura" }
+Scenery.LOOKS = {
+	-- A clear late-afternoon alpine sun, soft sky light, aerial haze and a
+	-- gentle filmic grade.
+	default = {
+		clock = 15.6,
+		brightness = 2.6,
+		ambient = Color3.fromRGB(74, 78, 88),
+		outdoorAmbient = Color3.fromRGB(126, 130, 140),
+		colorShiftTop = Color3.fromRGB(30, 18, 6),
+		exposure = 0.1,
+		atmosphere = { density = 0.3, offset = 0.22, color = Color3.fromRGB(198, 214, 230), decay = Color3.fromRGB(110, 126, 150), glare = 0.35, haze = 1.6 },
+		grade = { contrast = 0.08, saturation = 0.08, tint = Color3.fromRGB(255, 249, 240) },
+		bloom = { intensity = 0.45, size = 24, threshold = 1.3 },
+		rays = 0.05,
+		clouds = { cover = 0.42, density = 0.5, color = Color3.fromRGB(250, 248, 242) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(102, 126, 64),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(86, 110, 56),
+			[Enum.Material.Ground] = Color3.fromRGB(112, 94, 70),
+			[Enum.Material.Mud] = Color3.fromRGB(84, 72, 58),
+			[Enum.Material.Rock] = Color3.fromRGB(116, 116, 112),
+			[Enum.Material.Snow] = Color3.fromRGB(238, 242, 247),
+		},
+		water = Color3.fromRGB(46, 92, 96),
+	},
+	-- Spring in blossom: a lower golden sun through a pink haze, fresh green
+	-- meadows and blush-tinted clouds and snow, like the control page's shrine.
+	sakura = {
+		clock = 16.3,
+		brightness = 2.45,
+		ambient = Color3.fromRGB(88, 76, 88),
+		outdoorAmbient = Color3.fromRGB(142, 126, 138),
+		colorShiftTop = Color3.fromRGB(42, 18, 16),
+		exposure = 0.14,
+		atmosphere = { density = 0.32, offset = 0.2, color = Color3.fromRGB(242, 208, 222), decay = Color3.fromRGB(156, 116, 146), glare = 0.45, haze = 1.9 },
+		grade = { contrast = 0.06, saturation = 0.14, tint = Color3.fromRGB(255, 242, 246) },
+		bloom = { intensity = 0.55, size = 28, threshold = 1.2 },
+		rays = 0.07,
+		clouds = { cover = 0.38, density = 0.45, color = Color3.fromRGB(255, 233, 240) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(114, 142, 74),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(98, 126, 64),
+			[Enum.Material.Ground] = Color3.fromRGB(122, 98, 80),
+			[Enum.Material.Mud] = Color3.fromRGB(90, 74, 64),
+			[Enum.Material.Rock] = Color3.fromRGB(124, 118, 118),
+			[Enum.Material.Snow] = Color3.fromRGB(250, 240, 245),
+		},
+		water = Color3.fromRGB(56, 102, 116),
+	},
+} :: { [string]: Look }
+
+-- Scenery that belongs to one theme: shown with it, kept in ServerStorage otherwise.
+local themed: { alpine: Instance?, home: Instance?, sakura: Instance? } = {}
+local effects: { atmosphere: Atmosphere, grade: ColorCorrectionEffect, bloom: BloomEffect, rays: SunRaysEffect, clouds: Clouds }? = nil
+local current: string? = nil
+
+-- Switches the valley to a theme ("default" or "sakura") straight away.
+-- Returns false for an unknown theme, or before the scenery is built.
+function Scenery.setTheme(name: string): boolean
+	local look = Scenery.LOOKS[name]
+	if look == nil or effects == nil then return false end
+	local fx = effects :: any
+	if themed.alpine then themed.alpine.Parent = if name == "sakura" then ServerStorage else themed.home end
+	if themed.sakura then themed.sakura.Parent = if name == "sakura" then workspace else ServerStorage end
+	local terrain = workspace.Terrain
+	for material, colour in look.terrain do
+		terrain:SetMaterialColor(material, colour)
+	end
+	terrain.WaterColor = look.water
+	Lighting.ClockTime = look.clock
+	Lighting.Brightness = look.brightness
+	Lighting.Ambient = look.ambient
+	Lighting.OutdoorAmbient = look.outdoorAmbient
+	Lighting.ColorShift_Top = look.colorShiftTop
+	Lighting.ExposureCompensation = look.exposure
+	fx.atmosphere.Density = look.atmosphere.density
+	fx.atmosphere.Offset = look.atmosphere.offset
+	fx.atmosphere.Color = look.atmosphere.color
+	fx.atmosphere.Decay = look.atmosphere.decay
+	fx.atmosphere.Glare = look.atmosphere.glare
+	fx.atmosphere.Haze = look.atmosphere.haze
+	fx.grade.Contrast = look.grade.contrast
+	fx.grade.Saturation = look.grade.saturation
+	fx.grade.TintColor = look.grade.tint
+	fx.bloom.Intensity = look.bloom.intensity
+	fx.bloom.Size = look.bloom.size
+	fx.bloom.Threshold = look.bloom.threshold
+	fx.rays.Intensity = look.rays
+	fx.clouds.Cover = look.clouds.cover
+	fx.clouds.Density = look.clouds.density
+	fx.clouds.Color = look.clouds.color
+	current = name
+	return true
+end
+
+-- The theme showing now ("default" until the scenery is built).
+function Scenery.theme(): string
+	return current or "default"
+end
+
 -- `reserved` keeps trees and boulders out of circles (the leaderboards stand there).
-function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved: { { at: Vector3, radius: number } }?)
+-- `theme` is the theme to show once it is built (see Scenery.setTheme).
+function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved: { { at: Vector3, radius: number } }?, theme: string?)
 	-- Animated grass is enabled in the place/project: Decoration and GrassLength
 	-- are editor-only properties. LeafyGrass keeps the central arena blade-free.
 	local terrain = workspace.Terrain
@@ -7271,15 +7609,9 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 			+ math.abs(terrainHeight(x, z + 3, site) - terrainHeight(x, z - 3, site)) / 6
 	end
 
-	terrain:SetMaterialColor(Enum.Material.Grass, Color3.fromRGB(102, 126, 64))
-	terrain:SetMaterialColor(Enum.Material.LeafyGrass, Color3.fromRGB(86, 110, 56))
-	terrain:SetMaterialColor(Enum.Material.Ground, Color3.fromRGB(112, 94, 70))
-	terrain:SetMaterialColor(Enum.Material.Mud, Color3.fromRGB(84, 72, 58))
-	terrain:SetMaterialColor(Enum.Material.Rock, Color3.fromRGB(116, 116, 112))
-	terrain:SetMaterialColor(Enum.Material.Snow, Color3.fromRGB(238, 242, 247))
+	-- Terrain colours, like the light, come from the theme (see LOOKS).
 	terrain:FillBlock(CFrame.new(0, -8, 0), Vector3.new(EXTENT * 4, 16, EXTENT * 4), Enum.Material.Grass)
 	landscape(terrain, site)
-	terrain.WaterColor = Color3.fromRGB(46, 92, 96)
 	terrain.WaterTransparency = 0.62
 	terrain.WaterReflectance = 0.45
 	terrain.WaterWaveSize = 0.06
@@ -7571,19 +7903,23 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	text.Text = "⛏  DIAMOND MOUNTAIN"
 	text.Parent = gui
 
-	-- Festoon lights over the camp, without a light per bulb.
+	-- Festoon lights over the camp, without a light per bulb. The sakura theme's
+	-- torii takes their place.
+	local festoon = Instance.new("Folder")
+	festoon.Name = "Festoon"
+	festoon.Parent = folder
 	for i = 0, 14 do
 		local t = i / 14
 		local at = camp + Vector3.new(-10 + t * 20, 7 - 1.4 * math.sin(t * math.pi), -6)
-		local wire = piece(folder, "FestoonWire", Vector3.new(1.5, 0.035, 0.035), CFrame.new(at), Color3.fromRGB(48, 44, 35), Enum.Material.Metal)
+		local wire = piece(festoon, "FestoonWire", Vector3.new(1.5, 0.035, 0.035), CFrame.new(at), Color3.fromRGB(48, 44, 35), Enum.Material.Metal)
 		wire.CastShadow = false
 		if i % 2 == 0 then
-			local bulb = piece(folder, "FestoonBulb", Vector3.new(0.18, 0.27, 0.18), CFrame.new(at + Vector3.new(0, -0.2, 0)), Color3.fromRGB(255, 191, 102), Enum.Material.Neon)
+			local bulb = piece(festoon, "FestoonBulb", Vector3.new(0.18, 0.27, 0.18), CFrame.new(at + Vector3.new(0, -0.2, 0)), Color3.fromRGB(255, 191, 102), Enum.Material.Neon)
 			bulb.CastShadow = false
 		end
 	end
 	for _, x in { -10, 10 } do
-		beam(folder, "FestoonPost", camp + Vector3.new(x, 0, -6), camp + Vector3.new(x, 7.2, -6), 0.25, Color3.fromRGB(96, 70, 48), Enum.Material.Wood)
+		beam(festoon, "FestoonPost", camp + Vector3.new(x, 0, -6), camp + Vector3.new(x, 7.2, -6), 0.25, Color3.fromRGB(96, 70, 48), Enum.Material.Wood)
 	end
 
 	-- The campfire: a stone ring, crossed logs and log benches.
@@ -7620,60 +7956,59 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	lantern(folder, camp + Vector3.new(-9, 0, -8))
 	lantern(folder, camp + Vector3.new(9, 0, -8))
 
-	-- Light: a clear late-afternoon sun, soft sky light, aerial haze and a
-	-- gentle filmic grade. Technology is Future (set in the place file).
-	Lighting.ClockTime = 15.6
+	-- The sakura theme's scenery, kept out of view until it is chosen.
+	themed.alpine = festoon
+	themed.home = folder
+	local sakura = Sakura.build({
+		piece = piece,
+		beam = beam,
+		solid = solid,
+		ground = ground,
+		clear = clear,
+		spaced = spaced,
+		steepness = steepness,
+		pathCentre = function(z: number): number return pathCentre(z, site) end,
+		camp = camp,
+		lake = lake,
+		radius = clearRadius,
+	})
+	sakura.Parent = ServerStorage
+	themed.sakura = sakura
+
+	-- Light that both themes share; each theme sets the rest (see LOOKS).
+	-- Technology is Future (set in the place file).
 	Lighting.GeographicLatitude = 38
-	Lighting.Brightness = 2.6
 	Lighting.GlobalShadows = true
 	Lighting.ShadowSoftness = 0.22
-	Lighting.Ambient = Color3.fromRGB(74, 78, 88)
-	Lighting.OutdoorAmbient = Color3.fromRGB(126, 130, 140)
-	Lighting.ColorShift_Top = Color3.fromRGB(30, 18, 6)
 	Lighting.ColorShift_Bottom = Color3.fromRGB(0, 0, 0)
 	Lighting.EnvironmentDiffuseScale = 1
 	Lighting.EnvironmentSpecularScale = 0.85
-	Lighting.ExposureCompensation = 0.1
 	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
-	atmosphere.Density = 0.3
-	atmosphere.Offset = 0.22
-	atmosphere.Color = Color3.fromRGB(198, 214, 230)
-	atmosphere.Decay = Color3.fromRGB(110, 126, 150)
-	atmosphere.Glare = 0.35
-	atmosphere.Haze = 1.6
 	atmosphere.Parent = Lighting
 	local grade = Instance.new("ColorCorrectionEffect")
 	grade.Name = "AlpineGrade"
 	grade.Brightness = 0
-	grade.Contrast = 0.08
-	grade.Saturation = 0.08
-	grade.TintColor = Color3.fromRGB(255, 249, 240)
 	grade.Parent = Lighting
 	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.45
-	bloom.Size = 24
-	bloom.Threshold = 1.3
 	bloom.Parent = Lighting
 	local rays = Instance.new("SunRaysEffect")
-	rays.Intensity = 0.05
 	rays.Spread = 0.75
 	rays.Parent = Lighting
 	local clouds = terrain:FindFirstChildOfClass("Clouds") or Instance.new("Clouds")
-	clouds.Cover = 0.42
-	clouds.Density = 0.5
-	clouds.Color = Color3.fromRGB(250, 248, 242)
 	clouds.Parent = terrain
 	local sky = Lighting:FindFirstChildOfClass("Sky") or Instance.new("Sky")
 	sky.SunAngularSize = 12
 	sky.CelestialBodiesShown = true
 	sky.Parent = Lighting
+	effects = { atmosphere = atmosphere, grade = grade, bloom = bloom, rays = rays, clouds = clouds }
+	Scenery.setTheme(theme or "default")
 end
 
 return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="26">
+      <Item class="ModuleScript" referent="27">
         <Properties>
           <string name="Name">Statue</string>
           <string name="Source"><![CDATA[--!strict
@@ -7806,7 +8141,7 @@ return Statue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="27">
+      <Item class="ModuleScript" referent="28">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -7882,7 +8217,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="28">
+      <Item class="ModuleScript" referent="29">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -7897,7 +8232,7 @@ local RunService = game:GetService("RunService")
 
 export type Event = {
 	id: string,
-	type: string, -- "gift" | "like" | "follow" | "share"
+	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "theme"
 	user: string?,
 	name: string?,
 	gift: string?,
@@ -7906,6 +8241,7 @@ export type Event = {
 	likes: number?,
 	rocks: number?,
 	keybind: string?,
+	theme: string?, -- "theme" events: the map theme the control page chose
 }
 
 local TikTokFeed = {}
@@ -7928,6 +8264,7 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 	local event: Event = {
 		rocks = if type(raw.rocks) == "number" and raw.rocks == raw.rocks then math.clamp(raw.rocks, -1500000, 1500000) else nil,
 		keybind = if type(raw.keybind) == "string" then string.sub(raw.keybind, 1, 16) else nil,
+		theme = if type(raw.theme) == "string" then string.sub(raw.theme, 1, 16) else nil,
 		id = raw.id,
 		type = raw.type,
 		user = if type(raw.user) == "string" then string.sub(raw.user, 1, 40) else nil,
@@ -8026,15 +8363,15 @@ return TikTokFeed
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="29">
+  <Item class="StarterPlayer" referent="30">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="30">
+    <Item class="StarterPlayerScripts" referent="31">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="31">
+      <Item class="LocalScript" referent="32">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -8149,6 +8486,8 @@ LobbyView.start(Request, State, function(inGame: boolean)
 end)
 -- The diamond bird flies round the mountain; catching it doubles gifts.
 require(script:WaitForChild("BirdView")).start(gui, State)
+-- Cherry petals fall round the camera when the map shows the sakura theme.
+require(script:WaitForChild("PetalView")).start(State)
 
 -- Stone left (top centre) -------------------------------------------------------
 local stoneBox = make("Frame", {
@@ -8434,7 +8773,7 @@ local function panelBox(text: string, onSubmit: (string) -> ()): TextBox
 	return box
 end
 
-local function panelButtons(buttons: { { any } })
+local function panelButtons(buttons: { { any } }): { TextButton }
 	panelOrder += 1
 	local row = make("Frame", {
 		LayoutOrder = panelOrder,
@@ -8443,6 +8782,7 @@ local function panelButtons(buttons: { { any } })
 		ZIndex = 11,
 	}, panel)
 	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6) }, row)
+	local made: { TextButton } = {}
 	for _, spec in buttons do
 		local button = make("TextButton", {
 			Size = UDim2.new(1 / #buttons, -6, 1, 0),
@@ -8455,7 +8795,9 @@ local function panelButtons(buttons: { { any } })
 		}, row)
 		rounded(button, 8)
 		button.Activated:Connect(spec[2])
+		table.insert(made, button)
 	end
+	return made
 end
 
 local function send(action: string, value: any)
@@ -8630,6 +8972,21 @@ panelLabel("DIAMOND BIRD (every 5 to 7½ minutes)")
 panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
+
+panelLabel("MAP THEME (changes for everyone straight away)")
+local themeButtons = panelButtons({
+	{ "⛰ Alpine", function() send("setTheme", "default") end },
+	{ "🌸 Sakura", function() send("setTheme", "sakura") end },
+})
+-- The theme showing now is lit up.
+local function refreshTheme()
+	local theme = attr("Theme", "default")
+	for i, name in { "default", "sakura" } do
+		themeButtons[i].BackgroundColor3 = if theme == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+	end
+end
+State:GetAttributeChangedSignal("Theme"):Connect(refreshTheme)
+refreshTheme()
 
 panelLabel("REBUILD TEST GIFTS (adds blocks)")
 panelLabel("Tests refill dug spaces, then grow new mountain rock.")
@@ -9002,7 +9359,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="32">
+        <Item class="ModuleScript" referent="33">
           <Properties>
             <string name="Name">BirdView</string>
             <string name="Source"><![CDATA[--!strict
@@ -9155,7 +9512,7 @@ return BirdView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -9503,7 +9860,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -9845,7 +10202,7 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
@@ -10221,7 +10578,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -10689,7 +11046,109 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="38">
+          <Properties>
+            <string name="Name">PetalView</string>
+            <string name="Source"><![CDATA[--!strict
+-- Cherry petals drift down around the camera while the map shows the sakura
+-- theme and this player is in the game (not the lobby). The petals are local
+-- parts in a box that follows the camera: each falls, sways and tumbles on its
+-- own path, wrapping round the box, so the air stays full wherever you look
+-- for the cost of one BulkMoveTo a frame.
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local PetalView = {}
+
+local COUNT = 90
+local BOX = Vector3.new(80, 40, 80) -- studs round the camera
+local PINKS = {
+	Color3.fromRGB(255, 228, 236),
+	Color3.fromRGB(255, 206, 220),
+	Color3.fromRGB(255, 186, 204),
+	Color3.fromRGB(249, 163, 187),
+}
+
+type Petal = { seed: Vector3, fall: number, sway: number, phase: number, spin: Vector3 }
+
+-- Wraps `value` into [0, size).
+local function wrap(value: number, size: number): number
+	return value - math.floor(value / size) * size
+end
+
+-- Where a petal is at time `t`, inside the box round `centre`. Pure, for tests.
+function PetalView.frame(petal: Petal, t: number, centre: Vector3): CFrame
+	local drift = petal.seed + Vector3.new(
+		math.sin(t * petal.sway + petal.phase) * 2.2 + t * 1.1,
+		-t * petal.fall,
+		math.cos(t * petal.sway * 0.8 + petal.phase) * 1.6 + t * 0.4
+	)
+	local corner = centre - BOX / 2
+	local at = corner + Vector3.new(wrap(drift.X - corner.X, BOX.X), wrap(drift.Y - corner.Y, BOX.Y), wrap(drift.Z - corner.Z, BOX.Z))
+	return CFrame.new(at) * CFrame.Angles(t * petal.spin.X, t * petal.spin.Y, t * petal.spin.Z)
+end
+
+function PetalView.start(state: Instance)
+	local player = Players.LocalPlayer
+	local random = Random.new()
+	local folder = Instance.new("Folder")
+	folder.Name = "SakuraPetals"
+	local parts: { BasePart } = {}
+	local petals: { Petal } = {}
+	local frames: { CFrame } = {}
+	for i = 1, COUNT do
+		local part = Instance.new("Part")
+		part.Name = "Petal"
+		part.Size = Vector3.new(0.34, 0.04, 0.26)
+		part.Color = PINKS[random:NextInteger(1, #PINKS)]
+		part.Material = Enum.Material.SmoothPlastic
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+		part.CastShadow = false
+		part.Parent = folder
+		parts[i] = part
+		petals[i] = {
+			seed = Vector3.new(random:NextNumber(0, BOX.X), random:NextNumber(0, BOX.Y), random:NextNumber(0, BOX.Z)),
+			fall = random:NextNumber(1.6, 3.2),
+			sway = random:NextNumber(0.6, 1.4),
+			phase = random:NextNumber(0, math.pi * 2),
+			spin = Vector3.new(random:NextNumber(-2.5, 2.5), random:NextNumber(-1.5, 1.5), random:NextNumber(-2.5, 2.5)),
+		}
+		frames[i] = CFrame.identity
+	end
+	local connection: RBXScriptConnection? = nil
+	local function refresh()
+		local on = state:GetAttribute("Theme") == "sakura" and player:GetAttribute("InGame") == true
+		if on and connection == nil then
+			folder.Parent = workspace
+			connection = RunService.RenderStepped:Connect(function()
+				local camera = workspace.CurrentCamera
+				if camera == nil then return end
+				local t = os.clock()
+				local centre = camera.CFrame.Position
+				for i, petal in petals do
+					frames[i] = PetalView.frame(petal, t, centre)
+				end
+				workspace:BulkMoveTo(parts, frames, Enum.BulkMoveMode.FireCFrameChanged)
+			end)
+		elseif not on and connection ~= nil then
+			(connection :: RBXScriptConnection):Disconnect()
+			connection = nil
+			folder.Parent = nil
+		end
+	end
+	state:GetAttributeChangedSignal("Theme"):Connect(refresh)
+	player:GetAttributeChangedSignal("InGame"):Connect(refresh)
+	refresh()
+end
+
+return PetalView
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="39">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -10816,7 +11275,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -10932,12 +11391,12 @@ return SceneryView
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="39">
+  <Item class="Workspace" referent="41">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="40">
+    <Item class="Terrain" referent="42">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>
