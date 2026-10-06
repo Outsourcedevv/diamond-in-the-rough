@@ -680,12 +680,13 @@ local function panelButton(text: string): TextButton
 end
 
 panelLabel("LEADERBOARDS (behind the mountain)")
-panelLabel("Test gifts and likes never count.")
+panelLabel("Blue: helpers. Red: griefers who add stone.")
+panelLabel("Test gifts never count.")
 panelButtons({
 	{ "Preview with sample names", function() send("previewBoards") end },
 })
-confirmed(panelButton("Reset top gifters"), "Reset top gifters", function() send("resetBoard", "gifts") end)
-confirmed(panelButton("Reset top likers"), "Reset top likers", function() send("resetBoard", "likes") end)
+confirmed(panelButton("Reset top helpers"), "Reset top helpers", function() send("resetBoard", "helpers") end)
+confirmed(panelButton("Reset top griefers"), "Reset top griefers", function() send("resetBoard", "griefers") end)
 
 panelLabel("GOLD STATUES (saved in your game)")
 local statueName = panelBox("", function() end)

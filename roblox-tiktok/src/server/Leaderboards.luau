@@ -1,7 +1,8 @@
 --!strict
--- Two giant wooden leaderboards behind the mountain: top gifters (blue trim,
--- gift box on the roof) and top likers (red trim, heart on the roof). Totals
--- are tallied per TikTok viewer and saved with the streamer's settings.
+-- Two giant wooden leaderboards behind the mountain: top helpers (blue trim,
+-- pickaxe on the roof) rank the coins viewers gave to break the mountain, and
+-- top griefers (red trim, boulders on the roof) the coins they gave to add
+-- stone. Totals are tallied per TikTok viewer and saved with the streamer's settings.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
@@ -86,7 +87,7 @@ export type Style = {
 	unit: string,
 	trim: Color3,
 	valueColour: Color3,
-	emblem: string, -- "gift" or "heart"
+	emblem: string, -- "gift", "heart", "pickaxe" or "boulders"
 	empty: string,
 }
 export type Board = { model: Model, show: (entries: { Entry }) -> () }
@@ -156,6 +157,30 @@ local function emblem(parent: Instance, kind: string, at: CFrame, colour: Color3
 		piece(parent, "Ribbon", Vector3.new(0.9, 4.8, 4.8), at, GOLD, Enum.Material.Metal)
 		for _, side in { -1, 1 } do
 			piece(parent, "Bow", Vector3.new(1.8, 0.9, 1.1), at * CFrame.new(side * 0.8, 2.75, 0) * CFrame.Angles(0, 0, side * math.rad(35)), GOLD, Enum.Material.Metal)
+		end
+	elseif kind == "pickaxe" then
+		-- Handle on the diagonal, a steel head across its top end, a painted collar.
+		local tilt = at * CFrame.Angles(0, 0, math.rad(40))
+		local handle = piece(parent, "PickaxeHandle", Vector3.new(7, 0.8, 0.8), tilt, WOOD, Enum.Material.Wood) :: Part
+		handle.Shape = Enum.PartType.Cylinder
+		local top = tilt * CFrame.new(3, 0, 0)
+		piece(parent, "PickaxeCollar", Vector3.new(1.3, 1.3, 1.3), top, colour, Enum.Material.Wood)
+		for _, side in { -1, 1 } do
+			-- Each half of the head bends slightly back towards the handle.
+			local half = top * CFrame.Angles(0, 0, side * math.rad(90 + 12)) * CFrame.new(1.6, 0, 0)
+			piece(parent, "PickaxeHead", Vector3.new(3.2, 0.9, 0.9), half, Color3.fromRGB(150, 156, 166), Enum.Material.Metal)
+			piece(parent, "PickaxeTip", Vector3.new(0.9, 0.6, 0.6), half * CFrame.new(1.9, 0, 0), Color3.fromRGB(196, 202, 210), Enum.Material.Metal)
+		end
+	elseif kind == "boulders" then
+		-- A heap of grey rocks on a slab painted in the board's colour.
+		piece(parent, "BoulderBase", Vector3.new(6, 0.8, 3.4), at * CFrame.new(0, -2, 0), colour, Enum.Material.Wood)
+		local rocks = {
+			{ Vector3.new(3.4, 3, 3), CFrame.new(-1.2, -0.2, 0) * CFrame.Angles(0.2, 0.4, 0.15) },
+			{ Vector3.new(2.6, 2.4, 2.4), CFrame.new(1.5, -0.5, 0.2) * CFrame.Angles(-0.3, 0.7, -0.2) },
+			{ Vector3.new(2.2, 2, 2), CFrame.new(0.2, 1.8, -0.1) * CFrame.Angles(0.5, 0.2, 0.4) },
+		}
+		for _, rock in rocks do
+			piece(parent, "Boulder", rock[1], at * rock[2], Color3.fromRGB(112, 108, 104), Enum.Material.Slate)
 		end
 	else
 		local size = 3.6

@@ -59,8 +59,8 @@ local function ground() return 4 end
 local blue, red = Color3.fromRGB(36, 92, 204), Color3.fromRGB(196, 36, 44)
 local boards = {}
 for index, style in {
-	{ title = "🎁 TOP GIFTERS", unit = "coins", trim = blue, valueColour = Color3.new(1, 1, 1), emblem = "gift", empty = "Send a gift" },
-	{ title = "❤️ TOP LIKERS", unit = "likes", trim = red, valueColour = Color3.new(1, 1, 1), emblem = "heart", empty = "Tap to like" },
+	{ title = "⛏️ TOP HELPERS", unit = "coins", trim = blue, valueColour = Color3.new(1, 1, 1), emblem = "pickaxe", empty = "Send a gift" },
+	{ title = "🧱 TOP GRIEFERS", unit = "coins", trim = red, valueColour = Color3.new(1, 1, 1), emblem = "boulders", empty = "Add stone" },
 } do
 	local before = #instances
 	local board = Leaderboards.build(folder, spots[index].at, spots[index].facing, 14.5, style, ground)
@@ -79,7 +79,7 @@ for index, style in {
 			end
 			if p.Material == "Material.Wood" or p.Material == "Material.WoodPlanks" then wood += 1 end
 			if p.Name == "Face" then face = p end
-			if p.Name == "GiftBox" or p.Name == "Heart" then emblem += 1 end
+			if p.Name == "PickaxeHandle" or p.Name == "BoulderBase" then emblem += 1 end
 			if p.Name == "Roof" then table.insert(roofs, p) end
 			minY = math.min(minY, p.CFrame.Position.Y)
 			maxY = math.max(maxY, p.CFrame.Position.Y)
@@ -111,7 +111,7 @@ end
 boards[1].show({ { key = "a", name = "Amy", value = 12345 }, { key = "b", name = "Bob", value = 99 } })
 local shown = texts()
 check(shown["Amy"] and shown["12,345 coins"] and shown["Bob"] and shown["99 coins"], "rows show names and coins")
-check(shown["🎁 TOP GIFTERS"] and shown["❤️ TOP LIKERS"], "titles are on the boards")
+check(shown["⛏️ TOP HELPERS"] and shown["🧱 TOP GRIEFERS"], "titles are on the boards")
 
 -- The gold statue and its plaque.
 local before = #instances
