@@ -46,10 +46,21 @@ task.spawn(function()
 	until view.round > 0
 end)
 
-local FONT = Enum.Font.FredokaOne
+-- One clean look throughout: Gotham type, dark glass panels with a hairline
+-- edge, white text, a pale blue accent and gold for wins.
+local FONT = Enum.Font.GothamBold
+local FONT_MEDIUM = Enum.Font.GothamMedium
+local FONT_HEAVY = Enum.Font.GothamBlack
 local WHITE = Color3.fromRGB(255, 255, 255)
-local GOLD = Color3.fromRGB(255, 205, 70)
-local PANEL = Color3.fromRGB(28, 24, 40)
+local GOLD = Color3.fromRGB(246, 200, 92)
+local ACCENT = Color3.fromRGB(132, 212, 255)
+local GREEN = Color3.fromRGB(118, 230, 160)
+local MUTED = Color3.fromRGB(168, 174, 190)
+local PANEL = Color3.fromRGB(16, 18, 26)
+local GLASS = 0.28 -- how see-through the HUD's panels are
+local BUTTON = Color3.fromRGB(46, 50, 68)
+local SELECTED = Color3.fromRGB(64, 128, 236)
+local DANGER = Color3.fromRGB(176, 64, 72)
 
 local function attr(name: string, fallback: any): any
 	local value = State:GetAttribute(name)
@@ -92,7 +103,16 @@ local function setText(label: TextLabel, text: string)
 end
 
 local function outline(parent: Instance, thickness: number)
-	make("UIStroke", { Thickness = thickness, Color = Color3.fromRGB(0, 0, 0), Transparency = 0.3 }, parent)
+	make("UIStroke", { Thickness = thickness, Color = Color3.fromRGB(0, 0, 0), Transparency = 0.55 }, parent)
+end
+
+-- A dark glass panel with rounded corners and a faint edge.
+local function glass(instance: GuiObject, radius: number, transparency: number?)
+	instance.BackgroundColor3 = PANEL
+	instance.BackgroundTransparency = transparency or GLASS
+	instance.BorderSizePixel = 0
+	rounded(instance, radius)
+	make("UIStroke", { Thickness = 1, Color = WHITE, Transparency = 0.88, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, instance)
 end
 
 local gui = make("ScreenGui", {
@@ -117,120 +137,123 @@ require(script:WaitForChild("PetalView")).start(State)
 -- Stone left (top centre) -------------------------------------------------------
 local stoneBox = make("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 8),
-	Size = UDim2.fromOffset(440, 108),
-	BackgroundColor3 = PANEL,
-	BackgroundTransparency = 0.15,
+	Position = UDim2.new(0.5, 0, 0, 10),
+	Size = UDim2.fromOffset(300, 84),
 }, gui)
-rounded(stoneBox, 16)
+glass(stoneBox, 14)
 local stoneTitle = make("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 26),
-	Position = UDim2.fromOffset(0, 6),
+	Size = UDim2.new(1, 0, 0, 16),
+	Position = UDim2.fromOffset(0, 10),
 	BackgroundTransparency = 1,
 	Font = FONT,
-	TextSize = 22,
-	TextColor3 = Color3.fromRGB(200, 195, 215),
+	TextSize = 13,
+	TextColor3 = MUTED,
 	Text = "STONE LEFT", -- or HAY LEFT (see refreshSkin)
 }, stoneBox)
 local stoneValue = make("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 50),
-	Position = UDim2.fromOffset(0, 28),
+	Size = UDim2.new(1, 0, 0, 38),
+	Position = UDim2.fromOffset(0, 26),
 	BackgroundTransparency = 1,
-	Font = FONT,
-	TextSize = 50,
+	Font = FONT_HEAVY,
+	TextSize = 36,
 	TextColor3 = WHITE,
 	Text = "250,000",
 }, stoneBox)
-outline(stoneValue, 2)
 local bar = make("Frame", {
-	Position = UDim2.new(0, 18, 1, -22),
-	Size = UDim2.new(1, -36, 0, 12),
-	BackgroundColor3 = Color3.fromRGB(60, 55, 75),
+	Position = UDim2.new(0, 20, 1, -15),
+	Size = UDim2.new(1, -40, 0, 4),
+	BackgroundColor3 = WHITE,
+	BackgroundTransparency = 0.85,
+	BorderSizePixel = 0,
 }, stoneBox)
-rounded(bar, 6)
-local barFill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(150, 145, 140) }, bar)
-rounded(barFill, 6)
+rounded(bar, 2)
+local barFill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, bar)
+rounded(barFill, 2)
 
+-- Round time, in a small pill under the stone count.
 local timerLabel = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 122),
-	Size = UDim2.fromOffset(300, 30),
-	BackgroundTransparency = 1,
+	Position = UDim2.new(0.5, 0, 0, 102),
+	Size = UDim2.fromOffset(0, 26),
+	AutomaticSize = Enum.AutomaticSize.X,
 	Font = FONT,
-	TextSize = 26,
+	TextSize = 14,
 	TextColor3 = WHITE,
-	Text = "⏱ 0:00.0",
+	RichText = true,
+	Text = "",
 }, gui)
-outline(timerLabel, 2)
+glass(timerLabel, 13)
+make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, timerLabel)
 
 -- Win counter (top right) -----------------------------------------------------------
 local winsBox = make("TextLabel", {
 	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -12, 0, 8),
-	Size = UDim2.fromOffset(0, 72),
+	Position = UDim2.new(1, -12, 0, 10),
+	Size = UDim2.fromOffset(0, 56),
 	AutomaticSize = Enum.AutomaticSize.X,
-	Font = FONT,
-	TextSize = 46,
+	Font = FONT_HEAVY,
+	TextSize = 32,
 	Text = "WINS: 0",
 }, gui)
-rounded(winsBox, 16)
-make("UIPadding", { PaddingLeft = UDim.new(0, 22), PaddingRight = UDim.new(0, 22) }, winsBox)
-local winsStroke = make("UIStroke", { Thickness = 3, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
+rounded(winsBox, 14)
+make("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, winsBox)
+local winsStroke = make("UIStroke", { Thickness = 2, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
 
 
 -- Banner, hold countdown and status ----------------------------------------------------
 local banner = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 160),
-	Size = UDim2.fromOffset(640, 54),
-	BackgroundTransparency = 1,
+	Position = UDim2.new(0.5, 0, 0, 140),
+	Size = UDim2.fromOffset(0, 44),
+	AutomaticSize = Enum.AutomaticSize.X,
 	Font = FONT,
-	TextSize = 40,
-	TextColor3 = Color3.fromRGB(150, 240, 255),
+	TextSize = 22,
+	TextColor3 = ACCENT,
 	Text = "",
 	Visible = false,
 }, gui)
-outline(banner, 3)
+glass(banner, 22, 0.2)
+make("UIPadding", { PaddingLeft = UDim.new(0, 22), PaddingRight = UDim.new(0, 22) }, banner)
 
 local countdown = make("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0),
 	Position = UDim2.new(0.5, 0, 0, 10),
-	Size = UDim2.fromOffset(320, 144),
+	Size = UDim2.fromOffset(320, 140),
 	BackgroundTransparency = 1,
 	Visible = false,
 }, gui)
 local countHolder = make("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 44),
+	Size = UDim2.new(1, 0, 0, 36),
 	BackgroundTransparency = 1,
 	Font = FONT,
-	TextSize = 24,
+	TextSize = 20,
 	TextScaled = true,
 	TextColor3 = WHITE,
 	Text = "",
 }, countdown)
-make("UITextSizeConstraint", { MinTextSize = 14, MaxTextSize = 24 }, countHolder)
-outline(countHolder, 3)
+make("UITextSizeConstraint", { MinTextSize = 13, MaxTextSize = 20 }, countHolder)
+outline(countHolder, 1.5)
 local countNumber = make("TextLabel", {
-	Position = UDim2.fromOffset(0, 40),
-	Size = UDim2.new(1, 0, 0, 104),
+	Position = UDim2.fromOffset(0, 36),
+	Size = UDim2.new(1, 0, 0, 100),
 	BackgroundTransparency = 1,
-	Font = FONT,
-	TextSize = 96,
+	Font = FONT_HEAVY,
+	TextSize = 88,
 	TextColor3 = WHITE,
 	Text = "10",
 }, countdown)
-outline(countNumber, 5)
+outline(countNumber, 3)
 local countScale = make("UIScale", { Scale = 1 }, countNumber)
 
 local status = make("TextLabel", {
 	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -12, 1, -10),
-	Size = UDim2.fromOffset(520, 22),
+	Position = UDim2.new(1, -14, 1, -10),
+	Size = UDim2.fromOffset(520, 20),
 	BackgroundTransparency = 1,
-	Font = Enum.Font.GothamMedium,
-	TextSize = 15,
+	Font = FONT_MEDIUM,
+	TextSize = 13,
 	TextXAlignment = Enum.TextXAlignment.Right,
-	TextColor3 = Color3.fromRGB(230, 230, 240),
+	TextColor3 = MUTED,
 	Text = "",
 }, gui)
 outline(status, 1)
@@ -239,35 +262,45 @@ outline(status, 1)
 local feed = make("Frame", {
 	AnchorPoint = Vector2.new(0, 1),
 	Position = UDim2.new(0, 12, 1, -12),
-	Size = UDim2.fromOffset(440, 300),
+	Size = UDim2.fromOffset(440, 280),
 	BackgroundTransparency = 1,
 }, gui)
 make("UIListLayout", {
 	VerticalAlignment = Enum.VerticalAlignment.Bottom,
 	SortOrder = Enum.SortOrder.LayoutOrder,
-	Padding = UDim.new(0, 6),
+	Padding = UDim.new(0, 5),
 }, feed)
 local feedOrder = 0
 
 local function addFeed(text: string, stone: number, kind: string)
 	feedOrder += 1
-	local colour = if kind == "gift" then GOLD elseif kind == "follow" then Color3.fromRGB(255, 120, 170) else Color3.fromRGB(170, 220, 255)
+	local colour = if kind == "gift" then GOLD elseif kind == "follow" then Color3.fromRGB(255, 140, 180) else ACCENT
+	local clean = (text:gsub("[<>&]", ""))
 	local row = make("TextLabel", {
 		LayoutOrder = feedOrder,
-		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundColor3 = PANEL,
-		BackgroundTransparency = 0.25,
-		Font = FONT,
-		TextSize = 20,
+		Size = UDim2.fromOffset(0, 30),
+		AutomaticSize = Enum.AutomaticSize.X,
+		Font = FONT_MEDIUM,
+		TextSize = 15,
 		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 		TextColor3 = WHITE,
 		RichText = true,
 		Text = if stone ~= 0
-			then string.format('%s  <font color="#%s">%s%s</font>', (text:gsub("[<>&]", "")), (if stone < 0 then Color3.fromRGB(100, 240, 170) else colour):ToHex(), if stone < 0 then "+" else "-", Format.commas(math.abs(stone)))
-			else (text:gsub("[<>&]", "")),
+			then string.format('%s   <b><font color="#%s">%s%s</font></b>', clean, (if stone < 0 then GREEN else colour):ToHex(), if stone < 0 then "+" else "-", Format.commas(math.abs(stone)))
+			else clean,
 	}, feed)
-	rounded(row, 10)
-	make("UIPadding", { PaddingLeft = UDim.new(0, 12) }, row)
+	glass(row, 8)
+	make("UISizeConstraint", { MaxSize = Vector2.new(440, 30) }, row)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 12) }, row)
+	-- A thin bar in the row's colour along its left edge.
+	local edge = make("Frame", {
+		Position = UDim2.new(0, -14, 0, 7),
+		Size = UDim2.new(0, 3, 1, -14),
+		BackgroundColor3 = if stone < 0 then GREEN else colour,
+		BorderSizePixel = 0,
+	}, row)
+	rounded(edge, 2)
 	local rows = {}
 	for _, child in feed:GetChildren() do
 		if child:IsA("TextLabel") then
@@ -282,7 +315,11 @@ local function addFeed(text: string, stone: number, kind: string)
 	end
 	task.delay(7, function()
 		if row.Parent then
-			local fade = TweenService:Create(row, TweenInfo.new(0.6), { BackgroundTransparency = 1, TextTransparency = 1 })
+			local info = TweenInfo.new(0.6)
+			local fade = TweenService:Create(row, info, { BackgroundTransparency = 1, TextTransparency = 1 })
+			TweenService:Create(edge, info, { BackgroundTransparency = 1 }):Play()
+			local edgeStroke = row:FindFirstChildOfClass("UIStroke")
+			if edgeStroke then TweenService:Create(edgeStroke, info, { Transparency = 1 }):Play() end
 			fade:Play()
 			fade.Completed:Wait()
 			row:Destroy()
@@ -293,49 +330,47 @@ end
 -- Win screen --------------------------------------------------------------------------
 local winScreen = make("Frame", {
 	Size = UDim2.fromScale(1, 1),
-	BackgroundColor3 = Color3.fromRGB(10, 8, 20),
-	BackgroundTransparency = 0.25,
+	BackgroundColor3 = Color3.fromRGB(8, 10, 16),
+	BackgroundTransparency = 0.35,
 	Visible = false,
 	ZIndex = 20,
 }, gui)
 local winCard = make("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromOffset(620, 360),
-	BackgroundColor3 = PANEL,
+	Size = UDim2.fromOffset(540, 300),
 	ZIndex = 21,
 }, winScreen)
-rounded(winCard, 24)
-make("UIStroke", { Thickness = 4, Color = Color3.fromRGB(150, 240, 255) }, winCard)
+glass(winCard, 20, 0.05)
 local winScale = make("UIScale", { Scale = 1 }, winCard)
-local function winLine(y: number, height: number, size: number, colour: Color3): TextLabel
+local function winLine(y: number, height: number, font: Enum.Font, size: number, colour: Color3): TextLabel
 	return make("TextLabel", {
 		Position = UDim2.fromOffset(0, y),
 		Size = UDim2.new(1, 0, 0, height),
 		BackgroundTransparency = 1,
-		Font = FONT,
+		Font = font,
 		TextSize = size,
 		TextColor3 = colour,
 		Text = "",
 		ZIndex = 22,
 	}, winCard)
 end
-local winTitle = winLine(24, 64, 56, Color3.fromRGB(150, 240, 255))
-local winWho = winLine(92, 40, 30, WHITE)
-local winTime = winLine(160, 50, 40, WHITE)
-local winBest = winLine(216, 50, 40, GOLD)
-local winNewBest = winLine(282, 44, 34, Color3.fromRGB(120, 255, 150))
+local winTitle = winLine(30, 48, FONT_HEAVY, 40, ACCENT)
+local winWho = winLine(84, 32, FONT, 24, WHITE)
+local winTime = winLine(140, 30, FONT_MEDIUM, 20, WHITE)
+local winBest = winLine(174, 30, FONT_MEDIUM, 20, GOLD)
+local winNewBest = winLine(230, 32, FONT, 18, GREEN)
 
 local function showWin(data: { [string]: any })
 	local words = Skin.words(attr("Skin", "stone"))
-	winTitle.Text = words.icon .. " " .. string.upper(words.gem) .. " SECURED!"
+	winTitle.Text = string.upper(words.gem) .. " SECURED"
 	winWho.Text = tostring(data.winner or "") .. " wins!"
-	winTime.Text = "This round's time: " .. Format.duration(tonumber(data.time) or 0)
-	winBest.Text = "Best round's time: " .. Format.duration(tonumber(data.best) or 0)
-	winNewBest.Text = if data.newBest then "⭐ NEW BEST! ⭐" else ""
+	winTime.Text = "This round: " .. Format.duration(tonumber(data.time) or 0)
+	winBest.Text = "Best round: " .. Format.duration(tonumber(data.best) or 0)
+	winNewBest.Text = if data.newBest then "NEW BEST TIME" else ""
 	winScreen.Visible = true
-	winScale.Scale = 0.6
-	TweenService:Create(winScale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	winScale.Scale = 0.85
+	TweenService:Create(winScale, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 	task.delay(Config.WinScreenSeconds, function()
 		winScreen.Visible = false
 	end)
@@ -348,13 +383,12 @@ local panel = make("ScrollingFrame", {
 	Size = UDim2.fromOffset(340, 520),
 	CanvasSize = UDim2.fromOffset(0, 0),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	ScrollBarThickness = 6,
-	BackgroundColor3 = PANEL,
-	BackgroundTransparency = 0.05,
+	ScrollBarThickness = 4,
+	ScrollBarImageColor3 = MUTED,
 	Visible = false,
 	ZIndex = 10,
 }, gui)
-rounded(panel, 14)
+glass(panel, 14, 0.06)
 make("UIPadding", {
 	PaddingLeft = UDim.new(0, 12),
 	PaddingRight = UDim.new(0, 14),
@@ -368,12 +402,14 @@ local function panelLabel(text: string)
 	panelOrder += 1
 	make("TextLabel", {
 		LayoutOrder = panelOrder,
-		Size = UDim2.new(1, 0, 0, 20),
+		Size = UDim2.new(1, 0, 0, 18),
 		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamBold,
-		TextSize = 14,
+		Font = FONT,
+		TextSize = 12,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextColor3 = Color3.fromRGB(200, 195, 215),
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextColor3 = MUTED,
 		Text = text,
 		ZIndex = 11,
 	}, panel)
@@ -383,16 +419,18 @@ local function panelBox(text: string, onSubmit: (string) -> ()): TextBox
 	panelOrder += 1
 	local box = make("TextBox", {
 		LayoutOrder = panelOrder,
-		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundColor3 = Color3.fromRGB(50, 44, 68),
-		Font = Enum.Font.GothamMedium,
-		TextSize = 17,
+		Size = UDim2.new(1, 0, 0, 32),
+		BackgroundColor3 = Color3.fromRGB(32, 35, 48),
+		Font = FONT_MEDIUM,
+		TextSize = 15,
 		TextColor3 = WHITE,
+		PlaceholderColor3 = Color3.fromRGB(120, 126, 142),
 		ClearTextOnFocus = false,
 		Text = text,
 		ZIndex = 11,
 	}, panel)
 	rounded(box, 8)
+	make("UIStroke", { Thickness = 1, Color = WHITE, Transparency = 0.9, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, box)
 	box.FocusLost:Connect(function()
 		onSubmit(box.Text)
 	end)
@@ -412,9 +450,9 @@ local function panelButtons(buttons: { { any } }): { TextButton }
 	for _, spec in buttons do
 		local button = make("TextButton", {
 			Size = UDim2.new(1 / #buttons, -6, 1, 0),
-			BackgroundColor3 = Color3.fromRGB(90, 70, 150),
+			BackgroundColor3 = BUTTON,
 			Font = FONT,
-			TextSize = 16,
+			TextSize = 14,
 			TextColor3 = WHITE,
 			Text = spec[1],
 			ZIndex = 12,
@@ -538,22 +576,22 @@ local function refreshRules()
 		make("TextLabel", {
 			Size = UDim2.new(1, -40, 1, 0),
 			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamMedium,
-			TextSize = 15,
+			Font = FONT_MEDIUM,
+			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = WHITE,
-			Text = string.format("%s → %s rocks", tostring(name), (if (tonumber(rocks) or 0) < 0 then "ADD " else "REMOVE ") .. Format.commas(math.abs(tonumber(rocks) or 0))),
+			Text = string.format("%s: %s %s rocks", tostring(name), if (tonumber(rocks) or 0) < 0 then "adds" else "removes", Format.commas(math.abs(tonumber(rocks) or 0))),
 			ZIndex = 12,
 		}, row)
 		local remove = make("TextButton", {
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.fromScale(1, 0),
 			Size = UDim2.fromOffset(34, 30),
-			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
+			BackgroundColor3 = DANGER,
 			Font = FONT,
-			TextSize = 16,
+			TextSize = 14,
 			TextColor3 = WHITE,
-			Text = "✕",
+			Text = "X",
 			ZIndex = 12,
 		}, row)
 		rounded(remove, 8)
@@ -594,22 +632,22 @@ for index = 1, #testGifts, 2 do
 	panelButtons(buttons)
 end
 
-panelLabel("DIAMOND BIRD (every 5 to 7½ minutes)")
+panelLabel("DIAMOND BIRD (every 5 to 7.5 minutes)")
 panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
 
 panelLabel("MAP THEME (changes for everyone straight away)")
 local themeButtons = panelButtons({
-	{ "⛰ Alpine", function() send("setTheme", "default") end },
-	{ "🌸 Sakura", function() send("setTheme", "sakura") end },
-	{ "🚜 Farm", function() send("setTheme", "farm") end },
+	{ "Alpine", function() send("setTheme", "default") end },
+	{ "Sakura", function() send("setTheme", "sakura") end },
+	{ "Farm", function() send("setTheme", "farm") end },
 })
 -- The theme showing now is lit up.
 local function refreshTheme()
 	local theme = attr("Theme", "default")
 	for i, name in { "default", "sakura", "farm" } do
-		themeButtons[i].BackgroundColor3 = if theme == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+		themeButtons[i].BackgroundColor3 = if theme == name then SELECTED else BUTTON
 	end
 end
 State:GetAttributeChangedSignal("Theme"):Connect(refreshTheme)
@@ -617,14 +655,14 @@ refreshTheme()
 
 panelLabel("MOUNTAIN SKIN (same game, reskinned)")
 local skinButtons = panelButtons({
-	{ "💎 Stone & diamond", function() send("setSkin", "stone") end },
-	{ "🌾 Hay & needle", function() send("setSkin", "hay") end },
+	{ "Stone & diamond", function() send("setSkin", "stone") end },
+	{ "Hay & needle", function() send("setSkin", "hay") end },
 })
 -- The mountain repaints itself and the display's words follow the skin.
 local function refreshSkin()
 	local skin = attr("Skin", "stone")
 	for i, name in Skin.NAMES do
-		skinButtons[i].BackgroundColor3 = if skin == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+		skinButtons[i].BackgroundColor3 = if skin == name then SELECTED else BUTTON
 	end
 	stoneTitle.Text = string.upper(Skin.words(skin).material) .. " LEFT"
 	view:setSkin(skin)
@@ -668,9 +706,9 @@ local function panelButton(text: string): TextButton
 	local button = make("TextButton", {
 		LayoutOrder = panelOrder,
 		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundColor3 = Color3.fromRGB(90, 70, 150),
+		BackgroundColor3 = BUTTON,
 		Font = FONT,
-		TextSize = 16,
+		TextSize = 14,
 		TextColor3 = WHITE,
 		Text = text,
 		ZIndex = 12,
@@ -723,10 +761,10 @@ local function refreshStatues()
 		make("TextLabel", {
 			Size = UDim2.fromScale(1, 1),
 			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamMedium,
+			Font = FONT_MEDIUM,
 			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = Color3.fromRGB(190, 180, 210),
+			TextColor3 = MUTED,
 			Text = "No statues yet.",
 			ZIndex = 12,
 		}, row)
@@ -737,21 +775,21 @@ local function refreshStatues()
 		make("TextLabel", {
 			Size = UDim2.new(1, -96, 1, 0),
 			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamMedium,
-			TextSize = 15,
+			Font = FONT_MEDIUM,
+			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextColor3 = GOLD,
-			Text = string.format("🏆 %s · %s coins", tostring(statue.name), Format.commas(tonumber(statue.coins) or 0)),
+			Text = string.format("%s · %s coins", tostring(statue.name), Format.commas(tonumber(statue.coins) or 0)),
 			ZIndex = 12,
 		}, row)
 		local remove = make("TextButton", {
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.fromScale(1, 0),
 			Size = UDim2.fromOffset(88, 30),
-			BackgroundColor3 = Color3.fromRGB(150, 60, 70),
+			BackgroundColor3 = DANGER,
 			Font = FONT,
-			TextSize = 15,
+			TextSize = 14,
 			TextColor3 = WHITE,
 			Text = "Remove",
 			ZIndex = 12,
@@ -776,6 +814,138 @@ local function refreshPanelFields()
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
 end
 
+-- Settings (every player): the field of view, from the Settings button or O.
+-- The hands are refitted to it, so digging looks the same at any FOV.
+local SETTINGS_KEY = Enum.KeyCode.O
+local settingsButton = make("TextButton", {
+	Position = UDim2.fromOffset(12, 10),
+	Size = UDim2.fromOffset(0, 32),
+	AutomaticSize = Enum.AutomaticSize.X,
+	Font = FONT,
+	TextSize = 13,
+	TextColor3 = WHITE,
+	Text = "SETTINGS  <font color=\"#A8AEBE\">O</font>",
+	RichText = true,
+}, gui)
+glass(settingsButton, 16)
+make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, settingsButton)
+local settingsCard = make("Frame", {
+	Position = UDim2.fromOffset(12, 50),
+	Size = UDim2.fromOffset(300, 150),
+	Visible = false,
+	ZIndex = 15,
+}, gui)
+glass(settingsCard, 14, 0.08)
+make("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 14) }, settingsCard)
+local function settingsText(properties: { [string]: any }): TextLabel
+	local label = make("TextLabel", { BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 16 }, settingsCard)
+	for key, value in properties do (label :: any)[key] = value end
+	return label
+end
+settingsText({ Size = UDim2.new(1, 0, 0, 14), Font = FONT, TextSize = 12, TextColor3 = MUTED, Text = "SETTINGS" })
+settingsText({ Position = UDim2.fromOffset(0, 26), Size = UDim2.new(1, -50, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = "Field of view" })
+local fovValue = settingsText({ Position = UDim2.new(1, -50, 0, 26), Size = UDim2.fromOffset(50, 20), Font = FONT, TextSize = 15, TextColor3 = WHITE, TextXAlignment = Enum.TextXAlignment.Right, Text = "" })
+-- The slider: a track, its filled part and a knob, with a taller hit area.
+local fovSlider = make("TextButton", {
+	Position = UDim2.fromOffset(0, 54),
+	Size = UDim2.new(1, 0, 0, 28),
+	BackgroundTransparency = 1,
+	Text = "",
+	AutoButtonColor = false,
+	ZIndex = 16,
+}, settingsCard)
+local fovTrack = make("Frame", {
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.fromScale(0, 0.5),
+	Size = UDim2.new(1, 0, 0, 6),
+	BackgroundColor3 = WHITE,
+	BackgroundTransparency = 0.82,
+	BorderSizePixel = 0,
+	ZIndex = 16,
+}, fovSlider)
+rounded(fovTrack, 3)
+local fovFill = make("Frame", { Size = UDim2.fromScale(0.5, 1), BackgroundColor3 = SELECTED, BorderSizePixel = 0, ZIndex = 17 }, fovTrack)
+rounded(fovFill, 3)
+local fovKnob = make("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(18, 18),
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
+	ZIndex = 18,
+}, fovTrack)
+rounded(fovKnob, 9)
+local function settingsAction(text: string, x: number, colour: Color3): TextButton
+	local button = make("TextButton", {
+		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 96),
+		Size = UDim2.new(0.5, -4, 0, 30),
+		BackgroundColor3 = colour,
+		Font = FONT,
+		TextSize = 13,
+		TextColor3 = WHITE,
+		Text = text,
+		ZIndex = 16,
+	}, settingsCard)
+	rounded(button, 8)
+	return button
+end
+local fovReset = settingsAction("Reset", 0, BUTTON)
+local settingsDone = settingsAction("Done", 0.5, SELECTED)
+
+local function refreshFov()
+	local fov = FirstPerson.fieldOfView()
+	local fraction = (fov - FirstPerson.FOV_MIN) / (FirstPerson.FOV_MAX - FirstPerson.FOV_MIN)
+	fovFill.Size = UDim2.fromScale(fraction, 1)
+	fovKnob.Position = UDim2.fromScale(fraction, 0.5)
+	fovValue.Text = tostring(fov)
+end
+refreshFov()
+local function fovFromScreen(x: number)
+	local left, width = fovTrack.AbsolutePosition.X, math.max(1, fovTrack.AbsoluteSize.X)
+	local fraction = math.clamp((x - left) / width, 0, 1)
+	FirstPerson.setFieldOfView(FirstPerson.FOV_MIN + fraction * (FirstPerson.FOV_MAX - FirstPerson.FOV_MIN))
+	refreshFov()
+end
+local draggingFov = false
+fovSlider.InputBegan:Connect(function(input: InputObject)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		draggingFov = true
+		fovFromScreen(input.Position.X)
+	end
+end)
+UserInputService.InputChanged:Connect(function(input: InputObject)
+	if draggingFov and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		fovFromScreen(input.Position.X)
+	end
+end)
+UserInputService.InputEnded:Connect(function(input: InputObject)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		draggingFov = false
+	end
+end)
+fovReset.Activated:Connect(function()
+	FirstPerson.setFieldOfView(FirstPerson.FOV_DEFAULT)
+	refreshFov()
+end)
+
+local function settingsOpen(): boolean
+	return settingsCard.Visible and gui.Enabled
+end
+local function setSettingsOpen(show: boolean)
+	settingsCard.Visible = show
+	draggingFov = false
+	if show then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
+end
+settingsButton.Activated:Connect(function() setSettingsOpen(not settingsCard.Visible) end)
+settingsDone.Activated:Connect(function() setSettingsOpen(false) end)
+-- O toggles the settings in the game, unless the streamer bound O to a test gift.
+UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+	if processed or input.KeyCode ~= SETTINGS_KEY or not gui.Enabled or UserInputService:GetFocusedTextBox() then return end
+	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
+	if ok and type(bindings) == "table" and bindings[SETTINGS_KEY.Name] ~= nil then return end
+	setSettingsOpen(not settingsCard.Visible)
+end)
+
 -- The settings panel is hidden: the owner presses Y to open or close it.
 local isAdmin = false
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
@@ -789,8 +959,8 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	end
 end)
 RunService.RenderStepped:Connect(function()
-	-- First person locks the mouse; free it while the panel is open.
-	if panel.Visible then
+	-- First person locks the mouse; free it while the panel or settings are open.
+	if panel.Visible or settingsOpen() then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		UserInputService.MouseIconEnabled = true
 	end
@@ -841,14 +1011,14 @@ RunService.RenderStepped:Connect(function(dt: number)
 	timerLabel.Visible = phase ~= "Holding"
 	local now = workspace:GetServerTimeNow()
 	local roundStart = attr("RoundStart", now)
-	setText(timerLabel, "⏱ " .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart))
+	setText(timerLabel, '<font color="#A8AEBE">TIME</font>   ' .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart))
 	setText(status, "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else ""))
 
 	if phase == "Holding" then
 		local elapsed = now - attr("HoldStart", now)
 		local shown = HoldTimer.display(elapsed, Config.HoldSeconds, Config.HoldCountFrom, Config.HoldSlowdown)
 		countdown.Visible = true
-		setText(countHolder, "💎 " .. tostring(attr("Holder", "")) .. " — HOLD IT!")
+		setText(countHolder, string.upper(tostring(attr("Holder", ""))) .. " IS HOLDING IT")
 		setText(countNumber, tostring(shown))
 		if shown ~= lastCount then
 			lastCount = shown
@@ -866,8 +1036,8 @@ RunService.RenderStepped:Connect(function(dt: number)
 			banner.TextTransparency = 0
 		end
 		if phase == "Revealed" then
-			banner.Text = string.upper(Skin.words(attr("Skin", "stone")).gem) .. " UNCOVERED — FIND IT AND CLICK IT"
-			banner.TextTransparency = 0.25 + 0.25 * math.sin(now * 6)
+			banner.Text = string.upper(Skin.words(attr("Skin", "stone")).gem) .. " UNCOVERED  ·  FIND IT AND CLICK IT"
+			banner.TextTransparency = 0.15 + 0.15 * math.sin(now * 5)
 		end
 	end
 end)
@@ -888,7 +1058,8 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 end)
 
 -- Digging: hold the dig button (left mouse / touch) and your hands tear
--- through the rock you aim at, about DigPerSecond rocks a second.
+-- through the rock you aim at, about DigPerSecond rocks a second: a hand lands
+-- four times a second and breaks a quarter of that each time (see FirstPerson).
 -- A separate full-viewport layer keeps the dot aligned with the camera ray,
 -- regardless of the HUD inset or the screen's aspect ratio.
 local aimGui = make("ScreenGui", {
@@ -926,7 +1097,7 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	local phase = attr("Phase", "Digging")
 	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
 		and player:GetAttribute("InGame") == true and not LobbyView.isOpen()
-		and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
+		and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	aimDot.Visible = active
 	UserInputService.MouseIconEnabled = not active
@@ -945,7 +1116,6 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	rockOutline.Enabled = stone
 end)
 local digging = false
-local digClock = 0
 local function isDigInput(input: InputObject): boolean
 	return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
 end
@@ -959,7 +1129,6 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 			return
 		end
 		digging = true
-		digClock = 1
 	end
 end)
 UserInputService.InputEnded:Connect(function(input: InputObject)
@@ -970,27 +1139,28 @@ end)
 UserInputService.WindowFocusReleased:Connect(function()
 	digging = false
 end)
-RunService.Heartbeat:Connect(function(dt: number)
+-- The rock this player is digging now, while the dig button is held: its key,
+-- or nil when there is nothing to dig.
+local function digTarget(): number?
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	local target = aimTarget
-	local allowed = digging and not panel.Visible and phase ~= "Won" and phase ~= "Rebuilding"
+	local allowed = digging and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
-	local key = if target then view:keyForPart(target) else nil
-	local onRock = allowed and root ~= nil and root:IsA("BasePart")
-		and key ~= nil and (root.Position - (target :: BasePart).Position).Magnitude <= 16
-	player:SetAttribute("DiggingRock", onRock == true)
-	if not allowed then
-		return
+	local key = if allowed and target then view:keyForPart(target) else nil
+	if key == nil or root == nil or not root:IsA("BasePart") or (root.Position - (target :: BasePart).Position).Magnitude > 16 then
+		return nil
 	end
-	digClock += dt
-	if digClock < 0.1 then
-		return
-	end
-	digClock = 0
+	return key
+end
+-- The hands swing while this is set; the rock breaks as each one lands.
+RunService.Heartbeat:Connect(function()
+	player:SetAttribute("DiggingRock", digTarget() ~= nil)
+end)
+FirstPerson.onStrike(function()
+	local key = digTarget()
 	local character = player.Character
-	local tool = character and character:FindFirstChildOfClass("Tool")
-	if tool == nil and onRock then
+	if key ~= nil and (character == nil or character:FindFirstChildOfClass("Tool") == nil) then
 		Request:FireServer("mine", key)
 	end
 end)

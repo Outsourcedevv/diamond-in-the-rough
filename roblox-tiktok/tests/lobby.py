@@ -145,20 +145,20 @@ local texts = {}
 for _, object in instances do
 	if object.ClassName == "TextLabel" and object:IsDescendantOf(built.model) then texts[object.Text] = true end
 end
-check(texts["WELCOME"] and texts["Open  👑 GAMES  on the left to play"] and texts["👑"], "the crest and banners are lettered")
+check(texts["WELCOME"] and texts["Open  GAMES  on the left to play"], "the crest and banners are lettered")
 
 -- The games menu's status line for Diamond in the Rough.
-check(LobbyView.status("Digging", 123456) == "🔴 LIVE · 123,456 stone left", "live stone count")
-check(LobbyView.status("Revealed", 9) == "🔴 LIVE · 9 stone left", "still live once the diamond shows")
-check(LobbyView.status("Holding", 0) == "💎 Someone is holding the diamond!", "holding")
-check(LobbyView.status("Won", 0) == "🏆 Diamond found! A new round starts soon", "won")
-check(LobbyView.status("Rebuilding", 0) == "⛰ The mountain is being rebuilt", "rebuilding")
+check(LobbyView.status("Digging", 123456) == "LIVE · 123,456 stone left", "live stone count")
+check(LobbyView.status("Revealed", 9) == "LIVE · 9 stone left", "still live once the diamond shows")
+check(LobbyView.status("Holding", 0) == "Someone is holding the diamond!", "holding")
+check(LobbyView.status("Won", 0) == "Diamond found! A new round starts soon", "won")
+check(LobbyView.status("Rebuilding", 0) == "The mountain is being rebuilt", "rebuilding")
 -- The haystack skin says hay and needle instead.
-check(LobbyView.status("Digging", 1200, "hay") == "🔴 LIVE · 1,200 hay left", "hay left")
-check(LobbyView.status("Holding", 0, "hay") == "🌾 Someone is holding the needle!", "holding the needle")
-check(LobbyView.status("Won", 0, "hay") == "🏆 Needle found! A new round starts soon", "needle found")
-check(LobbyView.status("Rebuilding", 0, "hay") == "⛰ The haystack is being rebuilt", "haystack rebuilt")
-check(LobbyView.status("Won", 0, "stone") == "🏆 Diamond found! A new round starts soon", "stone skin reads as before")
+check(LobbyView.status("Digging", 1200, "hay") == "LIVE · 1,200 hay left", "hay left")
+check(LobbyView.status("Holding", 0, "hay") == "Someone is holding the needle!", "holding the needle")
+check(LobbyView.status("Won", 0, "hay") == "Needle found! A new round starts soon", "needle found")
+check(LobbyView.status("Rebuilding", 0, "hay") == "The haystack is being rebuilt", "haystack rebuilt")
+check(LobbyView.status("Won", 0, "stone") == "Diamond found! A new round starts soon", "stone skin reads as before")
 print(string.format("PASS: %d lobby checks (%d parts)", passed, lobbyParts))
 '''
 

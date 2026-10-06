@@ -105,7 +105,7 @@ function Statue.build(parent: Instance, spec: Spec): Model
 		line.Text = text
 		line.Parent = gui
 	end
-	engrave("★  IN HONOUR OF  ★", 0.06, 0.16, Enum.Font.GothamBold)
+	engrave("IN HONOUR OF", 0.06, 0.16, Enum.Font.GothamBold)
 	engrave(spec.name, 0.25, 0.42, Enum.Font.FredokaOne)
 	engrave(Format.commas(spec.coins) .. " COINS", 0.7, 0.22, Enum.Font.GothamBold)
 	return model

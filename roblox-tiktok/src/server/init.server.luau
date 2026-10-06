@@ -733,7 +733,7 @@ end
 -- Raised so both boards show over the summit as seen from the camp.
 local boardLift = math.max(14, mountainRadius * 0.55)
 local helperBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1].facing, boardLift, {
-	title = "⛏️ TOP HELPERS",
+	title = "TOP HELPERS",
 	unit = "coins",
 	trim = Color3.fromRGB(36, 92, 204),
 	valueColour = Color3.fromRGB(160, 214, 255),
@@ -741,7 +741,7 @@ local helperBoard = Leaderboards.build(showcase, boardSpots[1].at, boardSpots[1]
 	empty = "Send a gift to help break the mountain!",
 }, groundAt)
 local grieferBoard = Leaderboards.build(showcase, boardSpots[2].at, boardSpots[2].facing, boardLift, {
-	title = "🧱 TOP GRIEFERS",
+	title = "TOP GRIEFERS",
 	unit = "coins",
 	trim = Color3.fromRGB(196, 36, 44),
 	valueColour = Color3.fromRGB(255, 178, 188),
@@ -906,7 +906,7 @@ local function processTikTok(event: TikTokFeed.Event)
 		})
 	end
 	local _centre, applied = applyStone(amount, centreKey)
-	if doubledGifts[event] then text = "💎 2X " .. text end
+	if doubledGifts[event] then text = "2X " .. text end
 	Notify:FireAllClients("feed", { text = text .. (if applied == nil then " (queued)" elseif amount < 0 and applied == 0 then " (mountain full)" else ""), stone = applied or amount, kind = event.type })
 end
 
@@ -1238,8 +1238,9 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		return
 	end
 	if action == "mine" then
-		-- Sent every ~0.1 s while the dig button is held: dig as many rocks as
-		-- DigPerSecond allows for the time since the last dig.
+		-- Sent each time a digging hand lands (four times a second while the
+		-- dig button is held): dig as many rocks as DigPerSecond allows for the
+		-- time since the last dig, rounded so strikes on time get their full share.
 		-- The client names the rock cell it is aiming at (rock parts are local).
 		-- Digging carries on while a gift blasts or rebuilds the mountain.
 		local current = mountain
@@ -1249,7 +1250,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		local now = os.clock()
 		local since = now - (mineCooldown[player] or 0)
-		local allowed = math.min(math.floor(since * Config.DigPerSecond), math.ceil(Config.DigPerSecond / 4))
+		local allowed = math.min(math.floor(since * Config.DigPerSecond + 0.5), math.ceil(Config.DigPerSecond / 4))
 		if allowed < 1 then
 			return
 		end

@@ -10,13 +10,12 @@ export type Words = {
 	material: string, -- "stone" / "hay": what gifts blast away
 	gem: string, -- "diamond" / "needle": what you find and hold
 	heap: string, -- "mountain" / "haystack"
-	icon: string,
 }
 
 Skin.NAMES = { "stone", "hay" }
 Skin.WORDS = {
-	stone = { material = "stone", gem = "diamond", heap = "mountain", icon = "💎" },
-	hay = { material = "hay", gem = "needle", heap = "haystack", icon = "🌾" },
+	stone = { material = "stone", gem = "diamond", heap = "mountain" },
+	hay = { material = "hay", gem = "needle", heap = "haystack" },
 } :: { [string]: Words }
 
 -- The words for a skin name; anything unknown reads as stone.

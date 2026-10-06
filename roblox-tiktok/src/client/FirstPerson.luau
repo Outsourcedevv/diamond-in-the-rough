@@ -1,7 +1,13 @@
 --!strict
 -- First-person view with two hands in front of the camera (like the PC game).
--- The hands follow the camera, bob while walking and alternate reaching,
--- curling around stone and raking rubble back while digging.
+-- The hands follow the camera, bob while walking and take turns digging: each
+-- swing draws back, drives forward into the rock with the fingers clawed, and
+-- rakes the rubble down and back. The rock breaks when a hand lands (see
+-- FirstPerson.onStrike), so what you see and what you dig stay in step.
+--
+-- The hands are drawn small and close to the camera, so they never sink into
+-- the rock when you stand right against it, and they are refitted to the
+-- field of view (FirstPerson.setFieldOfView), so they look the same at any FOV.
 --
 -- Picking up the diamond: the gem flies from where it lay into your right hand,
 -- the hand lifts it up and the camera eases upward so the gem is framed
@@ -19,6 +25,17 @@ local GEM_SIZE = 1.05 -- studs across: about a third of the screen in the raised
 local FLY_SECONDS = 0.45 -- world position to hand
 local CAMERA_EASE = 0.7
 local HOLD_PITCH = math.rad(28) -- looking up, but still showing the peak below the gem
+local SWING_SECONDS = 0.25 -- one hand's swing; the server digs DigPerSecond / 4 rocks per strike
+local IMPACT = 0.5 -- how far through a swing the hand lands
+local VIEW_SCALE = 0.5 -- the hands are built at half size, half as far away: the same on screen
+local BASE_FOV = 70 -- the field of view the hands were framed for
+local PIVOT = Vector3.new(0, -0.92, -1.6) -- the hands' resting point in front of the camera
+
+FirstPerson.SWING_SECONDS = SWING_SECONDS
+FirstPerson.IMPACT = IMPACT
+FirstPerson.FOV_MIN = 50
+FirstPerson.FOV_MAX = 100
+FirstPerson.FOV_DEFAULT = BASE_FOV
 
 local function part(name: string, size: Vector3, colour: Color3, material: Enum.Material?): Part
 	local p = Instance.new("Part")
@@ -39,10 +56,64 @@ local function smooth(value: number): number
 	return value * value * (3 - 2 * value)
 end
 
+-- One hand's pose through a swing (0 to 1), as offsets from its resting pose:
+-- `inward` towards the middle of the screen, `up`, `back` towards the camera,
+-- the hand's pitch (radians, positive tips the fingers up) and how far the
+-- fingers curl (0 to 1). The pose starts and ends at rest, so swings chain
+-- without a jump. Pure, for tests.
+export type Pose = { inward: number, up: number, back: number, pitch: number, curl: number }
+local KEYS: { { at: number, pose: Pose } } = {
+	{ at = 0, pose = { inward = 0, up = 0, back = 0, pitch = 0, curl = 0.15 } },
+	-- Draw back and up, wrist cocked.
+	{ at = 0.34, pose = { inward = 0.03, up = 0.15, back = 0.16, pitch = math.rad(26), curl = 0.35 } },
+	-- Drive forward and a little down into the rock, fingers clawed.
+	{ at = IMPACT, pose = { inward = 0.2, up = -0.03, back = -0.6, pitch = math.rad(-16), curl = 0.92 } },
+	-- Rake the rubble down and back.
+	{ at = 0.8, pose = { inward = 0.13, up = -0.24, back = -0.18, pitch = math.rad(18), curl = 1 } },
+	{ at = 1, pose = { inward = 0, up = 0, back = 0, pitch = 0, curl = 0.15 } },
+}
+function FirstPerson.pose(t: number): Pose
+	t = math.clamp(t, 0, 1)
+	for i = 1, #KEYS - 1 do
+		local a, b = KEYS[i], KEYS[i + 1]
+		if t <= b.at then
+			local u = (t - a.at) / (b.at - a.at)
+			-- The drive into the rock speeds up to the impact; everything else eases.
+			u = if b.at == IMPACT then u * u else smooth(u)
+			local p, q = a.pose, b.pose
+			return {
+				inward = p.inward + (q.inward - p.inward) * u,
+				up = p.up + (q.up - p.up) * u,
+				back = p.back + (q.back - p.back) * u,
+				pitch = p.pitch + (q.pitch - p.pitch) * u,
+				curl = p.curl + (q.curl - p.curl) * u,
+			}
+		end
+	end
+	return KEYS[#KEYS].pose
+end
+
+-- How much bigger the hands must be drawn at `fov` to look the same on screen
+-- as at the field of view they were framed for.
+function FirstPerson.fovScale(fov: number): number
+	return math.tan(math.rad(fov) / 2) / math.tan(math.rad(BASE_FOV) / 2)
+end
+
+-- Where a point framed at the base field of view goes, in camera space, at a
+-- field of view `scale` times wider (see fovScale): the hands grow about their
+-- resting point, which moves out with the edge of the screen. Pure, for tests.
+function FirstPerson.fit(frame: CFrame, scale: number): CFrame
+	local p = frame.Position
+	local fitted = Vector3.new(p.X * scale, p.Y * scale, PIVOT.Z + (p.Z - PIVOT.Z) * scale) * VIEW_SCALE
+	return CFrame.new(fitted) * frame.Rotation
+end
+
 -- In the lobby the view is a normal third-person camera and the hands hide.
 local enabled = true
+local fieldOfView = BASE_FOV
 local function applyCamera()
 	local player = Players.LocalPlayer
+	local camera = workspace.CurrentCamera
 	if enabled then
 		player.CameraMode = Enum.CameraMode.LockFirstPerson
 		player.CameraMinZoomDistance = 0.5
@@ -52,11 +123,28 @@ local function applyCamera()
 		player.CameraMaxZoomDistance = 24
 		player.CameraMinZoomDistance = 8
 	end
+	if camera then camera.FieldOfView = if enabled then fieldOfView else BASE_FOV end
 end
 
 function FirstPerson.setEnabled(on: boolean)
 	enabled = on
 	applyCamera()
+end
+
+-- The player's field of view in the game (the lobby keeps the default).
+function FirstPerson.setFieldOfView(fov: number)
+	fieldOfView = math.clamp(math.floor(fov + 0.5), FirstPerson.FOV_MIN, FirstPerson.FOV_MAX)
+	applyCamera()
+end
+
+function FirstPerson.fieldOfView(): number
+	return fieldOfView
+end
+
+-- `callback` runs each time a digging hand lands on the rock.
+local strikeListeners: { () -> () } = {}
+function FirstPerson.onStrike(callback: () -> ())
+	table.insert(strikeListeners, callback)
 end
 
 function FirstPerson.start()
@@ -91,7 +179,16 @@ function FirstPerson.start()
 		table.insert(hands, { side = side, sleeve = sleeve, hand = hand, fingers = fingers, thumb = thumb })
 	end
 	local rigFrames: { CFrame } = table.create(#rigParts, CFrame.identity)
+	local baseSizes: { Vector3 } = {}
+	for i, p in rigParts do baseSizes[i] = p.Size end
 	local skinColour = SKIN_FALLBACK
+	-- The hands are resized only when the field of view changes.
+	local fitScale = -1
+	local function refit(scale: number)
+		if math.abs(scale - fitScale) < 1e-4 then return end
+		fitScale = scale
+		for i, p in rigParts do p.Size = baseSizes[i] * (scale * VIEW_SCALE) end
+	end
 
 	local State = ReplicatedStorage:WaitForChild("DiamondRushState")
 	local DiamondShape = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("DiamondShape"))
@@ -120,7 +217,8 @@ function FirstPerson.start()
 	-- The held gem: anchored facets moved in one call each frame (no welds).
 	-- In the haystack skin it is a needle (see Skin).
 	local gemKind = if State:GetAttribute("Skin") == "hay" then "needle" else "diamond"
-	local gem = DiamondShape.build(GEM_SIZE, "HeldDiamond", gemKind)
+	local gemScale = VIEW_SCALE
+	local gem = DiamondShape.build(GEM_SIZE * gemScale, "HeldDiamond", gemKind)
 	local core = part("Core", Vector3.new(0.1, 0.1, 0.1), Color3.new(1, 1, 1))
 	core.Transparency = 1
 	core.Parent = gem.model
@@ -148,17 +246,21 @@ function FirstPerson.start()
 	outline.OutlineTransparency = 0.35
 	outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	outline.Parent = gem.model
-	-- A reskin rebuilds the held gem, carrying its light, sparkles and outline over.
-	State:GetAttributeChangedSignal("Skin"):Connect(function()
-		local kind = if State:GetAttribute("Skin") == "hay" then "needle" else "diamond"
-		if kind == gemKind then return end
+	-- A reskin, or a new field of view, rebuilds the held gem, carrying its
+	-- light, sparkles and outline over.
+	local function rebuildGem(kind: string, scale: number)
+		if kind == gemKind and math.abs(scale - gemScale) < 1e-4 then return end
 		gemKind = kind
+		gemScale = scale
 		local old = gem
-		gem = DiamondShape.build(GEM_SIZE, "HeldDiamond", kind)
+		gem = DiamondShape.build(GEM_SIZE * scale, "HeldDiamond", kind)
 		core.Parent = gem.model
 		outline.Parent = gem.model
 		gem.model.Parent = old.model.Parent
 		old.model:Destroy()
+	end
+	State:GetAttributeChangedSignal("Skin"):Connect(function()
+		rebuildGem(if State:GetAttribute("Skin") == "hay" then "needle" else "diamond", gemScale)
 	end)
 
 	local hiddenArms: { [BasePart]: number } = {}
@@ -218,10 +320,11 @@ function FirstPerson.start()
 		end
 	end)
 
-	local cycle = 1
-	local punchSide = 1
+	local cycle = 1 -- how far through the current swing (1 = at rest)
+	local swingSide = 1 -- the hand swinging now; the hands take turns
+	local struck = true -- whether this swing has landed yet
+	local kick = 0 -- a small jolt through both hands as one lands
 	local bob = 0
-	local digBlend = 0
 	local lift = 0 -- 0 = digging pose, 1 = diamond raised high
 
 	-- Position the hands after both Roblox's camera and our hold-camera update.
@@ -235,9 +338,13 @@ function FirstPerson.start()
 			sparkles.Enabled = false
 			restoreArms()
 			hideWorld(false)
+			cycle, struck = 1, true
 			return
 		end
 		rig.Parent = camera
+		if camera.FieldOfView ~= fieldOfView then camera.FieldOfView = fieldOfView end
+		local scale = FirstPerson.fovScale(camera.FieldOfView)
+		refit(scale)
 		-- Scriptable cameras bypass the normal first-person transparency controller.
 		-- Hide the real limbs so they cannot float above the custom hands.
 		for _, limb in character:GetChildren() do
@@ -262,24 +369,31 @@ function FirstPerson.start()
 		end
 		local moving = humanoid.MoveDirection.Magnitude > 0.1 and humanoid.FloorMaterial ~= Enum.Material.Air
 		bob += dt * (if moving then 9 else 2)
-		local sway = if moving then 0.05 else 0.015
+		-- Walking sways the hands; digging steadies them.
+		local sway = if moving then 0.04 else 0.012
 		local holding = isHolding()
 		local digging = player:GetAttribute("DiggingRock") == true and not holding
-		digBlend += ((if digging then 1 else 0) - digBlend) * (1 - math.exp(-dt * 14))
+		-- A swing always finishes once begun, so letting go never snaps the
+		-- hand back; the next one starts, with the other hand, while you dig.
 		if holding then
-			cycle = 1
-		elseif cycle < 1 then
-			cycle = math.min(1, cycle + dt / 0.46)
-		elseif digging then
-			cycle = 0
-			punchSide = -punchSide
+			cycle, struck = 1, true
+		else
+			if cycle >= 1 and digging then
+				cycle, struck = 0, false
+				swingSide = -swingSide
+			end
+			if cycle < 1 then
+				cycle = math.min(1, cycle + dt / SWING_SECONDS)
+				if not struck and cycle >= IMPACT then
+					struck = true
+					kick = 1
+					if digging then
+						for _, callback in strikeListeners do task.spawn(callback) end
+					end
+				end
+			end
 		end
-		-- Wind up, reach quickly into the stone, rake down, then pull the rubble back.
-		local wind = smooth(cycle / 0.18) * (1 - smooth((cycle - 0.18) / 0.16))
-		local reach = smooth((cycle - 0.18) / 0.20)
-		local pull = smooth((cycle - 0.48) / 0.52)
-		local extension = reach * (1 - pull) * digBlend
-		local scoop = math.sin(math.clamp((cycle - 0.38) / 0.62, 0, 1) * math.pi) * digBlend
+		kick = math.max(0, kick - dt * 9)
 		lift += ((if holding then 1 else 0) - lift) * (1 - math.exp(-dt * 8))
 		hideWorld(holding)
 		local worldLight = worldDiamond:FindFirstChildOfClass("PointLight")
@@ -290,37 +404,45 @@ function FirstPerson.start()
 			if worldSparkles and worldSparkles:IsA("ParticleEmitter") then worldSparkles.Enabled = false end
 		end
 
+		-- Everything below is framed in camera space at the base field of view,
+		-- then fitted to the camera (see FirstPerson.fit).
 		local index = 0
 		local function put(frame: CFrame)
 			index += 1
-			rigFrames[index] = frame
+			rigFrames[index] = camera.CFrame * FirstPerson.fit(frame, scale)
 		end
-		local base = camera.CFrame * CFrame.new(math.sin(bob * 0.5) * sway * 0.4, -0.92 + math.sin(bob) * sway * 0.45, -1.6)
+		local jolt = kick * kick * 0.035
+		local base = CFrame.new(PIVOT + Vector3.new(math.sin(bob * 0.5) * sway * 0.4, math.sin(bob) * sway * 0.45 - jolt, jolt))
+		local swing = FirstPerson.pose(cycle)
+		-- The resting hand braces a little while the other one drives in.
+		local brace = math.sin(math.clamp(cycle / 0.8, 0, 1) * math.pi)
 		local palm = CFrame.identity
 		for _, h in hands do
-			local active = if h.side == punchSide then 1 - lift else 0
-			local hit = extension * active
-			local rake = scoop * active
-			local prep = wind * digBlend * active
-			local support = if h.side ~= punchSide then extension * (1 - lift) else 0
-			local normal = base * CFrame.new(h.side * (0.58 - hit * 0.24), hit * 0.27 - rake * 0.19 + support * 0.05, -hit * 0.62 + prep * 0.12 + rake * 0.16 - support * 0.08)
-				* CFrame.Angles(math.rad(10 - hit * 22 + rake * 34 + prep * 12), math.rad(-h.side * (8 + hit * 12)), math.rad(h.side * (rake * 16 - hit * 8)))
+			local active = h.side == swingSide
+			local p = if active then swing else nil
+			local inward = if p then p.inward else 0
+			local up = if p then p.up else -0.04 * brace
+			local back = if p then p.back else 0.07 * brace
+			local pitch = if p then p.pitch else math.rad(-4) * brace
+			local normal = base * CFrame.new(h.side * (0.58 - inward * (1 - lift)), up * (1 - lift), back * (1 - lift))
+				* CFrame.Angles(math.rad(10) + pitch * (1 - lift), math.rad(-h.side * (8 + inward * 50)), math.rad(-h.side * inward * 30))
 			-- The right hand rises to the right of centre, under the countdown;
 			-- the left hand drops out of view.
 			local raised = if h.side == 1
-				then camera.CFrame * CFrame.new(0.5, -0.62, -1.7) * CFrame.Angles(math.rad(34), math.rad(-12), math.rad(-6))
+				then CFrame.new(0.5, -0.62, -1.7) * CFrame.Angles(math.rad(34), math.rad(-12), math.rad(-6))
 				else normal * CFrame.new(0, -1.6, 0.3)
 			local arm = normal:Lerp(raised, smooth(lift))
 			put(arm * CFrame.new(0, 0, 0.46))
 			local handFrame = arm * CFrame.new(0, 0, -0.35)
 			put(handFrame)
 			if h.side == 1 then palm = handFrame end
-			local grip = math.max(if h.side == 1 then lift else 0, rake * 0.85)
+			local curl = if p then p.curl else 0.15
+			local grip = math.max(if h.side == 1 then lift else 0, curl * (1 - lift))
 			for fingerIndex, _ in h.fingers do
-				local curl = grip * (0.85 + fingerIndex * 0.035)
-				local joint = handFrame * CFrame.new((fingerIndex - 2.5) * 0.09, 0, -0.20) * CFrame.Angles(math.rad(-46 * curl), 0, 0)
+				local bend = grip * (0.85 + fingerIndex * 0.035)
+				local joint = handFrame * CFrame.new((fingerIndex - 2.5) * 0.09, 0, -0.20) * CFrame.Angles(math.rad(-46 * bend), 0, 0)
 				put(joint * CFrame.new(0, 0, -0.07))
-				put(joint * CFrame.new(0, 0, -0.14) * CFrame.Angles(math.rad(-54 * curl), 0, 0) * CFrame.new(0, 0, -0.065))
+				put(joint * CFrame.new(0, 0, -0.14) * CFrame.Angles(math.rad(-54 * bend), 0, 0) * CFrame.new(0, 0, -0.065))
 			end
 			put(handFrame * CFrame.new(-h.side * 0.17, 0.015, -0.08)
 				* CFrame.Angles(math.rad(-35 * grip), math.rad(h.side * 20 * grip), math.rad(h.side * (15 + 35 * grip))))
@@ -328,10 +450,11 @@ function FirstPerson.start()
 		workspace:BulkMoveTo(rigParts, rigFrames, Enum.BulkMoveMode.FireCFrameChanged)
 
 		if holding then
+			rebuildGem(gemKind, scale * VIEW_SCALE)
 			local t = os.clock() - holdClock
 			-- Upright in the world, crown tipped towards you, slowly turning.
 			local spin = t * 0.9
-			local seat = palm * CFrame.new(0, 0.17 + GEM_SIZE * 0.6, -0.05)
+			local seat = camera.CFrame * FirstPerson.fit(palm * CFrame.new(0, 0.17 + GEM_SIZE * 0.6, -0.05), scale)
 			local target = CFrame.new(seat.Position) * CFrame.Angles(0, holdYaw, 0) * CFrame.Angles(math.rad(20), 0, 0) * CFrame.Angles(0, spin, 0)
 			local frame = target
 			local from = gemFrom

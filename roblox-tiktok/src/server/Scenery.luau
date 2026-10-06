@@ -734,7 +734,7 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	text.Font = Enum.Font.FredokaOne
 	text.TextScaled = true
 	text.TextColor3 = Color3.fromRGB(250, 236, 206)
-	text.Text = "⛏  DIAMOND MOUNTAIN"
+	text.Text = "DIAMOND MOUNTAIN"
 	text.Parent = gui
 
 	-- What only the alpine theme shows.

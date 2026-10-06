@@ -213,8 +213,18 @@ function Lobby.build(parent: Instance): Built
 			gui.PixelsPerStud = 30
 			gui.LightInfluence = 0.8
 			gui.Parent = banner
-			label(gui, "👑", UDim2.fromScale(0.1, 0.12), UDim2.fromScale(0.8, 0.3), GOLD, Enum.Font.GothamBold)
-			label(gui, "◆", UDim2.fromScale(0.3, 0.56), UDim2.fromScale(0.4, 0.2), GOLD, Enum.Font.GothamBold)
+			-- Two gold diamonds (squares turned on their corners), large over small.
+			for _, mark in { { 0.27, 0.42 }, { 0.66, 0.2 } } do
+				local gem = Instance.new("Frame")
+				gem.AnchorPoint = Vector2.new(0.5, 0.5)
+				gem.Position = UDim2.fromScale(0.5, mark[1])
+				gem.Size = UDim2.fromScale(mark[2], mark[2])
+				gem.SizeConstraint = Enum.SizeConstraint.RelativeXX
+				gem.Rotation = 45
+				gem.BackgroundColor3 = GOLD
+				gem.BorderSizePixel = 0
+				gem.Parent = gui
+			end
 		end
 	end
 
@@ -233,7 +243,7 @@ function Lobby.build(parent: Instance): Built
 	gui.LightInfluence = 0.7
 	gui.Parent = crest
 	label(gui, "WELCOME", UDim2.fromScale(0.05, 0.08), UDim2.fromScale(0.9, 0.52), ROYAL, Enum.Font.Merriweather)
-	label(gui, "Open  👑 GAMES  on the left to play", UDim2.fromScale(0.08, 0.64), UDim2.fromScale(0.84, 0.24), Color3.fromRGB(150, 112, 30), Enum.Font.GothamBold)
+	label(gui, "Open  GAMES  on the left to play", UDim2.fromScale(0.08, 0.64), UDim2.fromScale(0.84, 0.24), Color3.fromRGB(150, 112, 30), Enum.Font.GothamBold)
 
 	-- A marble balustrade with a gold rail rings the edge; an invisible wall
 	-- behind it stops anyone jumping off.

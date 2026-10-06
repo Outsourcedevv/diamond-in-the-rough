@@ -1,7 +1,7 @@
 --!strict
 -- The games menu on the left of the screen, in the lobby's royal white and
 -- gold: Diamond in the Rough with its live status and a Join button, more
--- slots marked Coming soon, and Back to lobby while playing. The ◀ button
+-- slots marked Coming soon, and Back to lobby while playing. The Hide button
 -- hides it to a small tab; the tab (or G) shows it again. Also turns the
 -- lobby's giant diamond on this computer.
 local Players = game:GetService("Players")
@@ -63,15 +63,34 @@ local function text(parent: Instance, properties: { [string]: any }): TextLabel
 	return label
 end
 
+-- A small cut-gem mark (a square turned on its corner) at the left of a game
+-- card: filled for a game you can play, an outline for one still to come.
+local function gemMark(card: Instance, colour: Color3, hollow: number)
+	local mark = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromOffset(37, 40),
+		Size = UDim2.fromOffset(28, 28),
+		Rotation = 45,
+		BackgroundColor3 = colour,
+		BackgroundTransparency = hollow,
+		ZIndex = 2,
+	}, card)
+	rounded(mark, 5)
+	stroke(mark, if hollow > 0 then colour else Color3.new(1, 1, 1), 2, if hollow > 0 then 0.35 else 0.2)
+	if hollow == 0 then
+		make("UIGradient", { Color = ColorSequence.new(Color3.new(1, 1, 1), colour), Rotation = -45 }, mark)
+	end
+end
+
 -- What the Diamond in the Rough card says about the round going on now, in
 -- the mountain's skin ("stone" by default, or "hay": see Skin).
 function LobbyView.status(phase: string, stone: number, skin: string?): string
 	local words = Skin.words(skin)
 	local gem = words.gem
-	if phase == "Won" then return "🏆 " .. string.upper(string.sub(gem, 1, 1)) .. string.sub(gem, 2) .. " found! A new round starts soon" end
-	if phase == "Rebuilding" then return "⛰ The " .. words.heap .. " is being rebuilt" end
-	if phase == "Holding" then return words.icon .. " Someone is holding the " .. gem .. "!" end
-	return "🔴 LIVE · " .. Format.commas(stone) .. " " .. words.material .. " left"
+	if phase == "Won" then return string.upper(string.sub(gem, 1, 1)) .. string.sub(gem, 2) .. " found! A new round starts soon" end
+	if phase == "Rebuilding" then return "The " .. words.heap .. " is being rebuilt" end
+	if phase == "Holding" then return "Someone is holding the " .. gem .. "!" end
+	return "LIVE · " .. Format.commas(stone) .. " " .. words.material .. " left"
 end
 
 -- `request` sends joinGame / leaveGame; `onChange(inGame)` runs whenever the
@@ -94,7 +113,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		Font = Enum.Font.GothamBold,
 		TextSize = 19,
 		TextColor3 = ROYAL,
-		Text = "👑 GAMES",
+		Text = "GAMES",
 		AutoButtonColor = true,
 	}, gui)
 	rounded(tab, 14)
@@ -121,15 +140,15 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	}, panel)
 
 	text(panel, {
-		Size = UDim2.new(1, -48, 0, 40),
+		Size = UDim2.new(1, -72, 0, 40),
 		Font = TITLE_FONT,
 		TextSize = 30,
 		TextColor3 = ROYAL,
-		Text = "👑 GAMES",
+		Text = "Games",
 	})
 	text(panel, {
 		Position = UDim2.fromOffset(2, 40),
-		Size = UDim2.new(1, -48, 0, 20),
+		Size = UDim2.new(1, -72, 0, 20),
 		Font = Enum.Font.GothamMedium,
 		TextSize = 14,
 		TextColor3 = MUTED,
@@ -138,14 +157,14 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	local hide = make("TextButton", {
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, 0, 0, 2),
-		Size = UDim2.fromOffset(38, 38),
+		Size = UDim2.fromOffset(64, 30),
 		BackgroundColor3 = ROYAL,
 		Font = Enum.Font.GothamBold,
-		TextSize = 18,
+		TextSize = 13,
 		TextColor3 = Color3.new(1, 1, 1),
-		Text = "◀",
+		Text = "Hide",
 	}, panel)
-	rounded(hide, 19)
+	rounded(hide, 15)
 	make("Frame", {
 		Position = UDim2.fromOffset(0, 68),
 		Size = UDim2.new(1, 0, 0, 2),
@@ -172,14 +191,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	local fill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 1 }, card)
 	rounded(fill, 14)
 	make("UIGradient", { Color = ColorSequence.new(ROYAL, ROYAL_DEEP), Rotation = 35 }, fill)
-	text(card, {
-		Position = UDim2.fromOffset(8, 10),
-		Size = UDim2.fromOffset(58, 58),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		Font = Enum.Font.GothamBold,
-		TextSize = 44,
-		Text = "💎",
-	})
+	gemMark(card, Color3.fromRGB(176, 230, 255), 0)
 	text(card, {
 		Position = UDim2.fromOffset(72, 10),
 		Size = UDim2.new(1, -80, 0, 26),
@@ -218,15 +230,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		}, list)
 		rounded(soon, 14)
 		stroke(soon, GOLD, 1.5, 0.45)
-		text(soon, {
-			Position = UDim2.fromOffset(8, 12),
-			Size = UDim2.fromOffset(58, 58),
-			TextXAlignment = Enum.TextXAlignment.Center,
-			Font = Enum.Font.GothamBold,
-			TextSize = 34,
-			TextTransparency = 0.25,
-			Text = "🔒",
-		})
+		gemMark(soon, GOLD, 1)
 		text(soon, {
 			Position = UDim2.fromOffset(72, 18),
 			Size = UDim2.new(1, -150, 0, 24),
@@ -266,7 +270,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		Font = Enum.Font.GothamBold,
 		TextSize = 18,
 		TextColor3 = ROYAL,
-		Text = "🏰 Back to lobby",
+		Text = "Back to lobby",
 		Visible = false,
 	}, list)
 	rounded(back, 12)
@@ -321,7 +325,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		local now = player:GetAttribute("InGame") == true
 		if now == inGame then return end
 		inGame = now
-		join.Text = if now then "✓ PLAYING" else "JOIN"
+		join.Text = if now then "PLAYING" else "JOIN"
 		join.BackgroundColor3 = if now then Color3.new(1, 1, 1) else GOLD
 		join.AutoButtonColor = not now
 		back.Visible = now

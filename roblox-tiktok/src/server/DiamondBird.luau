@@ -165,13 +165,13 @@ function DiamondBird.start(options: Options): Bird
 		state:SetAttribute("BirdBoostUntil", boostUntil)
 		state:SetAttribute("BirdCatcher", player.DisplayName)
 		options.notify:FireAllClients("feed", {
-			text = string.format("💎 %s caught the diamond bird! Gifts x%d for %d s", player.DisplayName, Config.BirdMultiplier, Config.BirdBoostSeconds),
+			text = string.format("%s caught the diamond bird! Gifts x%d for %d s", player.DisplayName, Config.BirdMultiplier, Config.BirdBoostSeconds),
 			stone = 0,
 			kind = "gift",
 		})
 		task.delay(Config.BirdBoostSeconds, function()
 			if boostId ~= id then return end
-			options.notify:FireAllClients("feed", { text = "💎 Double gifts are over", stone = 0, kind = "notice" })
+			options.notify:FireAllClients("feed", { text = "Double gifts are over", stone = 0, kind = "notice" })
 		end)
 	end
 
@@ -200,7 +200,7 @@ function DiamondBird.start(options: Options): Bird
 		click.MouseClick:Connect(function(player: Player) caught(player, bird) end)
 		bird.Parent = workspace
 		current = bird
-		options.notify:FireAllClients("feed", { text = "💎 A diamond bird appeared! Click it for double gifts", stone = 0, kind = "notice" })
+		options.notify:FireAllClients("feed", { text = "A diamond bird appeared! Click it for double gifts", stone = 0, kind = "notice" })
 	end
 
 	task.spawn(function()
