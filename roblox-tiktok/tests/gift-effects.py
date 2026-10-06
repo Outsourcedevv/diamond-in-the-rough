@@ -154,11 +154,13 @@ end
 
 local TIERS = { 1, 10, 100, 500, 1000, 10000 }
 local expectedShake = { false, true, true, true, true, true }
+for round = 1, 2 do
+local adding = round == 2
 for tier, coins in TIERS do
 	local before = #instances
 	emitted = 0
 	maxShake = 0
-	GiftEffects.play({ position = Vector3.new(3, 12, -2), coins = coins, name = "Tester", gift = "Gift" })
+	GiftEffects.play({ position = Vector3.new(3, 12, -2), coins = coins, name = "Tester", gift = "Gift", adding = adding, blocks = if adding then -coins * 100 else coins * 100 })
 	local parts, lights, peakParts = 0, 0, 0
 	for step = 1, 12 * 30 do
 		run(1 / 30)
@@ -189,10 +191,12 @@ for tier, coins in TIERS do
 	check(next(renderConnections) == nil, "tier " .. tier .. ": every motion stops")
 	check(not GiftEffects.shaking() and next(bound) == nil, "tier " .. tier .. ": the camera shake ends")
 	check((maxShake > 0.05) == expectedShake[tier] and maxShake < 2.5, "tier " .. tier .. ": shake is gentle (" .. string.format("%.2f", maxShake) .. " degrees)")
-	print(string.format("tier %d %-17s %2d parts (peak %2d), %d lights, %3d particles, shake %.2f deg", tier, GiftEffects.TITLES[tier], parts, peakParts, lights, emitted, maxShake))
+	print(string.format("%s tier %d %-17s %2d parts (peak %2d), %d lights, %3d particles, shake %.2f deg", if adding then "adding" else "breaking", tier,
+		(if adding then GiftEffects.ADD_TITLES else GiftEffects.TITLES)[tier], parts, peakParts, lights, emitted, maxShake))
+end
 end
 
--- Adding gifts get the green rise; the haystack skin throws hay, not stone.
+-- Adding gifts are green and named for the adding tier; the haystack skin throws hay, not stone.
 state:SetAttribute("Skin", "hay")
 local before = #instances
 GiftEffects.play({ position = Vector3.new(0, 10, 0), coins = 30, adding = true, blocks = -300, name = "Tester", gift = "Doughnut" })
@@ -201,7 +205,7 @@ local banner = nil
 for _, object in instances do
 	if object.ClassName == "TextLabel" and object.Parent and object.Parent.Name == "GiftEffects" then banner = object end
 end
-check(banner ~= nil and banner.TextColor3 == Color3.fromRGB(90, 235, 170) and string.find(banner.Text, "ROCKS RESTORED", 1, true) ~= nil, "adding gifts glow green")
+check(banner ~= nil and banner.TextColor3 == Color3.fromRGB(90, 235, 170) and string.find(banner.Text, GiftEffects.ADD_TITLES[2], 1, true) ~= nil, "adding gifts glow green")
 run(10)
 before = #instances
 GiftEffects.play({ position = Vector3.new(0, 10, 0), coins = 10, name = "Tester", gift = "Rose" })

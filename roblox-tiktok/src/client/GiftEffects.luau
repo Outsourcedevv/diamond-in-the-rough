@@ -13,7 +13,16 @@
 -- shockwave rings), neon parts, trails, lights, a gentle camera shake and a
 -- brief colour grade. At most two sequences play at once, each with a capped
 -- number of parts, lights and particles, and every piece is gone within a few
--- seconds. Adding gifts (that restore rock) get a soft green rise instead.
+-- seconds.
+--
+-- Gifts that add stone have their own six, in greens, aimed at the summit:
+--   1  PEBBLE DROP       pebbles fall onto the peak with puffs of dust
+--   2  ROCKSLIDE         a ring of rocks rises out of the slopes and tumbles in
+--   3  STONE SURGE       green veins converge, stone pillars thrust up and sink in
+--   4  BOULDER BARRAGE   boulders are hurled in from far away and crash home
+--   5  STONE CYCLONE     rocks from the valley spiral up into a cyclone, then slam down
+--   6  MOUNTAIN RISING   the ground rumbles, a colossal boulder descends, pulling
+--                        rock up from all round, and lands with a blast of light
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -48,6 +57,16 @@ local COLOURS = {
 	Color3.fromRGB(255, 220, 130), -- white gold
 }
 local GREEN = Color3.fromRGB(90, 235, 170)
+-- Gifts that add stone (the griefers' gifts) get their own six sequences, in greens.
+GiftEffects.ADD_TITLES = { "PEBBLE DROP", "ROCKSLIDE", "STONE SURGE", "BOULDER BARRAGE", "STONE CYCLONE", "MOUNTAIN RISING" }
+local ADD_COLOURS = {
+	Color3.fromRGB(150, 255, 200), -- mint
+	Color3.fromRGB(90, 235, 170), -- green
+	Color3.fromRGB(60, 225, 140), -- emerald
+	Color3.fromRGB(120, 230, 90), -- moss
+	Color3.fromRGB(70, 235, 200), -- jade
+	Color3.fromRGB(140, 255, 120), -- bright green
+}
 local WHITE = Color3.new(1, 1, 1)
 local PINK = Color3.fromRGB(255, 120, 210)
 local SMOKE_DARK = Color3.fromRGB(70, 64, 60)
@@ -151,6 +170,9 @@ function GiftEffects.start(parent: Instance, gameState: Instance?)
 	label = text
 end
 
+-- A craggy lump of rock: its parts and where each sits in the lump.
+type Lump = { parts: { Part }, offsets: { CFrame } }
+
 export type Particles = {
 	texture: string,
 	count: number,
@@ -186,7 +208,7 @@ function GiftEffects.play(data: any)
 	folder.Parent = workspace
 	table.insert(active, { folder = folder, tier = tier })
 	Debris:AddItem(folder, GiftEffects.LIFETIME)
-	local colour = if data.adding then GREEN else COLOURS[tier]
+	local colour = if data.adding then ADD_COLOURS[tier] else COLOURS[tier]
 	local centre: Vector3 = data.position
 	local skin = if state then state:GetAttribute("Skin") else nil
 	local rock = ROCK[if type(skin) == "string" and ROCK[skin] then skin else "stone"]
@@ -407,15 +429,345 @@ function GiftEffects.play(data: any)
 		return at + Vector3.new(math.cos(angle) * reach, height, math.sin(angle) * reach)
 	end
 
-	if data.adding then
-		-- Rock coming back: green motes rise from the ground with a soft ring.
-		flash(centre, 4 + tier, GREEN, 0.4)
-		shockwave(centre, 6 + tier * 2, GREEN, 0.7)
-		burst(centre, {
-			texture = TEXTURES.spark, count = 24 + tier * 8, colour = sequence(WHITE, GREEN), size = curve(0.5, 0.3, 0),
-			lifetime = { 0.8, 1.5 }, speed = { 4, 10 }, spread = 40, drag = 1.5, acceleration = Vector3.new(0, 4, 0), spin = 120,
+	-- Where the rock surface is under a point (glowing veins and cracks lie on it).
+	local mountain = workspace:FindFirstChild("Mountain", true)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = if mountain then { mountain } else {}
+	local function surface(at: Vector3): Vector3?
+		if mountain == nil then return nil end
+		local hit = workspace:Raycast(at + Vector3.new(0, 100, 0), Vector3.new(0, -220, 0), params)
+		return if hit then hit.Position + hit.Normal * 0.09 else nil
+	end
+	-- A craggy lump of rock (or hay): one block, or three for big ones, moved together.
+	local LUMP_PIECES = {
+		{ Vector3.new(1, 0.8, 0.9), CFrame.identity },
+		{ Vector3.new(0.7, 0.6, 0.75), CFrame.new(0.25, 0.2, -0.1) * CFrame.Angles(0.5, 0.3, 0.2) },
+		{ Vector3.new(0.6, 0.55, 0.6), CFrame.new(-0.25, -0.1, 0.2) * CFrame.Angles(-0.3, 0.8, 0.4) },
+	}
+	local function lump(size: number, frame: CFrame): Lump?
+		local rocks: Lump = { parts = {}, offsets = {} }
+		for index, piece in LUMP_PIECES do
+			if index > 1 and size < 1.4 then break end
+			local offset = CFrame.new(piece[2].Position * size) * piece[2].Rotation
+			local chunk = part(Enum.PartType.Block, piece[1] * size, frame * offset, rock.colour:Lerp(rock.dust, random:NextNumber(0, 0.4)), rock.material)
+			if chunk == nil then break end
+			table.insert(rocks.parts, chunk)
+			table.insert(rocks.offsets, offset)
+		end
+		return if #rocks.parts > 0 then rocks else nil
+	end
+	local function place(rocks: Lump, frame: CFrame)
+		for index, chunk in rocks.parts do chunk.CFrame = frame * rocks.offsets[index] end
+	end
+	local function vanish(rocks: Lump)
+		for _, chunk in rocks.parts do chunk:Destroy() end
+	end
+	-- Green motes rising where rock has landed.
+	local function motes(at: Vector3, count: number, power: number)
+		burst(at, {
+			texture = TEXTURES.spark, count = count, colour = sequence(WHITE, colour), size = curve(0.5, 0.3, 0),
+			lifetime = { 0.8, 1.5 }, speed = { 3 * power, 9 * power }, spread = 45, drag = 1.5, acceleration = Vector3.new(0, 4, 0), spin = 120,
 		})
-		light(point(centre + Vector3.new(0, 2, 0), 1), GREEN, 14, 2, 0.8)
+	end
+	-- Rock arriving at `at`: a puff of dust, a green glint and a small ring.
+	local function settle(at: Vector3, power: number)
+		dust(at, math.ceil(2 * power), 0.6 * power)
+		motes(at, math.ceil(5 * power), 0.7)
+		shockwave(at, 2.5 * power, colour, 0.4)
+	end
+	-- Glowing veins along the rock from `radius` out, racing in to the centre
+	-- (inward) or out from it.
+	local function veins(origin: Vector3, branches: number, radius: number, inward: boolean, width: number, seconds: number)
+		local rotation = random:NextNumber(0, math.pi * 2)
+		for branch = 1, branches do
+			local angle = rotation + branch * math.pi * 2 / branches
+			local previous = origin
+			for step = 1, 3 do
+				local bend = angle + random:NextNumber(-0.3, 0.3)
+				local flatTarget = centre + Vector3.new(math.cos(bend), 0, math.sin(bend)) * radius * step / 3
+				local target = surface(flatTarget) or Vector3.new(flatTarget.X, origin.Y, flatTarget.Z)
+				local start = previous
+				previous = target
+				local delta = target - start
+				if delta.Magnitude < 0.05 or delta.Magnitude > radius * 0.6 then continue end
+				local delay = (if inward then 3 - step else step - 1) * seconds / 3 + branch * 0.015
+				after(delay, function()
+					local frame = if inward then CFrame.lookAt(target, start) else CFrame.lookAt(start, target)
+					local vein = part(Enum.PartType.Block, Vector3.new(width, width, 0.05), frame, colour)
+					if vein == nil then return end
+					animate(vein, seconds / 3, { Size = Vector3.new(width, width, delta.Magnitude), CFrame = frame * CFrame.new(0, 0, -delta.Magnitude / 2) }, Enum.EasingStyle.Linear)
+					task.delay(seconds + 0.25 - delay, function()
+						if vein.Parent then fade(vein, 0.3, { Color = WHITE, Transparency = 1 }) end
+					end)
+				end)
+			end
+		end
+	end
+	local function towards(a: Vector3, b: Vector3, t: number): Vector3
+		return a + (b - a) * t
+	end
+
+	if data.adding then
+		-- Rock coming back.
+		local summit = surface(centre) or centre
+		if tier == 1 then
+			-- PEBBLE DROP: pebbles fall onto the peak, each with a puff of dust.
+			light(point(summit + Vector3.new(0, 2, 0), 1), colour, 10, 2, 0.8)
+			for i = 1, 5 do
+				after((i - 1) * 0.08, function()
+					local angle = random:NextNumber(0, math.pi * 2)
+					local landing = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * random:NextNumber(0, 2.5)
+					local from = landing + Vector3.new(0, random:NextNumber(9, 12), 0)
+					local rocks = lump(random:NextNumber(0.5, 0.8), CFrame.new(from))
+					if rocks == nil then return end
+					local spin = random:NextNumber(4, 9)
+					motion(0.45, function(t)
+						place(rocks, CFrame.new(towards(from, landing, t * t)) * CFrame.Angles(spin * t, spin * t * 0.6, 0))
+					end, function()
+						vanish(rocks)
+						settle(landing, 1)
+					end)
+				end)
+			end
+			after(0.55, function() shockwave(summit, 5, colour, 0.5) end)
+		elseif tier == 2 then
+			-- ROCKSLIDE: a ring of rocks rises out of the slopes and tumbles in.
+			light(point(summit + Vector3.new(0, 2, 0), 1.4), colour, 16, 3, 1.2)
+			local rotation = random:NextNumber(0, math.pi * 2)
+			for i = 1, 10 do
+				local angle = rotation + i * math.pi / 5
+				local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 9
+				local rise = (surface(flat) or (flat - Vector3.new(0, 4, 0)))
+				local rocks = lump(random:NextNumber(0.7, 1.1), CFrame.new(rise))
+				if rocks == nil then break end
+				dust(rise, 2, 0.8)
+				local lifted = rise + Vector3.new(0, 3, 0)
+				local spin = random:NextNumber(5, 10)
+				motion(0.35, function(t)
+					place(rocks, CFrame.new(towards(rise, lifted, 1 - (1 - t) ^ 3)) * CFrame.Angles(0, t * 2, 0))
+				end)
+				after(0.35 + i * 0.03, function()
+					local apex = towards(lifted, summit, 0.5) + Vector3.new(0, 3, 0)
+					motion(0.45, function(t)
+						local u = t * t
+						local position = lifted * ((1 - u) ^ 2) + apex * (2 * (1 - u) * u) + summit * (u * u)
+						place(rocks, CFrame.new(position) * CFrame.Angles(spin * t, 2 + spin * t * 0.5, 0))
+					end, function()
+						vanish(rocks)
+						settle(summit, 0.8)
+					end)
+				end)
+			end
+			after(0.95, function()
+				shockwave(summit, 11, colour, 0.6)
+				motes(summit, 20, 1)
+				addShake(0.35)
+			end)
+		elseif tier == 3 then
+			-- STONE SURGE: green veins race in from all round, stone pillars
+			-- thrust up in a ring, lean in and sink into the peak.
+			veins(summit, 6, 11, true, 0.14, 0.5)
+			light(point(summit + Vector3.new(0, 2, 0), 1.6), colour, 14, 2, 1.4)
+			after(0.5, function()
+				local rotation = random:NextNumber(0, math.pi * 2)
+				for i = 1, 6 do
+					local angle = rotation + i * math.pi / 3
+					local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 4.5
+					local base = surface(flat) or (flat - Vector3.new(0, 1, 0))
+					local height = random:NextNumber(4, 6)
+					local column = part(Enum.PartType.Cylinder, Vector3.new(0.1, 1.5, 1.5), CFrame.new(base) * CFrame.Angles(0, 0, math.pi / 2), rock.colour, rock.material)
+					if column == nil then break end
+					dust(base, 2, 1)
+					animate(column, 0.22, { Size = Vector3.new(height, 1.5, 1.5), CFrame = CFrame.new(base + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, 0, math.pi / 2) }, Enum.EasingStyle.Back)
+					after(0.5, function()
+						-- Lean the top in towards the peak while sliding into it.
+						local top = base + Vector3.new(0, height / 2, 0)
+						local inward = Vector3.new(summit.X - base.X, 0, summit.Z - base.Z).Unit
+						local axis = Vector3.new(0, 1, 0):Cross(inward)
+						motion(0.3, function(t)
+							local position = towards(top, summit + Vector3.new(0, 0.5, 0), t * t)
+							column.CFrame = CFrame.new(position) * CFrame.fromAxisAngle(axis, 1.1 * t) * CFrame.Angles(0, 0, math.pi / 2)
+							column.Size = Vector3.new(height * (1 - 0.7 * t), 1.5 * (1 - 0.5 * t), 1.5 * (1 - 0.5 * t))
+						end, function() column:Destroy() end)
+					end)
+				end
+			end)
+			after(1.32, function()
+				flash(summit + Vector3.new(0, 1, 0), 8, colour, 0.35)
+				shockwave(summit, 14, colour, 0.6)
+				dust(summit, 12, 1.5)
+				motes(summit, 30, 1.2)
+				addShake(0.5)
+			end)
+		elseif tier == 4 then
+			-- BOULDER BARRAGE: boulders hurled in from far away crash home one
+			-- after another, trailing dust.
+			local rotation = random:NextNumber(0, math.pi * 2)
+			for i = 1, 6 do
+				after((i - 1) * 0.18, function()
+					local angle = rotation + i * 1.1
+					local from = summit + Vector3.new(math.cos(angle) * 75, random:NextNumber(4, 12), math.sin(angle) * 75)
+					local landing = summit + Vector3.new(random:NextNumber(-4, 4), 0, random:NextNumber(-4, 4))
+					landing = surface(landing) or landing
+					local apex = towards(from, landing, 0.5) + Vector3.new(0, 34, 0)
+					local rocks = lump(random:NextNumber(1.6, 2.2), CFrame.new(from))
+					if rocks == nil then return end
+					local trail = Instance.new("Attachment")
+					trail.Parent = rocks.parts[1]
+					local dustTrail = emitter({
+						texture = TEXTURES.smoke, count = 0, colour = sequence(rock.dust), size = curve(1.2, 2.6), transparency = curve(0.4, 1),
+						lifetime = { 0.5, 0.8 }, speed = { 0.2, 0.8 }, glow = 0, spin = 40,
+					}, trail)
+					dustTrail.Rate = 30
+					dustTrail.Enabled = true
+					local spin = random:NextNumber(3, 6)
+					motion(0.95, function(t)
+						local position = from * ((1 - t) ^ 2) + apex * (2 * (1 - t) * t) + landing * (t * t)
+						place(rocks, CFrame.new(position) * CFrame.Angles(spin * t, spin * t * 0.7, spin * t * 0.3))
+					end, function()
+						vanish(rocks)
+						settle(landing, 1.6)
+						chunks(landing, 2, 0.8)
+						addShake(0.3)
+					end)
+				end)
+			end
+			after(2, function()
+				shockwave(summit, 18, colour, 0.7)
+				motes(summit, 34, 1.3)
+				light(point(summit + Vector3.new(0, 3, 0), 1.2), colour, 22, 3, 1)
+			end)
+		elseif tier == 5 then
+			-- STONE CYCLONE: rocks from the valley spiral up into a whirling
+			-- cyclone over the peak, then slam down into it.
+			light(point(summit + Vector3.new(0, 10, 0), 2.6), colour, 26, 3, 2.4)
+			local count = 22
+			local stones: { Lump } = {}
+			local seeds: { { number } } = {}
+			for i = 1, count do
+				local angle = i / count * math.pi * 2
+				local reach = random:NextNumber(22, 32)
+				local rocks = lump(random:NextNumber(0.6, 1.1), CFrame.new(summit))
+				if rocks == nil then break end
+				table.insert(stones, rocks)
+				-- angle, reach, start height, end height, end reach, spin speed
+				table.insert(seeds, { angle, reach, summit.Y - random:NextNumber(8, 14), summit.Y + 7 + (i % 6) * 2.2, 2.5 + (i % 4) * 1.2, 4 + (i % 3) })
+			end
+			local whirl: { Attachment } = {}
+			for i = 1, 3 do
+				local spot = point(summit, 2.4)
+				local cloud = emitter({
+					texture = TEXTURES.smoke, count = 0, colour = sequence(rock.dust, colour:Lerp(rock.dust, 0.6)), size = curve(1.5, 3.5),
+					transparency = curve(0.45, 1), lifetime = { 0.6, 1 }, speed = { 0.5, 1.5 }, glow = 0, spin = 60,
+				}, spot)
+				cloud.Rate = 24
+				cloud.Enabled = true
+				table.insert(whirl, spot)
+			end
+			local positions: { Vector3 } = {}
+			motion(1.6, function(t)
+				local ease = 1 - (1 - t) ^ 2
+				for i, rocks in stones do
+					local seed = seeds[i]
+					local angle = seed[1] + t * seed[6] * 2.2
+					local reach = seed[2] + (seed[5] - seed[2]) * ease
+					local position = Vector3.new(summit.X + math.cos(angle) * reach, seed[3] + (seed[4] - seed[3]) * ease, summit.Z + math.sin(angle) * reach)
+					positions[i] = position
+					place(rocks, CFrame.new(position) * CFrame.Angles(angle * 2, angle, 0))
+				end
+				for i, spot in whirl do
+					local angle = t * 9 + i * math.pi * 2 / 3
+					spot.Position = summit + Vector3.new(math.cos(angle) * 4, 4 + i * 3 + t * 4, math.sin(angle) * 4)
+				end
+			end, function()
+				for i, rocks in stones do
+					local from = positions[i] or summit
+					local delay = (i % 5) * 0.03
+					after(delay, function()
+						motion(0.3, function(t)
+							place(rocks, CFrame.new(towards(from, summit, t * t)) * CFrame.Angles(t * 6, t * 3, 0))
+						end, function() vanish(rocks) end)
+					end)
+				end
+			end)
+			after(1.98, function()
+				flash(summit + Vector3.new(0, 1, 0), 14, colour, 0.4)
+				grade({ Brightness = 0.2, Contrast = 0.1, TintColor = colour:Lerp(WHITE, 0.65) }, 0.05, 0.1, 0.5)
+				addShake(0.9)
+				shockwave(summit, 22, colour, 0.75)
+				after(0.1, function() shockwave(summit, 15, WHITE, 0.6) end)
+				dust(summit, 16, 2.2)
+				motes(summit, 45, 1.5)
+			end)
+		else
+			-- MOUNTAIN RISING: the sky turns, the ground rumbles and green light
+			-- cracks outward, a colossal boulder descends pulling rock up from
+			-- all round, then lands on the peak with a blast of light.
+			grade({ Brightness = -0.1, Contrast = 0.18, Saturation = -0.05, TintColor = Color3.fromRGB(205, 255, 220) }, 0.6, 2.2, 1.2)
+			for i = 0, 5 do
+				after(i * 0.3, function() addShake(0.45) end)
+			end
+			veins(summit, 8, 20, false, 0.2, 0.8)
+			local sky = summit + Vector3.new(0, 70, 0)
+			local land = summit + Vector3.new(0, 5, 0)
+			local colossus = lump(8, CFrame.new(sky))
+			local carried = Vector3.zero
+			if colossus then
+				local core = colossus.parts[1]
+				light(core, colour, 40, 4, 2.4)
+				local halo = Instance.new("Attachment")
+				halo.Parent = core
+				local rings = emitter({
+					texture = TEXTURES.ring, count = 0, colour = sequence(WHITE, colour), size = curve(9, 16),
+					transparency = curve(0.3, 1), lifetime = { 0.6, 0.6 }, speed = { 0.01, 0.01 }, spread = 0, flat = true,
+				}, halo)
+				rings.Rate = 5
+				rings.Enabled = true
+				motion(1.6, function(t)
+					local u = t * t * (3 - 2 * t)
+					carried = towards(sky, land, u)
+					place(colossus, CFrame.new(carried) * CFrame.Angles(0.15, t * 1.5, 0.1))
+				end)
+				after(0.4, function()
+					-- Rock is pulled up off the slopes into it.
+					for i = 1, 14 do
+						local angle = i / 14 * math.pi * 2 + random:NextNumber(-0.2, 0.2)
+						local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * random:NextNumber(18, 30)
+						local from = surface(flat) or (flat - Vector3.new(0, 8, 0))
+						local rocks = lump(random:NextNumber(0.7, 1.2), CFrame.new(from))
+						if rocks == nil then break end
+						dust(from, 2, 1)
+						local spin = random:NextNumber(4, 8)
+						after(i * 0.04, function()
+							motion(1.1, function(t)
+								local target = if carried.Magnitude > 0 then carried else land
+								place(rocks, CFrame.new(towards(from, target, t * t) + Vector3.new(0, math.sin(t * math.pi) * 6, 0)) * CFrame.Angles(spin * t, spin * t, 0))
+							end, function()
+								vanish(rocks)
+								motes(carried, 4, 0.6)
+							end)
+						end)
+					end
+				end)
+			end
+			after(1.62, function()
+				if colossus then
+					for _, chunk in colossus.parts do fade(chunk, 0.12, { Size = chunk.Size * 0.6, Transparency = 1 }) end
+				end
+				grade({ Brightness = 0.4, Contrast = 0.1, TintColor = Color3.fromRGB(230, 255, 236) }, 0.04, 0.08, 0.6)
+				addShake(1.4)
+				flash(summit + Vector3.new(0, 2, 0), 24, colour, 0.5)
+				shockwave(summit, 30, colour, 0.9)
+				after(0.12, function() shockwave(summit, 20, WHITE, 0.7) end)
+				after(0.3, function() shockwave(summit, 40, colour:Lerp(rock.dust, 0.4), 1.1) end)
+				dust(summit, 22, 3.5)
+				motes(summit, 60, 2)
+				column(summit, 80, 5, colour, 1.3)
+				chunks(summit, 10, 1.6)
+				light(point(summit + Vector3.new(0, 4, 0), 1.6), colour, 36, 4, 1.4)
+			end)
+		end
 	elseif tier == 1 then
 		-- SPARK BURST: a crisp golden pop, sparks and a puff of dust.
 		flash(centre, 3, colour, 0.25)
@@ -438,15 +790,6 @@ function GiftEffects.play(data: any)
 	elseif tier == 3 then
 		-- DIAMOND FRACTURE: glowing cracks race over the rock, crystals burst up
 		-- out of them, then shatter into glittering shards.
-		local mountain = workspace:FindFirstChild("Mountain", true)
-		local params = RaycastParams.new()
-		params.FilterType = Enum.RaycastFilterType.Include
-		params.FilterDescendantsInstances = if mountain then { mountain } else {}
-		local function surface(at: Vector3): Vector3?
-			if mountain == nil then return nil end
-			local hit = workspace:Raycast(at + Vector3.new(0, 100, 0), Vector3.new(0, -220, 0), params)
-			return if hit then hit.Position + hit.Normal * 0.09 else nil
-		end
 		local origin = surface(centre) or centre
 		local radius = 7 + math.clamp((data.coins - 100) / 399, 0, 1) * 5
 		local rotation = random:NextNumber(0, math.pi * 2)
@@ -694,7 +1037,7 @@ function GiftEffects.play(data: any)
 		bannerTier = tier
 		bannerSerial += 1
 		local serial = bannerSerial
-		local title = if data.adding then (if data.blocks == 0 then "MOUNTAIN FULL" elseif data.blocks == nil then "REBUILDING" else "ROCKS RESTORED") else GiftEffects.TITLES[tier]
+		local title = if data.adding then (if data.blocks == 0 then "MOUNTAIN FULL" elseif data.blocks == nil then "REBUILDING" else GiftEffects.ADD_TITLES[tier]) else GiftEffects.TITLES[tier]
 		text.Text = title .. "  ·  " .. Format.commas(data.coins) .. " COINS\n" .. tostring(data.name or "Someone") .. " sent " .. tostring(data.gift or "a gift")
 		text.TextColor3 = colour
 		if bannerTween then bannerTween:Cancel() end

@@ -894,6 +894,8 @@ local function processTikTok(event: TikTokFeed.Event)
 	local current = mountain
 	local centreKey = if current then current.grid:randomExposed() else nil
 	local preview = if current and centreKey then current:keyPosition(centreKey) else Vector3.new(0, 8, 0)
+	-- Gifts that add stone play their effect on the summit: the mountain is fed.
+	if amount < 0 and current then preview = current:summit() or preview end
 	local available = if current then current:remaining() else 0
 	local blocks = if phase == "Won" or phase == "Rebuilding" then nil elseif amount < 0 then -math.min(-amount, math.max(0, growthCapacity() - available)) else math.min(amount, available)
 	-- Start the animation promptly while the queued rock work spans frames.
