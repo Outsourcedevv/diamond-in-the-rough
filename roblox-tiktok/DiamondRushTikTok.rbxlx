@@ -11787,24 +11787,29 @@ return FirstPerson
 --   1  SPARK BURST       (1+ coins)       a crisp golden pop and a puff of dust
 --   2  SHOCKWAVE         (10+ coins)      a ground shockwave, sparks and flying rock
 --   3  DIAMOND FRACTURE  (100+ coins)     glowing cracks, then crystals burst out and shatter
---   4  ORBITAL STRIKE    (500+ coins)     a target locks on, a beam fires from the sky
---   5  GALAXY COLLAPSE   (1,000+ coins)   a swirling black hole pulls in stars, then goes nova
---   6  COSMIC BURST      (10,000+ coins)  the sky darkens, meteors fall, then a comet hits
+--   4  ORBITAL STRIKE    (500+ coins)     a target locks on, a beam fires from the sky, then a
+--                                         barrage walks round the crater and a wider beam ends it
+--   5  GALAXY COLLAPSE   (1,000+ coins)   a swirling black hole pulls in stars, goes nova, flings
+--                                         out spiral arms, then pulses again with a starlight beam
+--   6  COSMIC BURST      (10,000+ coins)  the sky darkens, a meteor storm falls, a comet hits,
+--                                         fire geysers erupt, more meteors, then a cosmic shock
 --
 -- Built from Roblox's own particle textures (sparkles, fire, smoke, embers and
 -- shockwave rings), neon parts, trails, lights, a gentle camera shake and a
 -- brief colour grade. At most two sequences play at once, each with a capped
--- number of parts, lights and particles, and every piece is gone within a few
--- seconds.
+-- number of parts, lights and particles. The small tiers are over in a second
+-- or two; the big ones run for 4 to 8 seconds. Every piece is gone soon after.
 --
 -- Gifts that add stone have their own six, in greens, aimed at the summit:
 --   1  PEBBLE DROP       pebbles fall onto the peak with puffs of dust
 --   2  ROCKSLIDE         a ring of rocks rises out of the slopes and tumbles in
 --   3  STONE SURGE       green veins converge, stone pillars thrust up and sink in
---   4  BOULDER BARRAGE   boulders are hurled in from far away and crash home
---   5  STONE CYCLONE     rocks from the valley spiral up into a cyclone, then slam down
+--   4  BOULDER BARRAGE   a dozen boulders are hurled in from far away and crash home
+--   5  STONE CYCLONE     rocks from the valley spiral up into a towering cyclone,
+--                        then slam down, and the peak blasts out a second ring
 --   6  MOUNTAIN RISING   the ground rumbles, a colossal boulder descends, pulling
---                        rock up from all round, and lands with a blast of light
+--                        rock up from all round, lands with a blast of light, and
+--                        a ring of green pillars erupts round the mountain
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -11826,9 +11831,13 @@ local TEXTURES = {
 }
 GiftEffects.TEXTURES = TEXTURES
 GiftEffects.TITLES = { "SPARK BURST", "SHOCKWAVE", "DIAMOND FRACTURE", "ORBITAL STRIKE", "GALAXY COLLAPSE", "COSMIC BURST" }
-GiftEffects.PART_LIMIT = 70 -- parts one sequence may create
-GiftEffects.LIGHT_LIMIT = 3 -- lights one sequence may create
-GiftEffects.LIFETIME = 9 -- seconds before a sequence is cleared, whatever happens
+-- Per tier: the big gifts get longer, wilder shows with room for more pieces.
+GiftEffects.PART_LIMITS = { 70, 70, 70, 110, 130, 160 } -- parts one sequence may create
+GiftEffects.LIGHT_LIMITS = { 3, 3, 3, 3, 4, 4 } -- lights one sequence may create
+GiftEffects.LIFETIMES = { 9, 9, 9, 10, 11, 12 } -- seconds before a sequence is cleared, whatever happens
+GiftEffects.PARTICLE_BUDGETS = { 400, 400, 400, 600, 700, 900 } -- particles one sequence may emit at once (checked by the tests)
+-- How long the banner stays up for each tier.
+local BANNER_SECONDS = { 1.85, 2.2, 2.55, 4.4, 5.6, 7.4 }
 
 local COLOURS = {
 	Color3.fromRGB(255, 208, 112), -- gold
@@ -11989,7 +11998,7 @@ function GiftEffects.play(data: any)
 	folder.Name = "GiftBurst"
 	folder.Parent = workspace
 	table.insert(active, { folder = folder, tier = tier })
-	Debris:AddItem(folder, GiftEffects.LIFETIME)
+	Debris:AddItem(folder, GiftEffects.LIFETIMES[tier])
 	local colour = if data.adding then ADD_COLOURS[tier] else COLOURS[tier]
 	local centre: Vector3 = data.position
 	local skin = if state then state:GetAttribute("Skin") else nil
@@ -12005,7 +12014,7 @@ function GiftEffects.play(data: any)
 		end)
 	end
 	local function part(shape: Enum.PartType, size: Vector3, frame: CFrame, tint: Color3, material: Enum.Material?): Part?
-		if not alive() or made >= GiftEffects.PART_LIMIT then return nil end
+		if not alive() or made >= GiftEffects.PART_LIMITS[tier] then return nil end
 		made += 1
 		local p = Instance.new("Part")
 		p.Shape = shape
@@ -12045,7 +12054,7 @@ function GiftEffects.play(data: any)
 		end)
 	end
 	local function light(holder: Instance, tint: Color3, range: number, brightness: number, seconds: number)
-		if lights >= GiftEffects.LIGHT_LIMIT then return end
+		if lights >= GiftEffects.LIGHT_LIMITS[tier] then return end
 		lights += 1
 		local glow = Instance.new("PointLight")
 		glow.Color = tint
@@ -12383,17 +12392,19 @@ function GiftEffects.play(data: any)
 				addShake(0.5)
 			end)
 		elseif tier == 4 then
-			-- BOULDER BARRAGE: boulders hurled in from far away crash home one
-			-- after another, trailing dust.
+			-- BOULDER BARRAGE: a dozen boulders hurled in from far away crash home
+			-- one after another, trailing dust, then the peak heaves with a ring
+			-- of light.
 			local rotation = random:NextNumber(0, math.pi * 2)
-			for i = 1, 6 do
-				after((i - 1) * 0.18, function()
+			light(point(summit + Vector3.new(0, 4, 0), 3.6), colour, 20, 1.5, 3.4)
+			for i = 1, 12 do
+				after((i - 1) * 0.22, function()
 					local angle = rotation + i * 1.1
 					local from = summit + Vector3.new(math.cos(angle) * 75, random:NextNumber(4, 12), math.sin(angle) * 75)
-					local landing = summit + Vector3.new(random:NextNumber(-4, 4), 0, random:NextNumber(-4, 4))
+					local landing = summit + Vector3.new(random:NextNumber(-5, 5), 0, random:NextNumber(-5, 5))
 					landing = surface(landing) or landing
-					local apex = towards(from, landing, 0.5) + Vector3.new(0, 34, 0)
-					local rocks = lump(random:NextNumber(1.6, 2.2), CFrame.new(from))
+					local apex = towards(from, landing, 0.5) + Vector3.new(0, random:NextNumber(28, 42), 0)
+					local rocks = lump(random:NextNumber(1.6, 2.3), CFrame.new(from))
 					if rocks == nil then return end
 					local trail = Instance.new("Attachment")
 					trail.Parent = rocks.parts[1]
@@ -12410,62 +12421,77 @@ function GiftEffects.play(data: any)
 					end, function()
 						vanish(rocks)
 						settle(landing, 1.6)
-						chunks(landing, 2, 0.8)
-						addShake(0.3)
+						chunks(landing, 1, 0.8)
+						addShake(0.35)
 					end)
 				end)
 			end
-			after(2, function()
-				shockwave(summit, 18, colour, 0.7)
-				motes(summit, 34, 1.3)
-				light(point(summit + Vector3.new(0, 3, 0), 1.2), colour, 22, 3, 1)
+			after(3.45, function()
+				flash(summit + Vector3.new(0, 1, 0), 12, colour, 0.4)
+				grade({ Brightness = 0.15, Contrast = 0.08, TintColor = colour:Lerp(WHITE, 0.7) }, 0.05, 0.1, 0.5)
+				addShake(0.8)
+				shockwave(summit, 20, colour, 0.75)
+				after(0.12, function() shockwave(summit, 13, WHITE, 0.6) end)
+				column(summit, 40, 3, colour, 0.8)
+				motes(summit, 50, 1.5)
+				dust(summit, 12, 2)
+				light(point(summit + Vector3.new(0, 3, 0), 1.3), colour, 24, 3, 1.1)
 			end)
 		elseif tier == 5 then
-			-- STONE CYCLONE: rocks from the valley spiral up into a whirling
-			-- cyclone over the peak, then slam down into it.
-			light(point(summit + Vector3.new(0, 10, 0), 2.6), colour, 26, 3, 2.4)
-			local count = 22
+			-- STONE CYCLONE: rocks from the valley spiral up into a towering,
+			-- whirling cyclone over the peak with a pulsing green core, then
+			-- slam down into it, and the peak blasts out a second ring.
+			light(point(summit + Vector3.new(0, 10, 0), 4.4), colour, 28, 3, 4.2)
+			local count = 32
+			local spinUp = 3.2
 			local stones: { Lump } = {}
 			local seeds: { { number } } = {}
 			for i = 1, count do
 				local angle = i / count * math.pi * 2
-				local reach = random:NextNumber(22, 32)
-				local rocks = lump(random:NextNumber(0.6, 1.1), CFrame.new(summit))
+				local reach = random:NextNumber(22, 34)
+				local rocks = lump(random:NextNumber(0.6, 1.2), CFrame.new(summit))
 				if rocks == nil then break end
 				table.insert(stones, rocks)
 				-- angle, reach, start height, end height, end reach, spin speed
-				table.insert(seeds, { angle, reach, summit.Y - random:NextNumber(8, 14), summit.Y + 7 + (i % 6) * 2.2, 2.5 + (i % 4) * 1.2, 4 + (i % 3) })
+				table.insert(seeds, { angle, reach, summit.Y - random:NextNumber(8, 14), summit.Y + 7 + (i % 8) * 2.4, 2.5 + (i % 5) * 1.3, 4 + (i % 3) })
 			end
 			local whirl: { Attachment } = {}
-			for i = 1, 3 do
-				local spot = point(summit, 2.4)
+			for i = 1, 4 do
+				local spot = point(summit, spinUp + 0.8)
 				local cloud = emitter({
-					texture = TEXTURES.smoke, count = 0, colour = sequence(rock.dust, colour:Lerp(rock.dust, 0.6)), size = curve(1.5, 3.5),
+					texture = TEXTURES.smoke, count = 0, colour = sequence(rock.dust, colour:Lerp(rock.dust, 0.6)), size = curve(1.5, 3.8),
 					transparency = curve(0.45, 1), lifetime = { 0.6, 1 }, speed = { 0.5, 1.5 }, glow = 0, spin = 60,
 				}, spot)
 				cloud.Rate = 24
 				cloud.Enabled = true
 				table.insert(whirl, spot)
 			end
+			-- The eye of the storm pulses brighter as it spins up.
+			local eye = part(Enum.PartType.Cylinder, Vector3.new(26, 0.8, 0.8), CFrame.new(summit + Vector3.new(0, 13, 0)) * CFrame.Angles(0, 0, math.pi / 2), colour, Enum.Material.ForceField)
 			local positions: { Vector3 } = {}
-			motion(1.6, function(t)
+			motion(spinUp, function(t)
 				local ease = 1 - (1 - t) ^ 2
 				for i, rocks in stones do
 					local seed = seeds[i]
-					local angle = seed[1] + t * seed[6] * 2.2
+					local angle = seed[1] + t * seed[6] * 4
 					local reach = seed[2] + (seed[5] - seed[2]) * ease
 					local position = Vector3.new(summit.X + math.cos(angle) * reach, seed[3] + (seed[4] - seed[3]) * ease, summit.Z + math.sin(angle) * reach)
 					positions[i] = position
 					place(rocks, CFrame.new(position) * CFrame.Angles(angle * 2, angle, 0))
 				end
 				for i, spot in whirl do
-					local angle = t * 9 + i * math.pi * 2 / 3
-					spot.Position = summit + Vector3.new(math.cos(angle) * 4, 4 + i * 3 + t * 4, math.sin(angle) * 4)
+					local angle = t * 16 + i * math.pi / 2
+					spot.Position = summit + Vector3.new(math.cos(angle) * 4.5, 4 + i * 3 + t * 6, math.sin(angle) * 4.5)
+				end
+				if eye then
+					local pulse = 0.8 + t * 2.4 + math.sin(t * 40) * 0.3
+					eye.Size = Vector3.new(26, pulse, pulse)
 				end
 			end, function()
+				if eye then fade(eye, 0.2, { Size = Vector3.new(26, 0.1, 0.1), Transparency = 1 }) end
 				for i, rocks in stones do
 					local from = positions[i] or summit
-					local delay = (i % 5) * 0.03
+					local delay = (i % 6) * 0.03
 					after(delay, function()
 						motion(0.3, function(t)
 							place(rocks, CFrame.new(towards(from, summit, t * t)) * CFrame.Angles(t * 6, t * 3, 0))
@@ -12473,81 +12499,110 @@ function GiftEffects.play(data: any)
 					end)
 				end
 			end)
-			after(1.98, function()
-				flash(summit + Vector3.new(0, 1, 0), 14, colour, 0.4)
-				grade({ Brightness = 0.2, Contrast = 0.1, TintColor = colour:Lerp(WHITE, 0.65) }, 0.05, 0.1, 0.5)
-				addShake(0.9)
-				shockwave(summit, 22, colour, 0.75)
-				after(0.1, function() shockwave(summit, 15, WHITE, 0.6) end)
-				dust(summit, 16, 2.2)
-				motes(summit, 45, 1.5)
+			after(spinUp + 0.38, function()
+				flash(summit + Vector3.new(0, 1, 0), 16, colour, 0.45)
+				grade({ Brightness = 0.22, Contrast = 0.12, TintColor = colour:Lerp(WHITE, 0.65) }, 0.05, 0.12, 0.6)
+				addShake(1.1)
+				shockwave(summit, 24, colour, 0.8)
+				after(0.1, function() shockwave(summit, 16, WHITE, 0.6) end)
+				dust(summit, 18, 2.4)
+				motes(summit, 50, 1.6)
+			end)
+			after(spinUp + 1.1, function()
+				shockwave(summit, 32, colour:Lerp(rock.dust, 0.3), 1)
+				column(summit, 50, 3.5, colour, 0.9)
+				motes(summit, 40, 2)
+				addShake(0.6)
 			end)
 		else
 			-- MOUNTAIN RISING: the sky turns, the ground rumbles and green light
-			-- cracks outward, a colossal boulder descends pulling rock up from
-			-- all round, then lands on the peak with a blast of light.
-			grade({ Brightness = -0.1, Contrast = 0.18, Saturation = -0.05, TintColor = Color3.fromRGB(205, 255, 220) }, 0.6, 2.2, 1.2)
-			for i = 0, 5 do
+			-- cracks outward, a colossal boulder descends slowly, pulling rock
+			-- up from all round, lands on the peak with a blast of light, and a
+			-- ring of green pillars erupts round the mountain.
+			local descent = 2.8
+			grade({ Brightness = -0.12, Contrast = 0.2, Saturation = -0.05, TintColor = Color3.fromRGB(205, 255, 220) }, 0.6, 3.4, 1.4)
+			for i = 0, 9 do
 				after(i * 0.3, function() addShake(0.45) end)
 			end
-			veins(summit, 8, 20, false, 0.2, 0.8)
-			local sky = summit + Vector3.new(0, 70, 0)
+			veins(summit, 8, 20, false, 0.2, 1.2)
+			local sky = summit + Vector3.new(0, 85, 0)
 			local land = summit + Vector3.new(0, 5, 0)
-			local colossus = lump(8, CFrame.new(sky))
+			local colossus = lump(9, CFrame.new(sky))
 			local carried = Vector3.zero
 			if colossus then
 				local core = colossus.parts[1]
-				light(core, colour, 40, 4, 2.4)
+				light(core, colour, 40, 4, descent + 0.8)
 				local halo = Instance.new("Attachment")
 				halo.Parent = core
 				local rings = emitter({
-					texture = TEXTURES.ring, count = 0, colour = sequence(WHITE, colour), size = curve(9, 16),
+					texture = TEXTURES.ring, count = 0, colour = sequence(WHITE, colour), size = curve(9, 18),
 					transparency = curve(0.3, 1), lifetime = { 0.6, 0.6 }, speed = { 0.01, 0.01 }, spread = 0, flat = true,
 				}, halo)
 				rings.Rate = 5
 				rings.Enabled = true
-				motion(1.6, function(t)
+				motion(descent, function(t)
 					local u = t * t * (3 - 2 * t)
 					carried = towards(sky, land, u)
-					place(colossus, CFrame.new(carried) * CFrame.Angles(0.15, t * 1.5, 0.1))
+					place(colossus, CFrame.new(carried) * CFrame.Angles(0.15, t * 2.4, 0.1))
 				end)
 				after(0.4, function()
 					-- Rock is pulled up off the slopes into it.
-					for i = 1, 14 do
-						local angle = i / 14 * math.pi * 2 + random:NextNumber(-0.2, 0.2)
-						local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * random:NextNumber(18, 30)
+					for i = 1, 26 do
+						local angle = i / 26 * math.pi * 2 + random:NextNumber(-0.2, 0.2)
+						local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * random:NextNumber(18, 32)
 						local from = surface(flat) or (flat - Vector3.new(0, 8, 0))
-						local rocks = lump(random:NextNumber(0.7, 1.2), CFrame.new(from))
+						local rocks = lump(random:NextNumber(0.7, 1.3), CFrame.new(from))
 						if rocks == nil then break end
-						dust(from, 2, 1)
+						if i % 3 == 0 then dust(from, 2, 1) end
 						local spin = random:NextNumber(4, 8)
-						after(i * 0.04, function()
-							motion(1.1, function(t)
+						after(i * 0.06, function()
+							motion(1.4, function(t)
 								local target = if carried.Magnitude > 0 then carried else land
-								place(rocks, CFrame.new(towards(from, target, t * t) + Vector3.new(0, math.sin(t * math.pi) * 6, 0)) * CFrame.Angles(spin * t, spin * t, 0))
+								place(rocks, CFrame.new(towards(from, target, t * t) + Vector3.new(0, math.sin(t * math.pi) * 8, 0)) * CFrame.Angles(spin * t, spin * t, 0))
 							end, function()
 								vanish(rocks)
-								motes(carried, 4, 0.6)
+								motes(carried, 3, 0.6)
 							end)
 						end)
 					end
 				end)
 			end
-			after(1.62, function()
+			after(descent + 0.02, function()
 				if colossus then
 					for _, chunk in colossus.parts do fade(chunk, 0.12, { Size = chunk.Size * 0.6, Transparency = 1 }) end
 				end
-				grade({ Brightness = 0.4, Contrast = 0.1, TintColor = Color3.fromRGB(230, 255, 236) }, 0.04, 0.08, 0.6)
-				addShake(1.4)
-				flash(summit + Vector3.new(0, 2, 0), 24, colour, 0.5)
-				shockwave(summit, 30, colour, 0.9)
-				after(0.12, function() shockwave(summit, 20, WHITE, 0.7) end)
-				after(0.3, function() shockwave(summit, 40, colour:Lerp(rock.dust, 0.4), 1.1) end)
-				dust(summit, 22, 3.5)
+				grade({ Brightness = 0.45, Contrast = 0.12, TintColor = Color3.fromRGB(230, 255, 236) }, 0.04, 0.1, 0.7)
+				addShake(1.5)
+				flash(summit + Vector3.new(0, 2, 0), 28, colour, 0.55)
+				shockwave(summit, 32, colour, 0.9)
+				after(0.12, function() shockwave(summit, 22, WHITE, 0.7) end)
+				after(0.3, function() shockwave(summit, 44, colour:Lerp(rock.dust, 0.4), 1.1) end)
+				dust(summit, 24, 3.5)
 				motes(summit, 60, 2)
-				column(summit, 80, 5, colour, 1.3)
+				column(summit, 90, 6, colour, 1.6)
 				chunks(summit, 10, 1.6)
-				light(point(summit + Vector3.new(0, 4, 0), 1.6), colour, 36, 4, 1.4)
+				light(point(summit + Vector3.new(0, 4, 0), 1.8), colour, 36, 4, 1.6)
+			end)
+			-- Aftershock: green pillars burst up in a ring round the mountain,
+			-- one after another, then the whole peak pulses once more.
+			local ringTurn = random:NextNumber(0, math.pi * 2)
+			for i = 1, 8 do
+				after(descent + 0.5 + i * 0.16, function()
+					local angle = ringTurn + i * math.pi / 4
+					local flat = summit + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 16
+					local foot = surface(flat) or (flat - Vector3.new(0, 6, 0))
+					column(foot, 34, 2.2, colour, 0.9)
+					settle(foot, 1.5)
+					addShake(0.4)
+				end)
+			end
+			after(descent + 2.2, function()
+				flash(summit + Vector3.new(0, 2, 0), 18, colour, 0.5)
+				shockwave(summit, 50, colour, 1.2)
+				after(0.15, function() shockwave(summit, 36, WHITE, 0.9) end)
+				motes(summit, 70, 2.4)
+				grade({ Brightness = 0.25, Contrast = 0.08, TintColor = Color3.fromRGB(225, 255, 235) }, 0.05, 0.1, 0.8)
+				addShake(0.9)
 			end)
 		end
 	elseif tier == 1 then
@@ -12644,7 +12699,8 @@ function GiftEffects.play(data: any)
 		end)
 	elseif tier == 4 then
 		-- ORBITAL STRIKE: a target ring locks on while a charge gathers high in
-		-- the sky, then a beam slams down and the ground erupts.
+		-- the sky, a beam slams down and the ground erupts, then a barrage of
+		-- strikes walks round the crater and a last, wider beam finishes it.
 		burst(centre + Vector3.new(0, 0.3, 0), {
 			texture = TEXTURES.ring, count = 1, colour = sequence(colour), size = curve(16, 3), transparency = curve(0.6, 0.1),
 			lifetime = { 0.65, 0.65 }, speed = { 0.01, 0.01 }, spread = 0, flat = true,
@@ -12682,135 +12738,269 @@ function GiftEffects.play(data: any)
 			grade({ Brightness = 0.25, Contrast = 0.1, TintColor = colour:Lerp(WHITE, 0.7) }, 0.04, 0.05, 0.45)
 			addShake(0.8)
 			fireball(centre, 22, 2, colour)
-			smokeColumn(centre, 10, 2.5, 2.2)
+			smokeColumn(centre, 10, 2.5, 3)
 			embers(centre, 30, 1.1)
 			shockwave(centre, 20, colour, 0.7)
 			after(0.12, function() shockwave(centre, 13, WHITE, 0.55) end)
-			chunks(centre, 10, 1.4)
+			chunks(centre, 8, 1.4)
 			light(point(centre + Vector3.new(0, 3, 0), 1.2), colour, 26, 4, 1)
+		end)
+		-- The barrage: four more strikes walk round the crater.
+		local turn = random:NextNumber(0, math.pi * 2)
+		for i = 1, 4 do
+			local angle = turn + i * math.pi / 2 + random:NextNumber(-0.3, 0.3)
+			local spot = centre + Vector3.new(math.cos(angle), 0, math.sin(angle)) * random:NextNumber(6, 10)
+			spot = surface(spot) or spot
+			after(1.0 + i * 0.5, function()
+				burst(spot + Vector3.new(0, 0.3, 0), {
+					texture = TEXTURES.ring, count = 1, colour = sequence(colour), size = curve(7, 1.5), transparency = curve(0.6, 0.1),
+					lifetime = { 0.3, 0.3 }, speed = { 0.01, 0.01 }, spread = 0, flat = true,
+				})
+			end)
+			after(1.3 + i * 0.5, function()
+				column(spot, 70, 1.8, WHITE, 0.4)
+				column(spot, 70, 4, colour, 0.5, Enum.Material.ForceField)
+				flash(spot, 5, colour, 0.3)
+				fireball(spot, 10, 1.4, colour)
+				sparks(spot, 16, colour, 1.1)
+				shockwave(spot, 10, colour, 0.55)
+				chunks(spot, 3, 1)
+				addShake(0.5)
+			end)
+		end
+		-- The last word: a wider beam and three rings.
+		after(3.6, function()
+			column(centre, 80, 5, WHITE, 0.7)
+			column(centre, 80, 11, colour, 0.9, Enum.Material.ForceField)
+			flash(centre, 14, colour, 0.45)
+			grade({ Brightness = 0.32, Contrast = 0.12, TintColor = colour:Lerp(WHITE, 0.65) }, 0.04, 0.1, 0.6)
+			addShake(1.1)
+			fireball(centre, 26, 2.6, colour)
+			smokeColumn(centre, 14, 3, 3.4)
+			embers(centre, 40, 1.3)
+			shockwave(centre, 26, colour, 0.8)
+			after(0.12, function() shockwave(centre, 18, WHITE, 0.6) end)
+			after(0.3, function() shockwave(centre, 34, Color3.fromRGB(255, 150, 70), 1) end)
+			chunks(centre, 8, 1.6)
+			light(point(centre + Vector3.new(0, 3, 0), 1.5), colour, 32, 4, 1.3)
 		end)
 	elseif tier == 5 then
 		-- GALAXY COLLAPSE: a black hole opens over the rock with a spinning
-		-- ring of stars, pulls in light from all round, then goes nova and
-		-- drives a beam into the mountain.
+		-- ring of stars, pulls in light from all round, then goes nova. The
+		-- stars fling out in spiral arms, the hole flickers back for a second
+		-- pulse, and a beam of starlight drives into the mountain.
 		local core = centre + Vector3.new(0, 11, 0)
+		local gather = 1.8
 		local hole = part(Enum.PartType.Ball, Vector3.one * 0.2, CFrame.new(core), Color3.new(0, 0, 0), Enum.Material.SmoothPlastic)
 		local halo = part(Enum.PartType.Ball, Vector3.one * 0.3, CFrame.new(core), colour)
-		if hole then animate(hole, 0.8, { Size = Vector3.one * 3.4 }, Enum.EasingStyle.Back) end
+		if hole then animate(hole, 0.8, { Size = Vector3.one * 3.8 }, Enum.EasingStyle.Back) end
 		if halo then
 			halo.Transparency = 0.55
-			animate(halo, 0.8, { Size = Vector3.one * 5.2 }, Enum.EasingStyle.Back)
-			light(halo, colour, 24, 3, 1.3)
+			animate(halo, 0.8, { Size = Vector3.one * 6 }, Enum.EasingStyle.Back)
+			light(halo, colour, 26, 3, gather + 0.3)
 		end
+		grade({ Brightness = -0.08, Contrast = 0.15, Saturation = 0.15, TintColor = Color3.fromRGB(225, 210, 255) }, 0.5, gather - 0.5, 0.4)
 		-- The accretion ring: stars with short trails orbiting on a tilted plane.
-		local stars: { Part } = {}
-		local tilt = CFrame.new(core) * CFrame.Angles(math.rad(18), random:NextNumber(0, math.pi), math.rad(-10))
-		for i = 1, 16 do
-			local star = part(Enum.PartType.Ball, Vector3.one * random:NextNumber(0.3, 0.55), tilt, (if i % 3 == 0 then PINK elseif i % 3 == 1 then colour else Color3.fromRGB(120, 170, 255)):Lerp(WHITE, 0.3))
-			if star == nil then break end
+		local function star(size: number, at: CFrame, tint: Color3): Part?
+			local ball = part(Enum.PartType.Ball, Vector3.one * size, at, tint)
+			if ball == nil then return nil end
 			local a = Instance.new("Attachment")
 			a.Position = Vector3.new(0, 0.2, 0)
-			a.Parent = star
+			a.Parent = ball
 			local b = Instance.new("Attachment")
 			b.Position = Vector3.new(0, -0.2, 0)
-			b.Parent = star
+			b.Parent = ball
 			local trail = Instance.new("Trail")
 			trail.Attachment0 = a
 			trail.Attachment1 = b
-			trail.Color = sequence(WHITE, star.Color)
-			trail.Lifetime = 0.25
+			trail.Color = sequence(WHITE, tint)
+			trail.Lifetime = 0.3
 			trail.LightEmission = 1
 			trail.FaceCamera = true
 			trail.WidthScale = curve(1, 0)
 			trail.Transparency = curve(0.1, 1)
-			trail.Parent = star
-			table.insert(stars, star)
+			trail.Parent = ball
+			return ball
+		end
+		local function starColour(i: number): Color3
+			return (if i % 3 == 0 then PINK elseif i % 3 == 1 then colour else Color3.fromRGB(120, 170, 255)):Lerp(WHITE, 0.3)
+		end
+		local stars: { Part } = {}
+		local tilt = CFrame.new(core) * CFrame.Angles(math.rad(18), random:NextNumber(0, math.pi), math.rad(-10))
+		for i = 1, 24 do
+			local ball = star(random:NextNumber(0.3, 0.6), tilt, starColour(i))
+			if ball == nil then break end
+			table.insert(stars, ball)
 		end
 		local phases: { number } = {}
 		local orbits: { number } = {}
 		for i = 1, #stars do
 			phases[i] = i / #stars * math.pi * 2
-			orbits[i] = random:NextNumber(4.5, 8)
+			orbits[i] = random:NextNumber(4.5, 9)
 		end
-		motion(0.95, function(t)
-			for i, star in stars do
-				local spin = phases[i] + t * (6 + 4 / orbits[i] * 6)
-				local reach = orbits[i] * (1 - 0.45 * t * t)
-				star.CFrame = tilt * CFrame.new(math.cos(spin) * reach, math.sin(spin * 3 + i) * 0.25, math.sin(spin) * reach)
+		motion(gather, function(t)
+			for i, ball in stars do
+				local spin = phases[i] + t * (9 + 4 / orbits[i] * 9)
+				local reach = orbits[i] * (1 - 0.5 * t * t)
+				ball.CFrame = tilt * CFrame.new(math.cos(spin) * reach, math.sin(spin * 3 + i) * 0.25, math.sin(spin) * reach)
 			end
 		end)
 		-- Light pulled in from a sphere round the hole.
-		local well = part(Enum.PartType.Ball, Vector3.one * 28, CFrame.new(core), WHITE)
+		local well = part(Enum.PartType.Ball, Vector3.one * 30, CFrame.new(core), WHITE)
 		if well then
 			well.Transparency = 1
 			local inward = emitter({
 				texture = TEXTURES.spark, count = 0, colour = sequence(WHITE, colour, PINK), size = curve(0.2, 0.6, 0.1),
-				transparency = curve(0.6, 0, 0.4), lifetime = { 0.45, 0.45 }, speed = { 28, 30 }, spread = 0, spin = 180,
+				transparency = curve(0.6, 0, 0.4), lifetime = { 0.45, 0.45 }, speed = { 30, 32 }, spread = 0, spin = 180,
 			}, well)
 			inward.Shape = Enum.ParticleEmitterShape.Sphere
 			inward.ShapeInOut = Enum.ParticleEmitterShapeInOut.Inward
 			inward.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
-			inward.Rate = 110
+			inward.Rate = 120
 			inward.Enabled = true
-			after(0.85, function() inward.Enabled = false end)
+			after(gather - 0.1, function() inward.Enabled = false end)
+		end
+		for i = 1, 3 do
+			after(i * 0.45, function() addShake(0.25 + i * 0.1) end)
 		end
 		-- Collapse, then nova.
-		after(0.95, function()
+		after(gather, function()
 			if hole then fade(hole, 0.12, { Size = Vector3.one * 0.1 }) end
 			if halo then fade(halo, 0.12, { Size = Vector3.one * 0.1, Transparency = 1 }) end
-			for _, star in stars do fade(star, 0.12, { Size = Vector3.one * 0.05 }) end
+			for _, ball in stars do fade(ball, 0.12, { Size = Vector3.one * 0.05 }) end
 		end)
-		after(1.08, function()
-			flash(core, 16, colour, 0.45)
-			grade({ Brightness = 0.3, Contrast = 0.15, Saturation = 0.2, TintColor = colour:Lerp(WHITE, 0.6) }, 0.05, 0.1, 0.6)
-			addShake(0.9)
-			shockwave(core, 24, colour, 0.8)
-			after(0.1, function() shockwave(core, 16, PINK, 0.7) end)
+		after(gather + 0.13, function()
+			flash(core, 18, colour, 0.5)
+			grade({ Brightness = 0.32, Contrast = 0.15, Saturation = 0.2, TintColor = colour:Lerp(WHITE, 0.6) }, 0.05, 0.1, 0.6)
+			addShake(1)
+			shockwave(core, 26, colour, 0.8)
+			after(0.1, function() shockwave(core, 18, PINK, 0.7) end)
 			burst(core, {
 				texture = TEXTURES.spark, count = 70, colour = sequence(WHITE, colour, PINK), size = curve(0.7, 0.45, 0),
 				lifetime = { 0.7, 1.4 }, speed = { 14, 30 }, drag = 3, spin = 200,
 			})
 			column(centre, 11, 2.6, colour, 0.45)
 			shockwave(centre, 22, colour, 0.7)
-			dust(centre, 16, 2)
+			dust(centre, 14, 2)
 			fireball(centre, 14, 1.6, colour)
-			chunks(centre, 10, 1.4)
+			chunks(centre, 8, 1.4)
+			light(point(core, 1.6), colour, 30, 4, 1.4)
+			-- Spiral arms: new stars fling out from the core and fade.
+			for i = 1, 18 do
+				local arm = (i % 2) * math.pi
+				local ball = star(random:NextNumber(0.35, 0.7), CFrame.new(core), starColour(i))
+				if ball == nil then break end
+				local reachOut = 8 + (i // 2) * 2.2
+				local twist = random:NextNumber(2.2, 3)
+				motion(1.6, function(t)
+					local ease = 1 - (1 - t) ^ 3
+					local angle = arm + ease * twist + (i // 2) * 0.12
+					ball.CFrame = tilt * CFrame.new(math.cos(angle) * reachOut * ease, math.sin(i + t * 4) * 0.6, math.sin(angle) * reachOut * ease)
+					ball.Transparency = math.clamp((t - 0.6) / 0.4, 0, 1)
+				end, function() ball:Destroy() end)
+			end
+		end)
+		-- The second pulse: the hole flickers back, then starlight pours down.
+		local pulseAt = gather + 1.6
+		after(pulseAt, function()
+			flash(core, 9, PINK, 0.4)
+			shockwave(core, 20, PINK, 0.7)
+			after(0.1, function() shockwave(core, 14, colour, 0.6) end)
+			addShake(0.6)
+		end)
+		after(pulseAt + 0.4, function()
+			column(centre, 60, 3.4, WHITE, 0.6)
+			column(centre, 60, 7.5, colour, 0.8, Enum.Material.ForceField)
+			burst(core + Vector3.new(0, 6, 0), {
+				texture = TEXTURES.spark, count = 60, colour = sequence(WHITE, PINK, colour), size = curve(0.6, 0.4, 0),
+				lifetime = { 1, 1.8 }, speed = { 4, 12 }, spread = 70, drag = 1, acceleration = Vector3.new(0, -18, 0), spin = 160,
+			})
+			flash(centre, 14, colour, 0.45)
+			grade({ Brightness = 0.28, Contrast = 0.12, Saturation = 0.2, TintColor = colour:Lerp(WHITE, 0.6) }, 0.04, 0.1, 0.7)
+			addShake(1.1)
+			shockwave(centre, 30, colour, 0.9)
+			after(0.12, function() shockwave(centre, 20, WHITE, 0.7) end)
+			after(0.3, function() shockwave(centre, 38, PINK, 1.1) end)
+			fireball(centre, 20, 2, colour)
+			dust(centre, 18, 2.4)
+			chunks(centre, 8, 1.6)
+			light(point(centre + Vector3.new(0, 4, 0), 1.6), colour, 34, 4, 1.4)
 		end)
 	else
-		-- COSMIC BURST: the sky darkens, meteors rain down round the target,
-		-- then a blazing comet strikes with a mushroom of fire and smoke.
-		grade({ Brightness = -0.12, Contrast = 0.2, Saturation = 0.1, TintColor = Color3.fromRGB(255, 214, 196) }, 0.5, 2.2, 1.2)
-		for i = 1, 5 do
-			after(0.15 + (i - 1) * 0.2, function()
-				local target = centre + Vector3.new(random:NextNumber(-13, 13), 0, random:NextNumber(-13, 13))
-				streak(skyPoint(target, 60, 30), target, 1.1, 0.6, colour, false, function()
-					flash(target, 3.5, colour, 0.3)
-					shockwave(target, 6, colour, 0.5)
-					sparks(target, 14, colour, 1)
-					chunks(target, 2, 0.9)
-					addShake(0.25)
+		-- COSMIC BURST: the sky darkens, a meteor storm rains down round the
+		-- target, a blazing comet strikes with a mushroom of fire and smoke,
+		-- fire geysers erupt in a ring, more meteors fall, and a final cosmic
+		-- shock rolls out across the whole valley.
+		grade({ Brightness = -0.15, Contrast = 0.22, Saturation = 0.1, TintColor = Color3.fromRGB(255, 205, 190) }, 0.5, 5.6, 1.5)
+		local function meteor(delay: number, spread: number, size: number)
+			after(delay, function()
+				local target = centre + Vector3.new(random:NextNumber(-spread, spread), 0, random:NextNumber(-spread, spread))
+				target = surface(target) or target
+				streak(skyPoint(target, 60, 30), target, size, 0.6, colour, false, function()
+					flash(target, 3.5 * size, colour, 0.3)
+					shockwave(target, 6 * size, colour, 0.5)
+					sparks(target, 12, colour, 1)
+					chunks(target, 1, 0.9)
+					addShake(0.3)
 				end)
 			end)
 		end
-		after(1.1, function()
-			streak(skyPoint(centre, 95, 60), centre, 4.5, 0.75, colour, true, function()
-				grade({ Brightness = 0.45, Contrast = 0.1, TintColor = Color3.fromRGB(255, 244, 220) }, 0.04, 0.08, 0.6)
-				addShake(1.4)
-				flash(centre, 26, colour, 0.5)
-				shockwave(centre, 34, colour, 0.9)
-				after(0.12, function() shockwave(centre, 24, WHITE, 0.7) end)
-				after(0.3, function() shockwave(centre, 42, Color3.fromRGB(255, 150, 70), 1.1) end)
-				fireball(centre, 36, 3.5, colour)
-				smokeColumn(centre, 22, 4.5, 3.4)
-				embers(centre, 60, 1.4)
+		for i = 1, 12 do
+			meteor(0.15 + (i - 1) * 0.2, 16, random:NextNumber(0.9, 1.4))
+		end
+		local impact = 2.9
+		after(impact - 0.75, function()
+			streak(skyPoint(centre, 100, 60), centre, 5, 0.75, colour, true, function()
+				grade({ Brightness = 0.5, Contrast = 0.1, TintColor = Color3.fromRGB(255, 244, 220) }, 0.04, 0.1, 0.7)
+				addShake(1.5)
+				flash(centre, 30, colour, 0.55)
+				shockwave(centre, 36, colour, 0.9)
+				after(0.12, function() shockwave(centre, 26, WHITE, 0.7) end)
+				after(0.3, function() shockwave(centre, 46, Color3.fromRGB(255, 150, 70), 1.1) end)
+				fireball(centre, 36, 3.8, colour)
+				smokeColumn(centre, 22, 4.8, 4.5)
+				embers(centre, 60, 1.5)
 				burst(centre + Vector3.new(0, 3, 0), {
 					texture = TEXTURES.spark, count = 45, colour = sequence(WHITE, colour), size = curve(0.8, 0.5, 0),
 					lifetime = { 0.8, 1.6 }, speed = { 16, 34 }, drag = 2.5, spin = 200,
 				})
-				column(centre, 100, 6, colour, 1.4)
-				chunks(centre, 14, 1.8)
-				light(point(centre + Vector3.new(0, 4, 0), 1.8), colour, 40, 5, 1.6)
+				column(centre, 110, 7, colour, 1.6)
+				chunks(centre, 12, 1.8)
+				light(point(centre + Vector3.new(0, 4, 0), 2), colour, 42, 5, 1.8)
 			end)
+		end)
+		-- Fire geysers burst up in a ring, one after another, while the ground rumbles.
+		local turn = random:NextNumber(0, math.pi * 2)
+		for i = 1, 6 do
+			after(impact + 0.6 + i * 0.22, function()
+				local angle = turn + i * math.pi / 3
+				local flat = centre + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 13
+				local foot = surface(flat) or flat
+				column(foot, 26, 2.4, Color3.fromRGB(255, 150, 70), 0.8)
+				fireball(foot, 9, 1.8, colour)
+				smokeColumn(foot, 4, 2, 2.4)
+				shockwave(foot, 7, colour, 0.5)
+				addShake(0.45)
+			end)
+		end
+		-- A second, smaller wave of meteors.
+		for i = 1, 6 do
+			meteor(impact + 1.7 + i * 0.18, 20, random:NextNumber(0.8, 1.2))
+		end
+		-- The cosmic shock: the sky flashes white and rings roll out across the valley.
+		after(impact + 3.6, function()
+			grade({ Brightness = 0.4, Contrast = 0.12, Saturation = 0.15, TintColor = Color3.fromRGB(255, 236, 225) }, 0.05, 0.12, 0.8)
+			addShake(1.2)
+			flash(centre + Vector3.new(0, 4, 0), 22, WHITE, 0.5)
+			shockwave(centre, 50, colour, 1.2)
+			after(0.15, function() shockwave(centre, 38, WHITE, 1) end)
+			after(0.35, function() shockwave(centre, 62, Color3.fromRGB(255, 150, 70), 1.4) end)
+			embers(centre, 40, 1.6)
+			burst(centre + Vector3.new(0, 6, 0), {
+				texture = TEXTURES.spark, count = 50, colour = sequence(WHITE, colour, PINK), size = curve(0.8, 0.5, 0),
+				lifetime = { 1, 1.8 }, speed = { 18, 36 }, drag = 2.5, spin = 200,
+			})
+			light(point(centre + Vector3.new(0, 6, 0), 1.6), colour, 40, 4, 1.4)
 		end)
 	end
 
@@ -12831,7 +13021,7 @@ function GiftEffects.play(data: any)
 		grow.Parent = text
 		TweenService:Create(text, TweenInfo.new(0.3, Enum.EasingStyle.Back), { Position = UDim2.fromScale(0.5, 0.30) }):Play()
 		TweenService:Create(grow, TweenInfo.new(0.3, Enum.EasingStyle.Back), { Scale = 1 }):Play()
-		task.delay(1.5 + tier * 0.35, function()
+		task.delay(BANNER_SECONDS[tier], function()
 			if serial ~= bannerSerial then return end
 			bannerTween = TweenService:Create(text, TweenInfo.new(0.45), { TextTransparency = 1, TextStrokeTransparency = 1 })
 			bannerTween:Play()

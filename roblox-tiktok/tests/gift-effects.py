@@ -162,7 +162,7 @@ for tier, coins in TIERS do
 	maxShake = 0
 	GiftEffects.play({ position = Vector3.new(3, 12, -2), coins = coins, name = "Tester", gift = "Gift", adding = adding, blocks = if adding then -coins * 100 else coins * 100 })
 	local parts, lights, peakParts = 0, 0, 0
-	for step = 1, 12 * 30 do
+	for step = 1, 14 * 30 do
 		run(1 / 30)
 		peakParts = math.max(peakParts, liveParts())
 	end
@@ -183,9 +183,9 @@ for tier, coins in TIERS do
 			check(known, "tier " .. tier .. ": only built-in particle textures: " .. tostring(object.Texture))
 		end
 	end
-	check(parts >= 2 and parts <= GiftEffects.PART_LIMIT, "tier " .. tier .. ": part budget kept (" .. parts .. ")")
-	check(lights >= 1 and lights <= GiftEffects.LIGHT_LIMIT, "tier " .. tier .. ": light budget kept (" .. lights .. ")")
-	check(emitted >= 20 and emitted <= 400, "tier " .. tier .. ": particle budget kept (" .. emitted .. ")")
+	check(parts >= 2 and parts <= GiftEffects.PART_LIMITS[tier], "tier " .. tier .. ": part budget kept (" .. parts .. ")")
+	check(lights >= 1 and lights <= GiftEffects.LIGHT_LIMITS[tier], "tier " .. tier .. ": light budget kept (" .. lights .. ")")
+	check(emitted >= 20 and emitted <= GiftEffects.PARTICLE_BUDGETS[tier], "tier " .. tier .. ": particle budget kept (" .. emitted .. ")")
 	check(liveParts() == 0 and live("ParticleEmitter") == 0 and live("Trail") == 0 and live("PointLight") == 0, "tier " .. tier .. ": nothing is left behind")
 	check(live("ColorCorrectionEffect") == 0, "tier " .. tier .. ": the colour grade is removed")
 	check(next(renderConnections) == nil, "tier " .. tier .. ": every motion stops")
@@ -229,7 +229,7 @@ for _, object in instances do
 	if object.ClassName == "Folder" and object.Name == "GiftBurst" and not object.destroyed and object.Parent == workspace then folders += 1 end
 end
 check(folders == 2, "at most two sequences at once: " .. folders)
-run(12)
+run(14)
 check(liveParts() == 0 and next(renderConnections) == nil and next(bound) == nil, "overlapping sequences clean up")
 
 -- A tiny gift never interrupts a bigger show.
@@ -242,7 +242,7 @@ for _, object in instances do
 	if object.ClassName == "Folder" and object.Name == "GiftBurst" and not object.destroyed and object.Parent == workspace then folders += 1 end
 end
 check(folders == 2, "a rose does not cut short two galaxies")
-run(12)
+run(14)
 
 print(string.format("PASS: %d gift effect checks", passed))
 '''
