@@ -245,6 +245,39 @@ server:blast(500, nil)
 deliver({ view }, server, "blast")
 verify(view, nextRound, "stale diff ignored")
 
+-- The haystack skin repaints every drawn cell in straw, in order with changes,
+-- and stone comes back exactly as it was.
+local stoneLook = {}
+for key, part in view.parts do stoneLook[key] = { part.Color, part.Material } end
+view:setSkin("hay")
+view:setSkin("bogus") -- unknown skins are ignored
+check(view:pending() == 1, "one reskin is queued")
+view:_handle(view.queue[view.head].kind, view.queue[view.head].payload)
+view.queue[view.head] = nil
+view.head += 1
+local hayMaterials = { ["Material.Grass"] = true, ["Material.Fabric"] = true }
+local repainted = 0
+for key, part in view.parts do
+	local layer, r, g, b = RockStyle.look(key, view.tops[key % 65536], view.height, "hay")
+	check(part.Color == Color3.fromRGB(r, g, b) and part.Material == "Material." .. RockStyle.HAY_LAYERS[layer].material, "drawn cells take the hay look")
+	check(hayMaterials[part.Material], "hay is straw, not stone")
+	check(part.Color.R > part.Color.B, "hay is golden")
+	repainted += 1
+end
+check(repainted > 100, "the haystack was repainted: " .. repainted)
+nextRound:blast(400, nil)
+deliver({ view }, nextRound, "hay blast")
+verify(view, nextRound, "hay blast")
+for key, part in view.parts do
+	check(hayMaterials[part.Material], "newly opened cells are hay too")
+end
+view:_repaint("stone")
+for key, part in view.parts do
+	local _, r, g, b = RockStyle.look(key, view.tops[key % 65536], view.height)
+	check(part.Color == Color3.fromRGB(r, g, b), "stone comes back")
+	if stoneLook[key] then check(stoneLook[key][1] == part.Color and stoneLook[key][2] == part.Material, "stone comes back exactly") end
+end
+
 -- Client cost of a very large gift (CPU only; rendering is Roblox's).
 local big = Mountain.new(250000, 0.4, function() end)
 local client = MountainView.new()

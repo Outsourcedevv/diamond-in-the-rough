@@ -153,14 +153,76 @@ return Config
 -- An eight-sided brilliant-cut gem, made from native triangular facets.
 -- Light crown, deeper blue pavilion and a bright table give it the familiar
 -- diamond silhouette against any background, including the open sky.
+--
+-- The haystack skin (see Skin) swaps the gem for a needle: a slim steel shaft
+-- with a sharp point, an open eye and a red thread, lying at a slant. A root
+-- part's "GemKind" attribute ("diamond" or "needle") says which it shows.
 local DiamondShape = {}
 
-export type Facet = { offset: CFrame, size: Vector3, colour: Color3, material: Enum.Material }
+-- `shape` is the part shape: a triangular facet (the default, a WedgePart),
+-- or "Block", "Cylinder" (along X) or "Ball".
+export type Facet = { offset: CFrame, size: Vector3, colour: Color3, material: Enum.Material, shape: string? }
 
 local THICKNESS = 0.006
 
--- Facet layout for a gem whose bounding size is `scale` studs, relative to its centre.
-function DiamondShape.facets(scale: number): { Facet }
+local STEEL = Color3.fromRGB(206, 212, 220)
+local THREAD = Color3.fromRGB(214, 40, 52)
+
+-- A needle about 1.3 x `scale` studs long, slanting through its centre.
+local function needle(scale: number): { Facet }
+	local list: { Facet } = {}
+	local along = Vector3.new(math.sin(math.rad(50)), math.cos(math.rad(50)), 0)
+	local across = Vector3.new(0, 0, 1)
+	local side = along:Cross(across).Unit
+	local function rod(name: string, from: number, to: number, width: number, colour: Color3, material: Enum.Material, shift: Vector3?)
+		local centre = along * ((from + to) / 2) + (shift or Vector3.zero)
+		table.insert(list, {
+			offset = CFrame.fromMatrix(centre * scale, along, side),
+			size = Vector3.new(to - from, width, width) * scale,
+			colour = colour,
+			material = material,
+			shape = name,
+		})
+	end
+	-- The shaft, then a point that narrows in steps.
+	rod("Cylinder", -0.34, 0.46, 0.09, STEEL, Enum.Material.Metal)
+	rod("Cylinder", -0.5, -0.33, 0.06, STEEL, Enum.Material.Metal)
+	rod("Cylinder", -0.62, -0.49, 0.032, STEEL, Enum.Material.Metal)
+	-- A bright glint runs down the shaft, so the needle catches the eye.
+	rod("Block", -0.3, 0.3, 0.022, Color3.fromRGB(240, 250, 255), Enum.Material.Neon, side * 0.04)
+	-- The eye: two flat prongs either side of a slot, joined by a rounded head.
+	for _, offset in { -0.032, 0.032 } do
+		rod("Block", 0.45, 0.63, 0.026, STEEL, Enum.Material.Metal, side * offset)
+	end
+	table.insert(list, {
+		offset = CFrame.new(along * 0.63 * scale),
+		size = Vector3.one * 0.09 * scale,
+		colour = STEEL,
+		material = Enum.Material.Metal,
+		shape = "Ball",
+	})
+	-- A red thread through the eye, trailing down in a loose loop.
+	local eye = along * 0.55
+	local points = { eye, eye + Vector3.new(0.16, -0.22, 0.08), eye + Vector3.new(0.3, -0.5, 0.12), eye + Vector3.new(0.42, -0.62, 0.02) }
+	for i = 1, #points - 1 do
+		local a, b = points[i], points[i + 1]
+		local direction = (b - a).Unit
+		local up = if math.abs(direction.Y) > 0.99 then Vector3.new(1, 0, 0) else Vector3.new(0, 1, 0)
+		table.insert(list, {
+			offset = CFrame.fromMatrix((a + b) / 2 * scale, direction, direction:Cross(up):Cross(direction).Unit),
+			size = Vector3.new((b - a).Magnitude + 0.02, 0.026, 0.026) * scale,
+			colour = THREAD,
+			material = Enum.Material.Fabric,
+			shape = "Cylinder",
+		})
+	end
+	return list
+end
+
+-- Facet layout for a gem whose bounding size is `scale` studs, relative to its
+-- centre. `kind` is "diamond" (the default) or "needle".
+function DiamondShape.facets(scale: number, kind: string?): { Facet }
+	if kind == "needle" then return needle(scale) end
 	local list: { Facet } = {}
 	local function triangle(a: Vector3, b: Vector3, c: Vector3, colour: Color3, material: Enum.Material)
 		local ab, ac, bc = b - a, c - a, c - b
@@ -200,12 +262,14 @@ function DiamondShape.facets(scale: number): { Facet }
 end
 
 local function facetPart(facet: Facet): Part
-	local face = Instance.new("WedgePart") :: any
+	local face = Instance.new(if facet.shape == nil then "WedgePart" else "Part") :: any
+	if facet.shape == "Cylinder" then face.Shape = Enum.PartType.Cylinder
+	elseif facet.shape == "Ball" then face.Shape = Enum.PartType.Ball end
 	face.Name = "Facet"
 	face.Size = facet.size
 	face.Color = facet.colour
 	face.Material = facet.material
-	face.Reflectance = if facet.material == Enum.Material.Neon then 0 else 0.3
+	face.Reflectance = if facet.material == Enum.Material.Neon or facet.material == Enum.Material.Fabric then 0 else 0.3
 	face.CanCollide = false
 	face.CanQuery = false
 	face.CanTouch = false
@@ -223,7 +287,8 @@ function DiamondShape.attach(root: BasePart)
 	local facets = Instance.new("Folder")
 	facets.Name = "Facets"
 	facets.Parent = root
-	for _, facet in DiamondShape.facets(root.Size.X) do
+	local kind = root:GetAttribute("GemKind")
+	for _, facet in DiamondShape.facets(root.Size.X, if type(kind) == "string" then kind else nil) do
 		local face = facetPart(facet)
 		face.CFrame = root.CFrame * facet.offset
 		face.Parent = facets
@@ -239,11 +304,11 @@ end
 -- left the old held gem's facets behind at the world origin.
 export type Gem = { model: Model, parts: { BasePart }, offsets: { CFrame }, frames: { CFrame } }
 
-function DiamondShape.build(size: number, name: string): Gem
+function DiamondShape.build(size: number, name: string, kind: string?): Gem
 	local model = Instance.new("Model")
 	model.Name = name
 	local parts: { BasePart }, offsets: { CFrame }, frames: { CFrame } = {}, {}, {}
-	for _, facet in DiamondShape.facets(size) do
+	for _, facet in DiamondShape.facets(size, kind) do
 		local face = facetPart(facet)
 		face.Anchored = true
 		face.Parent = model
@@ -276,11 +341,26 @@ function DiamondShape.resize(root: BasePart, size: Vector3)
 	DiamondShape.visible(root, visible)
 end
 
+-- Switches a world gem between the diamond and the needle, keeping its size
+-- and whether it shows.
+function DiamondShape.setKind(root: BasePart, kind: string)
+	if (root:GetAttribute("GemKind") or "diamond") == kind then return end
+	root:SetAttribute("GemKind", kind)
+	local visible = root:GetAttribute("GemVisible") == true
+	local facets = root:FindFirstChild("Facets")
+	if facets then facets:Destroy() end
+	DiamondShape.attach(root)
+	root:SetAttribute("GemVisible", nil)
+	DiamondShape.visible(root, visible)
+end
+
 function DiamondShape.visible(root: BasePart, visible: boolean)
 	if root:GetAttribute("GemVisible") == visible then return end
 	root:SetAttribute("GemVisible", visible)
 	root.Transparency = 1
-	for _, face in root.Facets:GetChildren() do
+	local facets = root:FindFirstChild("Facets")
+	if facets == nil then return end
+	for _, face in facets:GetChildren() do
 		(face :: BasePart).Transparency = if visible then 0 else 1
 	end
 end
@@ -1805,10 +1885,31 @@ RockStyle.LAYERS = {
 	{ name = "Rock", material = "Rock", colour = { 113, 108, 102 } },
 	{ name = "Slate", material = "Slate", colour = { 98, 96, 97 } },
 }
+-- The haystack skin (see Skin): the same layers in straw. Sun-bleached tops,
+-- greener fresh hay low down, packed hay beneath it and golden bales inside.
+RockStyle.HAY_LAYERS = {
+	{ name = "Bleached straw", material = "Grass", colour = { 236, 218, 152 } },
+	{ name = "Fresh hay", material = "Grass", colour = { 190, 178, 88 } },
+	{ name = "Packed hay", material = "Fabric", colour = { 150, 112, 58 } },
+	{ name = "Straw", material = "Grass", colour = { 222, 184, 94 } },
+	{ name = "Old hay", material = "Grass", colour = { 196, 154, 70 } },
+	{ name = "Bale", material = "Fabric", colour = { 174, 134, 62 } },
+}
+-- Layers and the colour of the rare flecks inside, for each skin.
+RockStyle.SKINS = {
+	stone = { layers = RockStyle.LAYERS, fleck = { 165, 160, 150 } },
+	hay = { layers = RockStyle.HAY_LAYERS, fleck = { 118, 88, 42 } },
+}
+
+-- The layer table for a skin name ("stone" when unknown).
+function RockStyle.layers(skin: string?): { { name: string, material: string, colour: { number } } }
+	return (RockStyle.SKINS[skin or "stone"] or RockStyle.SKINS.stone).layers
+end
 
 -- The layer and colour for a cell. `top` is the column's original summit
--- layer, `height` the original mountain height in layers.
-function RockStyle.look(key: number, top: number?, height: number): (number, number, number, number)
+-- layer, `height` the original mountain height in layers. `skin` picks the
+-- palette ("stone" by default, or "hay"); the layer is the same in both.
+function RockStyle.look(key: number, top: number?, height: number, skin: string?): (number, number, number, number)
 	local column = key % LAYER
 	local x, y, z = column % SPAN - 128, key // LAYER, column // SPAN - 128
 	local h = y / math.max(1, height)
@@ -1827,7 +1928,8 @@ function RockStyle.look(key: number, top: number?, height: number): (number, num
 		-- Tilted strata show in crater walls.
 		layer = if math.noise(x * 0.05, y * 0.22 + x * 0.03, z * 0.05) > 0.1 then RockStyle.SLATE else RockStyle.ROCK
 	end
-	local base = RockStyle.LAYERS[layer].colour
+	local palette = RockStyle.SKINS[skin or "stone"] or RockStyle.SKINS.stone
+	local base = palette.layers[layer].colour
 	local shade = 0.9 + sample(key, 7321441) * 0.18
 	local r, g, b = base[1] * shade, base[2] * shade, base[3] * shade
 	if layer == RockStyle.GRASS then
@@ -1835,8 +1937,8 @@ function RockStyle.look(key: number, top: number?, height: number): (number, num
 		local warm = math.clamp(math.noise(x * 0.21, z * 0.21, 9.1) + 0.5, 0, 1)
 		r, g, b = r + warm * 18, g + warm * 12, b + warm * 4
 	elseif layer >= RockStyle.ROCK and sample(key, 517927) > 0.985 then
-		-- Rare pale quartz flecks keep the rock from looking flat.
-		r, g, b = 165, 160, 150
+		-- Rare flecks (pale quartz, or dark stalks in hay) keep it from looking flat.
+		r, g, b = palette.fleck[1], palette.fleck[2], palette.fleck[3]
 	end
 	return layer, math.min(255, r), math.min(255, g), math.min(255, b)
 end
@@ -4358,13 +4460,51 @@ H44kTFtpTKosYs80HUUjx6lJBM1IIhU0wjFDne44YDAzkYybTsIMTzUjZp3NIMZikzorJ1U5ftJ0mVVJ
 ]]></string>
         </Properties>
       </Item>
+      <Item class="ModuleScript" referent="18">
+        <Properties>
+          <string name="Name">Skin</string>
+          <string name="Source"><![CDATA[--!strict
+-- The mountain's skin: stone with a diamond hidden inside (the default), or a
+-- haystack with a needle hidden in it. It is the same game, reskinned: only
+-- the rock's look (RockStyle), the gem's shape (DiamondShape) and the words on
+-- the display change. The server publishes the chosen skin as the State
+-- attribute "Skin".
+local Skin = {}
+
+export type Words = {
+	material: string, -- "stone" / "hay": what gifts blast away
+	gem: string, -- "diamond" / "needle": what you find and hold
+	heap: string, -- "mountain" / "haystack"
+	icon: string,
+}
+
+Skin.NAMES = { "stone", "hay" }
+Skin.WORDS = {
+	stone = { material = "stone", gem = "diamond", heap = "mountain", icon = "💎" },
+	hay = { material = "hay", gem = "needle", heap = "haystack", icon = "🌾" },
+} :: { [string]: Words }
+
+-- The words for a skin name; anything unknown reads as stone.
+function Skin.words(name: any): Words
+	return Skin.WORDS[name] or Skin.WORDS.stone
+end
+
+-- The gem shape for a skin (see DiamondShape.facets).
+function Skin.gem(name: any): string
+	return if name == "hay" then "needle" else "diamond"
+end
+
+return Skin
+]]></string>
+        </Properties>
+      </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="18">
+  <Item class="ServerScriptService" referent="19">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="19">
+    <Item class="Script" referent="20">
       <Properties>
         <string name="Name">DiamondRushServer</string>
         <token name="RunContext">0</token>
@@ -4384,6 +4524,7 @@ local TextChatService = game:GetService("TextChatService")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
+local Skin = require(Shared:WaitForChild("Skin"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
@@ -4428,6 +4569,8 @@ local settings = {
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
 	statues = {} :: { any },
+	theme = "default", -- the map's look: "default" (alpine), "sakura" or "farm"
+	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 }
 local saved = Store.load()
 if saved then
@@ -4475,6 +4618,8 @@ local function publishSettings()
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
+	State:SetAttribute("Theme", settings.theme)
+	State:SetAttribute("Skin", settings.skin)
 end
 
 local function saveSettings()
@@ -4514,8 +4659,19 @@ local boardSpots = Leaderboards.spots(arenaRadius, mountainRadius, spawn.Positio
 local reserved = {}
 for _, spot in boardSpots do table.insert(reserved, { at = spot.at, radius = 30 }) end
 
--- Hills, distant peaks, a lake, a pine forest, boulders and a campfire.
-require(script.Scenery).build(mountainRadius, spawn.Position, reserved)
+-- Hills, distant peaks, a lake, a pine forest, boulders and a campfire, in the
+-- saved theme (alpine, sakura or farm).
+local Scenery = require(script.Scenery)
+if Scenery.LOOKS[settings.theme] == nil then settings.theme = "default" end
+Scenery.build(mountainRadius, spawn.Position, reserved, settings.theme)
+
+-- Switches the map's theme live for everyone and remembers it.
+local function setTheme(name: string): boolean
+	if name == settings.theme or not Scenery.setTheme(name) then return false end
+	settings.theme = name
+	saveSettings()
+	return true
+end
 
 -- Every player carries a pickaxe to chip at the rock themselves.
 local function makePickaxe(): Tool
@@ -4569,6 +4725,9 @@ diamond.CanCollide = false
 diamond.CanTouch = false
 diamond.CanQuery = false
 diamond.Parent = workspace
+if Skin.WORDS[settings.skin] == nil then settings.skin = "stone" end
+-- In the haystack skin the gem is a needle (see Skin).
+diamond:SetAttribute("GemKind", Skin.gem(settings.skin))
 DiamondShape.attach(diamond)
 local glow = Instance.new("PointLight")
 glow.Color = Color3.fromRGB(140, 230, 255)
@@ -4608,6 +4767,16 @@ click.MaxActivationDistance = 0
 click.Parent = diamond
 
 local DIAMOND_TILT = CFrame.Angles(0, math.rad(22.5), 0)
+
+-- Reskins the mountain live for everyone (stone and a diamond, or hay and a
+-- needle) and remembers it. Each player's game repaints its own rock.
+local function setSkin(name: string): boolean
+	if name == settings.skin or Skin.WORDS[name] == nil then return false end
+	settings.skin = name
+	DiamondShape.setKind(diamond, Skin.gem(name))
+	saveSettings()
+	return true
+end
 
 -- Round state -------------------------------------------------------------------
 local mountain: Mountain.Mountain? = nil
@@ -5257,6 +5426,15 @@ local giftQueue: { TikTokFeed.Event } = {}
 local giftHead = 1
 local giftWorkerRunning = false
 local function onTikTok(event: TikTokFeed.Event)
+	if event.type == "theme" then
+		-- From the bridge control page's theme buttons: it changes the
+		-- scenery straight away, without waiting behind queued gifts.
+		if event.theme then setTheme(event.theme) end
+		return
+	elseif event.type == "skin" then
+		if event.skin then setSkin(event.skin) end
+		return
+	end
 	-- While the diamond bird's bonus runs, a gift counts as if it were sent
 	-- twice: double the stone blasted or added, the effect and the leaderboard
 	-- coins. It is decided on arrival, so gifts still queued keep their bonus.
@@ -5436,7 +5614,7 @@ end
 local function setInGame(player: Player, joining: boolean)
 	if (player:GetAttribute("InGame") == true) == joining then return end
 	if not joining and holder == player then
-		notice(player, "You're holding the diamond! Win or lose it first, then go back to the lobby.")
+		notice(player, "You're holding the " .. Skin.words(settings.skin).gem .. "! Win or lose it first, then go back to the lobby.")
 		return
 	end
 	local now = os.clock()
@@ -5547,6 +5725,12 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
+		return
+	elseif action == "setTheme" and type(value) == "string" then
+		setTheme(value)
+		return
+	elseif action == "setSkin" and type(value) == "string" then
+		setSkin(value)
 		return
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
@@ -5711,7 +5895,7 @@ State:SetAttribute("TikTok", "Starting…")
 newRound()
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="20">
+      <Item class="ModuleScript" referent="21">
         <Properties>
           <string name="Name">DiamondBird</string>
           <string name="Source"><![CDATA[--!strict
@@ -5939,7 +6123,536 @@ return DiamondBird
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="21">
+      <Item class="ModuleScript" referent="22">
+        <Properties>
+          <string name="Name">Farm</string>
+          <string name="Source"><![CDATA[--!strict
+-- The farm theme's own scenery: the mountain stands in a ranch corral, a
+-- timber board fence all the way round the arena except for the opening
+-- where the trail comes in from the camp, under a log arch with a hanging
+-- DIAMOND RANCH sign. Beyond the fence, in view of the spawn, is a red
+-- gambrel-roofed barn with a silo, a cornfield with a scarecrow, a windpump,
+-- a tractor, hay bales and cows grazing by a water trough. Scenery builds it
+-- once, alongside the alpine valley, and keeps it out of view until the theme
+-- is chosen (see Scenery.setTheme). Nothing here takes part in mining
+-- raycasts or touch events; the fence, gate, barn and silo can be bumped into
+-- (the fence is low enough to hop).
+local Sakura = require(script.Parent.Sakura)
+
+local Farm = {}
+
+type Kit = Sakura.Kit
+
+local BARN_RED = Color3.fromRGB(156, 46, 38)
+local TRIM = Color3.fromRGB(240, 234, 220)
+local ROOF = Color3.fromRGB(76, 72, 70)
+local TIMBER = Color3.fromRGB(132, 104, 76)
+local LOG = Color3.fromRGB(108, 80, 54)
+local STONE = Color3.fromRGB(128, 124, 116)
+local HAY = Color3.fromRGB(224, 188, 96)
+local DARK = Color3.fromRGB(46, 36, 30)
+
+Farm.GATE = 9 -- studs of open trail between the gateposts
+Farm.BARN = Vector3.new(15, 15, 21) -- the barn's width, height to the ridge and depth
+
+-- Where the trail crosses the fence's ring: the angle round the arena (from
+-- +Z, towards +X), so the opening sits on the trail wherever it bends.
+local function gateAngle(kit: Kit, radius: number): number
+	local x = 0
+	for _ = 1, 4 do
+		x = kit.pathCentre(math.sqrt(radius * radius - x * x))
+	end
+	return math.atan2(x, math.sqrt(radius * radius - x * x))
+end
+
+-- The ranch fence round the arena, and its gate arch over the trail.
+local function fence(kit: Kit, parent: Instance, random: Random)
+	local model = Instance.new("Model")
+	model.Name = "RanchFence"
+	model.Parent = parent
+	local radius = kit.radius - 3
+	local gate = gateAngle(kit, radius)
+	local half = math.asin(Farm.GATE / 2 / radius)
+	local arc = math.pi * 2 - half * 2
+	local count = math.ceil(arc * radius / 6.5)
+	local posts: { Vector3 } = {}
+	for i = 0, count do
+		local angle = gate + half + arc * i / count
+		posts[i + 1] = kit.ground(math.sin(angle) * radius, math.cos(angle) * radius)
+	end
+	for i, at in posts do
+		local centre = Vector3.new(0, at.Y + 1.8, 0)
+		if i > 1 and i < #posts then
+			kit.solid(kit.piece(model, "FencePost", Vector3.new(0.5, 4.4, 0.5), CFrame.lookAt(at + Vector3.new(0, 1.8, 0), centre), LOG, Enum.Material.Wood))
+		end
+		local nextAt = posts[i + 1]
+		if nextAt then
+			-- Three boards nailed on the outside of the posts.
+			local mid = (at + nextAt) / 2
+			local outward = Vector3.new(mid.X, 0, mid.Z).Unit * 0.32
+			for _, y in { 1.0, 2.1, 3.2 } do
+				local a, b = at + outward + Vector3.new(0, y, 0), nextAt + outward + Vector3.new(0, y, 0)
+				local tone = random:NextNumber(0.88, 1.06)
+				local colour = Color3.new(TIMBER.R * tone, TIMBER.G * tone, TIMBER.B * tone)
+				kit.solid(kit.piece(model, "FenceRail", Vector3.new((b - a).Magnitude + 0.3, 0.45, 0.16), CFrame.lookAt((a + b) / 2, b) * CFrame.Angles(0, math.pi / 2, 0), colour, Enum.Material.WoodPlanks))
+			end
+		end
+	end
+	-- The gate: two tall log posts at the ends of the fence, a log beam
+	-- across them with knee braces, and the ranch's sign hanging under it,
+	-- lettered on both faces.
+	local left, right = posts[1], posts[#posts]
+	local across = Vector3.new(right.X - left.X, 0, right.Z - left.Z).Unit
+	for _, at in { left, right } do
+		kit.solid(kit.beam(model, "GatePost", at - Vector3.new(0, 0.6, 0), at + Vector3.new(0, 11, 0), 0.95, LOG, Enum.Material.Wood))
+		kit.piece(model, "GateCap", Vector3.new(1.3, 0.3, 1.3), CFrame.new(at + Vector3.new(0, 11.1, 0)), DARK, Enum.Material.Wood)
+	end
+	local top = math.max(left.Y, right.Y) + 10.3
+	local a, b = Vector3.new(left.X, top, left.Z) - across * 1.2, Vector3.new(right.X, top, right.Z) + across * 1.2
+	kit.beam(model, "GateBeam", a, b, 0.75, LOG, Enum.Material.Wood)
+	kit.beam(model, "GateBrace", Vector3.new(left.X, top - 2.2, left.Z), Vector3.new(left.X, top - 0.2, left.Z) + across * 2, 0.35, LOG, Enum.Material.Wood)
+	kit.beam(model, "GateBrace", Vector3.new(right.X, top - 2.2, right.Z), Vector3.new(right.X, top - 0.2, right.Z) - across * 2, 0.35, LOG, Enum.Material.Wood)
+	local middle = (Vector3.new(left.X, top, left.Z) + Vector3.new(right.X, top, right.Z)) / 2 - Vector3.new(0, 2.1, 0)
+	local outward = Vector3.new(middle.X, 0, middle.Z).Unit
+	local frame = CFrame.lookAt(middle, middle + outward)
+	local sign = kit.piece(model, "RanchSign", Vector3.new(6.6, 1.7, 0.25), frame, Color3.fromRGB(138, 100, 64), Enum.Material.WoodPlanks)
+	for _, side in { -2.7, 2.7 } do
+		kit.piece(model, "SignChain", Vector3.new(0.1, 1.3, 0.1), frame * CFrame.new(side, 1.45, 0), Color3.fromRGB(56, 56, 58), Enum.Material.Metal)
+	end
+	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
+		local gui = Instance.new("SurfaceGui")
+		gui.Face = face
+		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		gui.PixelsPerStud = 50
+		gui.LightInfluence = 1
+		gui.Parent = sign
+		local text = Instance.new("TextLabel")
+		text.Size = UDim2.fromScale(1, 1)
+		text.BackgroundTransparency = 1
+		text.Font = Enum.Font.FredokaOne
+		text.TextScaled = true
+		text.TextColor3 = Color3.fromRGB(252, 238, 206)
+		text.Text = "DIAMOND RANCH"
+		text.Parent = gui
+	end
+end
+
+-- Where the barn goes: open, fairly flat ground in view of the spawn (to one
+-- side of the mountain), off the arena, camp and boards, with room for its cornfield beside it. Returns its
+-- frame (on the highest ground under it, front facing the camp) and how far
+-- its foundation must reach down, or nil.
+local FIELD = { width = 22, from = -12, to = 16 } -- beside the barn, along its depth
+local function barnSite(kit: Kit, random: Random, gap: number): (CFrame?, number)
+	local best: CFrame? = nil
+	local bestDrop, bestScore = 0, math.huge
+	local w, d = Farm.BARN.X, Farm.BARN.Z
+	for attempt = 1, 500 do
+		-- To one side of the mountain, so it does not hide the barn from the spawn.
+		local angle = (if random:NextNumber() < 0.5 then -1 else 1) * random:NextNumber(math.rad(32), math.rad(72))
+		local distance = random:NextNumber(70, 140)
+		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
+		local centre = kit.ground(spot.X, spot.Z)
+		if not kit.clear(centre, 16) and centre.Y < 26 and kit.steepness(centre.X, centre.Z) < 0.45 and kit.spaced(centre, gap) then
+			local flat = Vector3.new(centre.X, 0, centre.Z)
+			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
+			local base = CFrame.lookAt(flat, flat + facing)
+			local low, high = math.huge, -math.huge
+			for _, offset in { Vector3.new(-w / 2, 0, -d / 2), Vector3.new(w / 2, 0, -d / 2), Vector3.new(-w / 2, 0, d / 2), Vector3.new(w / 2, 0, d / 2),
+				Vector3.new(0, 0, 0), Vector3.new(w / 2 + 4.8, 0, d / 2 - 4.5) } do
+				local at = base * offset
+				local y = kit.ground(at.X, at.Z).Y
+				low, high = math.min(low, y), math.max(high, y)
+			end
+			local silo = base * Vector3.new(w / 2 + 4.8, 0, d / 2 - 4.5)
+			if high - low < 3 and not kit.clear(silo, 5) and kit.spaced(silo, 4) then
+				-- How much of the cornfield beside it is open ground.
+				local open = 0
+				for i = 0, 3 do
+					for j = 0, 3 do
+						local at = base * Vector3.new(-(w / 2 + 5 + FIELD.width * i / 3), 0, FIELD.from + (FIELD.to - FIELD.from) * j / 3)
+						local ground = kit.ground(at.X, at.Z)
+						if not kit.clear(ground, 1) and kit.spaced(ground, 2) and kit.steepness(at.X, at.Z) < 0.7 then open += 1 end
+					end
+				end
+				-- And whether a tree stands in front of it, hiding it from the camp.
+				local hidden = 0
+				for _, z in { -d / 2 - 5, -d / 2 - 11, -d / 2 - 17 } do
+					for _, x in { -5, 0, 5 } do
+						if not kit.spaced(kit.ground((base * Vector3.new(x, 0, z)).X, (base * Vector3.new(x, 0, z)).Z), 4) then hidden += 1 end
+					end
+				end
+				local score = math.abs(math.abs(angle) - math.rad(48)) * 0.6 + distance / 150 + (high - low) * 0.3 + (16 - open) * 0.12 + hidden * 0.35
+				if score < bestScore then
+					bestScore = score
+					best = base + Vector3.new(0, high + 0.6, 0)
+					bestDrop = high + 0.6 - low + 0.6
+				end
+			end
+		end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	return best, bestDrop
+end
+
+-- The barn and its silo, built in `base`'s frame: the floor at its origin,
+-- the front (with the big doors and the hayloft) facing -Z.
+local function barn(kit: Kit, parent: Instance, base: CFrame, drop: number): Model
+	local model = Instance.new("Model")
+	model.Name = "Barn"
+	model.Parent = parent
+	local w, d = Farm.BARN.X, Farm.BARN.Z
+	local eave, breakX, breakY, ridge = 8, 5, 12.6, Farm.BARN.Y
+	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
+		return kit.piece(model, name, size, base * offset, colour, material, kind)
+	end
+	local function wall(name: string, size: Vector3, offset: CFrame)
+		kit.solid(put(name, size, offset, BARN_RED, Enum.Material.WoodPlanks))
+	end
+	-- A board from (x1, y1) to (x2, y2) across the barn's width, `depth` long,
+	-- raised `lift` off the line on its upper side.
+	local function slab(name: string, x1: number, y1: number, x2: number, y2: number, z: number, depth: number, thick: number, lift: number, colour: Color3, material: Enum.Material)
+		local angle = math.atan2(y2 - y1, x2 - x1)
+		local up = Vector3.new(-math.sin(angle), math.cos(angle), 0) * lift
+		local length = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2) + 0.3
+		put(name, Vector3.new(length, thick, depth), CFrame.new((x1 + x2) / 2 + up.X, (y1 + y2) / 2 + up.Y, z) * CFrame.Angles(0, 0, angle), colour, material)
+	end
+	kit.solid(put("BarnFoundation", Vector3.new(w + 0.8, drop, d + 0.8), CFrame.new(0, -drop / 2, 0), STONE, Enum.Material.Cobblestone))
+	-- Walls, with the big door opening in the front.
+	wall("BarnWall", Vector3.new(w, eave, 0.4), CFrame.new(0, eave / 2, d / 2))
+	for _, side in { -1, 1 } do
+		wall("BarnWall", Vector3.new(0.4, eave, d), CFrame.new(side * w / 2, eave / 2, 0))
+		wall("BarnWall", Vector3.new((w - 7) / 2, eave, 0.4), CFrame.new(side * (3.5 + (w - 7) / 4), eave / 2, -d / 2))
+	end
+	wall("BarnWall", Vector3.new(7, eave - 7, 0.4), CFrame.new(0, 7 + (eave - 7) / 2, -d / 2))
+	-- Gambrel gables front and back: a middle panel and four wedges.
+	for _, z in { -d / 2, d / 2 } do
+		wall("BarnGable", Vector3.new(breakX * 2, breakY - eave, 0.4), CFrame.new(0, (eave + breakY) / 2, z))
+		for _, side in { -1, 1 } do
+			-- Each wedge rises towards the middle of the barn.
+			local turn = if side > 0 then CFrame.Angles(0, -math.pi / 2, 0) else CFrame.Angles(0, math.pi / 2, 0)
+			kit.solid(put("BarnGable", Vector3.new(0.4, breakY - eave, w / 2 - breakX), CFrame.new(side * (breakX + (w / 2 - breakX) / 2), (eave + breakY) / 2, z) * turn, BARN_RED, Enum.Material.WoodPlanks, "WedgePart"))
+			kit.solid(put("BarnGable", Vector3.new(0.4, ridge - breakY, breakX), CFrame.new(side * breakX / 2, (breakY + ridge) / 2, z) * turn, BARN_RED, Enum.Material.WoodPlanks, "WedgePart"))
+		end
+	end
+	-- The roof: steep lower slopes and shallow upper ones, overhanging the walls.
+	for _, side in { -1, 1 } do
+		local outer, inner = side * (w / 2 + 0.7), side * breakX
+		local x1, y1, x2, y2 = math.min(outer, inner), if side < 0 then eave - 0.5 else breakY, math.max(outer, inner), if side < 0 then breakY else eave - 0.5
+		slab("BarnRoof", x1, y1, x2, y2, 0, d + 1.6, 0.35, 0.3, ROOF, Enum.Material.RoofShingles)
+		local u1, v1, u2, v2 = math.min(inner, 0), if side < 0 then breakY else ridge, math.max(inner, 0), if side < 0 then ridge else breakY
+		slab("BarnRoof", u1, v1, u2, v2, 0, d + 1.6, 0.35, 0.3, ROOF, Enum.Material.RoofShingles)
+		-- White trim along the front gable's edge.
+		slab("BarnTrim", x1, y1, x2, y2, -d / 2 - 0.25, 0.2, 0.4, 0, TRIM, Enum.Material.WoodPlanks)
+		slab("BarnTrim", u1, v1, u2, v2, -d / 2 - 0.25, 0.2, 0.4, 0, TRIM, Enum.Material.WoodPlanks)
+	end
+	put("BarnRidge", Vector3.new(0.6, 0.35, d + 1.8), CFrame.new(0, ridge + 0.35, 0), ROOF, Enum.Material.Wood)
+	put("BarnTrim", Vector3.new(w + 0.2, 0.4, 0.2), CFrame.new(0, eave, -d / 2 - 0.25), TRIM, Enum.Material.WoodPlanks)
+	for _, x in { -w / 2, w / 2 } do
+		for _, z in { -d / 2, d / 2 } do
+			put("BarnTrim", Vector3.new(0.55, eave, 0.55), CFrame.new(x, eave / 2, z), TRIM, Enum.Material.WoodPlanks)
+		end
+	end
+	-- The big doors: closed, framed in white with a white X on each leaf.
+	local front = -d / 2 - 0.22
+	put("BarnDoor", Vector3.new(7, 7, 0.2), CFrame.new(0, 3.5, front + 0.12), Color3.fromRGB(140, 40, 34), Enum.Material.WoodPlanks)
+	put("BarnTrim", Vector3.new(7.5, 0.35, 0.16), CFrame.new(0, 7.05, front), TRIM, Enum.Material.WoodPlanks)
+	for _, x in { -3.6, 0, 3.6 } do
+		put("BarnTrim", Vector3.new(0.35, 7, 0.16), CFrame.new(x, 3.5, front), TRIM, Enum.Material.WoodPlanks)
+	end
+	local cross = math.atan2(6.6, 3.2)
+	for _, x in { -1.8, 1.8 } do
+		for _, sign in { -1, 1 } do
+			put("BarnTrim", Vector3.new(math.sqrt(6.6 ^ 2 + 3.2 ^ 2), 0.3, 0.12), CFrame.new(x, 3.5, front - 0.02) * CFrame.Angles(0, 0, sign * cross), TRIM, Enum.Material.WoodPlanks)
+		end
+	end
+	put("DoorTrack", Vector3.new(15, 0.25, 0.3), CFrame.new(0, 7.45, front - 0.1), DARK, Enum.Material.Metal)
+	-- The hayloft: an open door with hay showing, and a hoist beam above it.
+	local loft = (eave + breakY) / 2 + 0.3
+	put("Hayloft", Vector3.new(3, 3.2, 0.1), CFrame.new(0, loft, front + 0.1), DARK, Enum.Material.Wood)
+	for _, x in { -1.6, 1.6 } do
+		put("BarnTrim", Vector3.new(0.3, 3.6, 0.16), CFrame.new(x, loft, front), TRIM, Enum.Material.WoodPlanks)
+	end
+	put("BarnTrim", Vector3.new(3.5, 0.3, 0.16), CFrame.new(0, loft + 1.75, front), TRIM, Enum.Material.WoodPlanks)
+	put("HayBale", Vector3.new(2.6, 1.1, 1.2), CFrame.new(0, loft - 1.05, front + 0.2), HAY, Enum.Material.Grass)
+	put("HoistBeam", Vector3.new(0.5, 0.5, 2.6), CFrame.new(0, ridge - 0.7, -d / 2 - 1.1), LOG, Enum.Material.Wood)
+	put("HoistRope", Vector3.new(0.08, 2.6, 0.08), CFrame.new(0, ridge - 2.2, -d / 2 - 2.1), Color3.fromRGB(196, 170, 120), Enum.Material.Fabric)
+	-- Windows down each side.
+	for _, side in { -1, 1 } do
+		for _, z in { -d / 4, d / 4 } do
+			put("BarnTrim", Vector3.new(0.12, 2.4, 2.4), CFrame.new(side * (w / 2 + 0.22), 4.8, z), TRIM, Enum.Material.WoodPlanks)
+			put("BarnWindow", Vector3.new(0.14, 1.8, 1.8), CFrame.new(side * (w / 2 + 0.25), 4.8, z), Color3.fromRGB(52, 60, 70), Enum.Material.Glass)
+		end
+	end
+	-- A cupola with a weathervane on the ridge.
+	put("Cupola", Vector3.new(2.2, 1.8, 2.2), CFrame.new(0, ridge + 1.3, 0), TRIM, Enum.Material.WoodPlanks)
+	for _, side in { -1, 1 } do
+		slab("CupolaRoof", if side < 0 then -1.6 else 0, if side < 0 then ridge + 2.1 else ridge + 3.1, if side < 0 then 0 else 1.6, if side < 0 then ridge + 3.1 else ridge + 2.1, 0, 2.8, 0.25, 0.15, ROOF, Enum.Material.RoofShingles)
+	end
+	put("VanePole", Vector3.new(0.12, 2.2, 0.12), CFrame.new(0, ridge + 4.2, 0), DARK, Enum.Material.Metal)
+	put("VaneArrow", Vector3.new(0.12, 0.12, 2), CFrame.new(0, ridge + 4.7, 0) * CFrame.Angles(0, 0.6, 0), DARK, Enum.Material.Metal)
+	put("VaneCross", Vector3.new(1.2, 0.08, 0.08), CFrame.new(0, ridge + 4.1, 0), DARK, Enum.Material.Metal)
+	-- A warm lamp over the doors.
+	put("LampArm", Vector3.new(0.15, 0.15, 1), CFrame.new(0, 8.2, -d / 2 - 0.6), DARK, Enum.Material.Metal)
+	local lamp = put("BarnLamp", Vector3.new(0.6, 0.35, 0.6), CFrame.new(0, 7.95, -d / 2 - 1.05), Color3.fromRGB(255, 200, 124), Enum.Material.Neon)
+	lamp.CastShadow = false
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 192, 122)
+	light.Range = 14
+	light.Brightness = 0.8
+	light.Shadows = false
+	light.Parent = lamp
+	-- The silo behind one side: concrete staves, iron hoops and a domed cap.
+	local siloAt = base * Vector3.new(w / 2 + 4.8, 0, d / 2 - 4.5)
+	local foot = kit.ground(siloAt.X, siloAt.Z).Y - 0.6
+	local height = base.Position.Y + 21
+	kit.solid(kit.beam(model, "Silo", Vector3.new(siloAt.X, foot, siloAt.Z), Vector3.new(siloAt.X, height, siloAt.Z), 7, Color3.fromRGB(196, 190, 178), Enum.Material.Concrete))
+	for _, y in { 4, 9, 14, 19 } do
+		local at = base.Position.Y + y
+		kit.beam(model, "SiloHoop", Vector3.new(siloAt.X, at, siloAt.Z), Vector3.new(siloAt.X, at + 0.25, siloAt.Z), 7.16, Color3.fromRGB(70, 70, 72), Enum.Material.Metal)
+	end
+	local dome = kit.piece(model, "SiloDome", Vector3.new(7.1, 7.1, 7.1), CFrame.new(siloAt.X, height, siloAt.Z), Color3.fromRGB(178, 182, 186), Enum.Material.Metal) :: Part
+	dome.Shape = Enum.PartType.Ball
+	put("SiloChute", Vector3.new(1.1, 17, 1.1), CFrame.new(w / 2 + 1.5, 8.5, d / 2 - 4.5), BARN_RED, Enum.Material.WoodPlanks)
+	return model
+end
+
+-- A blocky cow at `at` on the ground, facing `facing`; grazing ones lower their heads.
+local function cow(kit: Kit, parent: Instance, at: Vector3, facing: Vector3, grazing: boolean)
+	local model = Instance.new("Model")
+	model.Name = "Cow"
+	model.Parent = parent
+	local frame = CFrame.lookAt(at, at + facing)
+	local white, black, pink = Color3.fromRGB(238, 234, 226), Color3.fromRGB(38, 34, 34), Color3.fromRGB(232, 162, 160)
+	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3)
+		kit.piece(model, name, size, frame * offset, colour, Enum.Material.SmoothPlastic)
+	end
+	put("CowBody", Vector3.new(1.6, 1.5, 3.2), CFrame.new(0, 2.05, 0), white)
+	put("CowPatch", Vector3.new(1.66, 0.8, 1), CFrame.new(0, 2.3, -0.6), black)
+	put("CowPatch", Vector3.new(1.66, 0.7, 0.8), CFrame.new(0, 1.85, 0.9), black)
+	for _, x in { -0.55, 0.55 } do
+		for _, z in { -1.2, 1.2 } do
+			put("CowLeg", Vector3.new(0.4, 1.4, 0.4), CFrame.new(x, 0.7, z), white)
+		end
+	end
+	local head = if grazing then CFrame.new(0, 1.35, -1.95) * CFrame.Angles(math.rad(-35), 0, 0) else CFrame.new(0, 2.6, -1.95)
+	put("CowHead", Vector3.new(1, 1, 1.1), head, white)
+	put("CowSnout", Vector3.new(0.9, 0.5, 0.3), head * CFrame.new(0, -0.2, -0.65), pink)
+	for _, x in { -0.65, 0.65 } do
+		put("CowEar", Vector3.new(0.4, 0.15, 0.22), head * CFrame.new(x, 0.35, 0.2), black)
+	end
+	put("CowTail", Vector3.new(0.14, 1.2, 0.14), CFrame.new(0, 2, 1.65), black)
+	put("CowUdder", Vector3.new(0.6, 0.3, 0.6), CFrame.new(0, 1.2, 0.7), pink)
+end
+
+-- A little red tractor, its front facing -Z of `frame`.
+local function tractor(kit: Kit, parent: Instance, frame: CFrame)
+	local model = Instance.new("Model")
+	model.Name = "Tractor"
+	model.Parent = parent
+	local red, black, yellow = Color3.fromRGB(176, 40, 32), Color3.fromRGB(34, 32, 32), Color3.fromRGB(232, 184, 52)
+	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material)
+		kit.piece(model, name, size, frame * offset, colour, material)
+	end
+	local function wheel(x: number, y: number, z: number, size: number, width: number)
+		kit.beam(model, "TractorWheel", frame * Vector3.new(x - width / 2, y, z), frame * Vector3.new(x + width / 2, y, z), size, black, Enum.Material.Rubber)
+		kit.beam(model, "TractorHub", frame * Vector3.new(x - width / 2 - 0.03, y, z), frame * Vector3.new(x + width / 2 + 0.03, y, z), size * 0.45, yellow, Enum.Material.Metal)
+	end
+	put("TractorBody", Vector3.new(1.5, 1, 3.6), CFrame.new(0, 1.7, 0), red, Enum.Material.Metal)
+	put("TractorHood", Vector3.new(1.3, 1, 2.1), CFrame.new(0, 2.6, -0.75), red, Enum.Material.Metal)
+	put("TractorGrille", Vector3.new(1.2, 0.9, 0.1), CFrame.new(0, 2.6, -1.82), black, Enum.Material.Metal)
+	put("TractorSeat", Vector3.new(0.9, 0.25, 0.8), CFrame.new(0, 2.75, 1.15), black, Enum.Material.Fabric)
+	put("TractorSeat", Vector3.new(0.9, 0.9, 0.2), CFrame.new(0, 3.2, 1.55), black, Enum.Material.Fabric)
+	put("TractorWheelArch", Vector3.new(3.6, 0.2, 2), CFrame.new(0, 3.1, 1.1), red, Enum.Material.Metal)
+	kit.beam(model, "TractorStack", frame * Vector3.new(0.35, 3, -1.2), frame * Vector3.new(0.35, 4.4, -1.2), 0.22, black, Enum.Material.Metal)
+	kit.beam(model, "TractorSteering", frame * Vector3.new(0, 3.3, 0.35), frame * Vector3.new(0, 3.45, 0.55), 0.8, black, Enum.Material.Metal)
+	wheel(-1.35, 1.5, 1.1, 3, 0.8)
+	wheel(1.35, 1.5, 1.1, 3, 0.8)
+	wheel(-0.85, 0.7, -1.5, 1.4, 0.45)
+	wheel(0.85, 0.7, -1.5, 1.4, 0.45)
+end
+
+-- A windpump: a steel lattice tower with a bladed wheel and tail vane, the
+-- wheel facing -Z of `frame` (on the ground).
+local function windpump(kit: Kit, parent: Instance, frame: CFrame)
+	local model = Instance.new("Model")
+	model.Name = "Windpump"
+	model.Parent = parent
+	local steel, blade = Color3.fromRGB(150, 152, 150), Color3.fromRGB(200, 200, 194)
+	local h = 17
+	local function leg(sx: number, sz: number, y: number): Vector3
+		local spread = 2.2 - 1.7 * y / h
+		return frame * Vector3.new(sx * spread, y, sz * spread)
+	end
+	local corners = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }
+	for i, c in corners do
+		local foot = leg(c[1], c[2], 0)
+		local ground = kit.ground(foot.X, foot.Z).Y - frame.Position.Y
+		kit.solid(kit.beam(model, "PumpLeg", leg(c[1], c[2], ground - 0.4), leg(c[1], c[2], h), 0.25, steel, Enum.Material.Metal))
+		local n = corners[i % 4 + 1]
+		for _, y in { 4.5, 9, 13.5 } do
+			kit.beam(model, "PumpGirt", leg(c[1], c[2], y), leg(n[1], n[2], y), 0.14, steel, Enum.Material.Metal)
+		end
+	end
+	kit.piece(model, "PumpPlatform", Vector3.new(1.8, 0.2, 1.8), frame * CFrame.new(0, h, 0), steel, Enum.Material.Metal)
+	local hub = frame * CFrame.new(0, h + 1.2, -0.9)
+	kit.beam(model, "PumpHub", hub * Vector3.new(0, 0, -0.3), hub * Vector3.new(0, 0, 0.6), 0.6, Color3.fromRGB(70, 70, 72), Enum.Material.Metal)
+	for k = 0, 11 do
+		kit.piece(model, "PumpBlade", Vector3.new(0.7, 2.4, 0.08), hub * CFrame.Angles(0, 0, k * math.pi / 6) * CFrame.new(0, 1.85, -0.2) * CFrame.Angles(0, 0.35, 0), blade, Enum.Material.Metal)
+	end
+	kit.beam(model, "PumpBoom", hub * Vector3.new(0, 0, 0.3), hub * Vector3.new(0, 0, 4.2), 0.16, steel, Enum.Material.Metal)
+	kit.piece(model, "PumpVane", Vector3.new(0.08, 1.6, 2.2), hub * CFrame.new(0, 0.2, 4.6), Color3.fromRGB(176, 40, 32), Enum.Material.Metal)
+	kit.beam(model, "PumpRod", frame * Vector3.new(0, 0.6, 0), frame * Vector3.new(0, h, 0), 0.1, Color3.fromRGB(70, 70, 72), Enum.Material.Metal)
+end
+
+-- Builds the theme's scenery into a new folder (not yet parented).
+function Farm.build(kit: Kit): Folder
+	local folder = Instance.new("Folder")
+	folder.Name = "FarmScenery"
+	-- Its own seed, so the alpine valley is laid out the same with or without it.
+	local random = Random.new(6131)
+	fence(kit, folder, random)
+	local site, drop = nil, 0
+	for _, gap in { 12, 8, 5 } do
+		site, drop = barnSite(kit, random, gap)
+		if site then break end
+	end
+	if site == nil then
+		warn("[DiamondRush] Farm: no open ground for the barn, so it is left out.")
+		return folder
+	end
+	local base = site :: CFrame
+	barn(kit, folder, base, drop)
+	local w, d = Farm.BARN.X, Farm.BARN.Z
+	local flatLook = Vector3.new(base.LookVector.X, 0, base.LookVector.Z)
+	-- A point's place in the barn's frame (across, along), ignoring height.
+	local function toLocal(at: Vector3): Vector3
+		local offset, right = at - base.Position, base.RightVector
+		return Vector3.new(offset.X * right.X + offset.Z * right.Z, 0, -(offset.X * flatLook.X + offset.Z * flatLook.Z))
+	end
+	-- Somewhere open on the ground near the barn, in its frame, or nil.
+	local function spot(x: number, z: number, margin: number): Vector3?
+		local at = base * Vector3.new(x, 0, z)
+		local ground = kit.ground(at.X, at.Z)
+		if kit.clear(ground, margin) or not kit.spaced(ground, margin) or kit.steepness(at.X, at.Z) > 0.8 then return nil end
+		return ground
+	end
+	-- The cornfield beside the barn: rows of corn on ridged earth, broken
+	-- where a tree or rock stands in the way, with a scarecrow keeping watch.
+	local field = Instance.new("Model")
+	field.Name = "Cornfield"
+	field.Parent = folder
+	local rows = 10
+	for i = 0, rows - 1 do
+		local x = -(w / 2 + 5 + FIELD.width * i / (rows - 1))
+		local run: { Vector3 } = {}
+		local function plant()
+			if #run >= 3 then
+				local a, b = run[1], run[#run]
+				local corn = Color3.fromRGB(92 + (i % 3) * 6, 132 + (i % 2) * 8, 50)
+				local length = (b - a).Magnitude + 2
+				local along = CFrame.lookAt((a + b) / 2, b)
+				kit.piece(field, "FieldRidge", Vector3.new(1.6, 0.6, length + 0.6), along, Color3.fromRGB(104, 78, 54), Enum.Material.Ground)
+				kit.piece(field, "Corn", Vector3.new(1, 2.8, length), along * CFrame.new(0, 1.5, 0), corn, Enum.Material.LeafyGrass)
+				kit.piece(field, "CornTassels", Vector3.new(0.6, 0.3, length - 0.4), along * CFrame.new(0, 3.05, 0), Color3.fromRGB(222, 192, 104), Enum.Material.Grass)
+			end
+			run = {}
+		end
+		for z = FIELD.from, FIELD.to, 2 do
+			local at = spot(x, z, 1.5)
+			if at then table.insert(run, at) else plant() end
+		end
+		plant()
+		if i % 3 == 2 then task.wait() end
+	end
+	local scarecrowAt = spot(-(w / 2 + 5 + FIELD.width / 2) + 1.2, FIELD.from - 2.5, 1)
+	if scarecrowAt then
+		local at = scarecrowAt :: Vector3
+		local frame = CFrame.lookAt(at, at + flatLook)
+		local model = Instance.new("Model")
+		model.Name = "Scarecrow"
+		model.Parent = field
+		kit.piece(model, "ScarecrowPost", Vector3.new(0.25, 5.4, 0.25), frame * CFrame.new(0, 2.4, 0), LOG, Enum.Material.Wood)
+		kit.piece(model, "ScarecrowArms", Vector3.new(3.4, 0.25, 0.25), frame * CFrame.new(0, 3.9, 0), LOG, Enum.Material.Wood)
+		kit.piece(model, "ScarecrowShirt", Vector3.new(1.3, 1.6, 0.6), frame * CFrame.new(0, 3.5, 0), Color3.fromRGB(70, 96, 150), Enum.Material.Fabric)
+		kit.piece(model, "ScarecrowHead", Vector3.new(0.9, 0.95, 0.9), frame * CFrame.new(0, 4.85, 0), HAY, Enum.Material.Grass)
+		kit.beam(model, "ScarecrowHat", frame * Vector3.new(0, 5.3, 0), frame * Vector3.new(0, 5.4, 0), 1.9, Color3.fromRGB(196, 160, 92), Enum.Material.Fabric)
+		kit.beam(model, "ScarecrowHat", frame * Vector3.new(0, 5.35, 0), frame * Vector3.new(0, 5.95, 0), 1, Color3.fromRGB(196, 160, 92), Enum.Material.Fabric)
+	end
+	-- The windpump at the field's far corner, its wheel to the camp.
+	for _, offset in { Vector3.new(-(w / 2 + 2), 0, d / 2 + 7), Vector3.new(-(w / 2 + 8), 0, FIELD.to + 6), Vector3.new(-3, 0, d / 2 + 8) } do
+		local at = spot(offset.X, offset.Z, 3)
+		if at then
+			windpump(kit, folder, CFrame.lookAt(at :: Vector3, (at :: Vector3) + flatLook))
+			break
+		end
+	end
+	-- A tractor by the barn, square bales stacked at its door and cows
+	-- grazing round a water trough.
+	local tractorAt = spot(w / 2 + 3.5, -d / 2 - 3, 2.5)
+	if tractorAt then
+		tractor(kit, folder, CFrame.new(tractorAt :: Vector3) * base.Rotation * CFrame.Angles(0, math.rad(-25), 0))
+	end
+	local balesAt = spot(-w / 2 + 1.5, -d / 2 - 2.8, 1.5)
+	if balesAt then
+		local frame = CFrame.new(balesAt :: Vector3) * base.Rotation
+		for row, count in { 3, 2, 1 } do
+			for k = 1, count do
+				local x = (k - (count + 1) / 2) * 2.5
+				kit.piece(folder, "HayBale", Vector3.new(2.4, 1.15, 1.3), frame * CFrame.new(x, 0.45 + (row - 1) * 1.15, 0) * CFrame.Angles(0, random:NextNumber(-0.06, 0.06), 0), HAY, Enum.Material.Grass)
+			end
+		end
+	end
+	-- The pasture: in front of the barn if it is open there, else beside or behind it.
+	local pasture: Vector3? = nil
+	for _, offset in { Vector3.new(2, 0, -d / 2 - 13), Vector3.new(4, 0, -d / 2 - 9), Vector3.new(w / 2 + 13, 0, -6), Vector3.new(w / 2 + 12, 0, d / 2 + 8), Vector3.new(-4, 0, d / 2 + 12) } do
+		if spot(offset.X, offset.Z, 2) then
+			pasture = offset
+			break
+		end
+	end
+	local troughAt = pasture and spot((pasture :: Vector3).X, (pasture :: Vector3).Z, 2)
+	if pasture and troughAt then
+		local centre = pasture :: Vector3
+		local frame = CFrame.new(troughAt :: Vector3) * base.Rotation
+		kit.solid(kit.piece(folder, "WaterTrough", Vector3.new(3.8, 1, 1.5), frame * CFrame.new(0, 0.45, 0), TIMBER, Enum.Material.WoodPlanks))
+		kit.piece(folder, "TroughWater", Vector3.new(3.4, 0.1, 1.1), frame * CFrame.new(0, 0.92, 0), Color3.fromRGB(70, 118, 132), Enum.Material.Glass)
+		local cows = 0
+		for attempt = 1, 40 do
+			if cows >= 4 then break end
+			local angle = attempt * 2.4
+			local distance = 3.5 + (attempt % 4) * 2.2
+			local local_ = centre + Vector3.new(math.cos(angle) * distance, 0, math.sin(angle) * distance)
+			local at = spot(local_.X, local_.Z, 2)
+			if at then
+				-- Roughly towards the trough, each at its own angle.
+				local turn = angle + math.pi + random:NextNumber(-0.6, 0.6)
+				cow(kit, folder, at :: Vector3, base:VectorToWorldSpace(Vector3.new(math.cos(turn), 0, math.sin(turn))), cows % 2 == 0)
+				cows += 1
+			end
+		end
+	end
+	-- Round bales lie about in the grass, clear of the barn, field and pasture.
+	local placed = 0
+	for attempt = 1, 60 do
+		if placed >= 5 then break end
+		local at = spot(random:NextNumber(-w / 2 - 20, w / 2 + 14), random:NextNumber(-d / 2 - 22, d / 2 + 12), 2.5)
+		local local_ = at and toLocal(at :: Vector3)
+		if at and local_ and not (math.abs(local_.X) < w / 2 + 9 and math.abs(local_.Z) < d / 2 + 6) and local_.X > -(w / 2 + 3)
+			and (pasture == nil or (local_ - (pasture :: Vector3)).Magnitude > 16) then
+			local ground = at :: Vector3
+			local roll = Vector3.new(math.cos(attempt), 0, math.sin(attempt)) * 1.5
+			kit.beam(folder, "RoundBale", ground + Vector3.new(0, 1.4, 0) - roll, ground + Vector3.new(0, 1.4, 0) + roll, 3, Color3.fromRGB(206, 170, 84), Enum.Material.Grass)
+			placed += 1
+		end
+	end
+	return folder
+end
+
+return Farm
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="23">
         <Properties>
           <string name="Name">Leaderboards</string>
           <string name="Source"><![CDATA[--!strict
@@ -6272,7 +6985,7 @@ return Leaderboards
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="22">
+      <Item class="ModuleScript" referent="24">
         <Properties>
           <string name="Name">Lobby</string>
           <string name="Source"><![CDATA[--!strict
@@ -6541,7 +7254,7 @@ return Lobby
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="23">
+      <Item class="ModuleScript" referent="25">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
@@ -6857,7 +7570,387 @@ return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="24">
+      <Item class="ModuleScript" referent="26">
+        <Properties>
+          <string name="Name">Sakura</string>
+          <string name="Source"><![CDATA[--!strict
+-- The sakura theme's own scenery: cherry trees in blossom across the meadows,
+-- with fallen petals beneath them, a vermilion torii gate at the camp's
+-- entrance framing the mountain, stone lanterns, and a shrine on a meadow in
+-- view of the camp, behind its own little torii. Scenery builds it once,
+-- alongside the alpine valley, and keeps it out of view until the theme is
+-- chosen (see Scenery.setTheme). Like the rest of the scenery, nothing here
+-- takes part in mining raycasts or touch events.
+local Sakura = {}
+
+-- What Scenery lends the theme: its part makers and where things may go.
+export type Kit = {
+	piece: (parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, kind: string?) -> BasePart,
+	beam: (parent: Instance, name: string, a: Vector3, b: Vector3, width: number, colour: Color3, material: Enum.Material) -> BasePart,
+	solid: (BasePart) -> BasePart,
+	ground: (x: number, z: number) -> Vector3,
+	clear: (at: Vector3, margin: number) -> boolean, -- arena, camp, lake, path or leaderboards
+	spaced: (at: Vector3, gap: number) -> boolean, -- clear of the valley's trees and rocks
+	steepness: (x: number, z: number) -> number,
+	pathCentre: (z: number) -> number,
+	camp: Vector3,
+	lake: Vector3,
+	radius: number, -- the arena's clear radius
+}
+
+-- Blossom pinks from pale to deep, a shade richer than the control page's so
+-- they stay pink under the game's bright sun and bloom.
+local PINKS = {
+	Color3.fromRGB(255, 212, 226),
+	Color3.fromRGB(255, 194, 214),
+	Color3.fromRGB(252, 176, 202),
+	Color3.fromRGB(246, 158, 190),
+	Color3.fromRGB(236, 140, 176),
+}
+local BARK = Color3.fromRGB(78, 56, 54)
+local VERMILION = Color3.fromRGB(200, 50, 60)
+local LACQUER = Color3.fromRGB(34, 28, 30)
+local STONE = Color3.fromRGB(150, 146, 138)
+local PLASTER = Color3.fromRGB(244, 238, 226)
+local TIMBER = Color3.fromRGB(116, 80, 54)
+local COPPER = Color3.fromRGB(88, 138, 120) -- a weathered copper roof
+local GOLD = Color3.fromRGB(226, 182, 88)
+local STRAW = Color3.fromRGB(214, 188, 120)
+
+-- A cherry tree: a dark leaning trunk forking into three or four branches,
+-- each ending in a puff of blossom, with a crown over the middle and a carpet
+-- of fallen petals on the ground.
+local function tree(kit: Kit, parent: Instance, at: Vector3, height: number, random: Random)
+	local model = Instance.new("Model")
+	model.Name = "SakuraTree"
+	model.Parent = parent
+	local lean = Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1)) * height * 0.06
+	local fork = at + Vector3.new(0, height * 0.4, 0) + lean
+	kit.beam(model, "SakuraTrunk", at - Vector3.new(0, 0.6, 0), fork, height * 0.08, BARK, Enum.Material.Wood)
+	local tone = random:NextInteger(1, #PINKS - 1)
+	local branches = random:NextInteger(3, 4)
+	local yaw = random:NextNumber(0, math.pi * 2)
+	local spread = height * 0.3
+	for k = 1, branches do
+		local angle = yaw + k / branches * math.pi * 2 + random:NextNumber(-0.3, 0.3)
+		local tip = fork + Vector3.new(math.cos(angle) * spread, height * random:NextNumber(0.2, 0.32), math.sin(angle) * spread)
+		kit.beam(model, "SakuraBranch", fork, tip, height * 0.04, BARK, Enum.Material.Wood)
+		local size = height * random:NextNumber(0.4, 0.5)
+		local colour = PINKS[math.clamp(tone + random:NextInteger(-1, 1), 1, #PINKS)]
+		local blossom = kit.piece(model, "Blossom", Vector3.one * size, CFrame.new(tip + Vector3.new(0, size * 0.12, 0)), colour, Enum.Material.LeafyGrass)
+		;(blossom :: Part).Shape = Enum.PartType.Ball
+	end
+	local crown = height * 0.56
+	local top = kit.piece(model, "Blossom", Vector3.one * crown, CFrame.new(fork + Vector3.new(0, height * 0.42, 0)), PINKS[tone], Enum.Material.LeafyGrass)
+	;(top :: Part).Shape = Enum.PartType.Ball
+	-- Fallen petals: a thin pink disc, a little wider than the crown.
+	local width = height * random:NextNumber(0.85, 1.05)
+	local carpet = kit.piece(model, "FallenPetals", Vector3.new(0.1, width, width), CFrame.new(at + Vector3.new(0, 0.04, 0)) * CFrame.Angles(0, 0, math.pi / 2),
+		PINKS[math.min(tone + 1, #PINKS)], Enum.Material.Sand)
+	;(carpet :: Part).Shape = Enum.PartType.Cylinder
+	carpet.CastShadow = false
+end
+
+-- A torii gate standing at `frame`: its beams run along the frame's X axis and
+-- its plaque faces the frame's +Z, towards whoever walks through it.
+local function torii(kit: Kit, parent: Instance, frame: CFrame, span: number, tall: number?)
+	local model = Instance.new("Model")
+	model.Name = "Torii"
+	model.Parent = parent
+	local height = tall or 8.6
+	local scale = height / 8.6
+	local function at(x: number, y: number, z: number): Vector3
+		return frame * Vector3.new(x, y, z)
+	end
+	for _, side in { -1, 1 } do
+		local x = side * span / 2
+		kit.solid(kit.beam(model, "ToriiPillar", at(x, -0.5, 0), at(x, height, 0), 0.8 * scale, VERMILION, Enum.Material.SmoothPlastic))
+		kit.beam(model, "ToriiBase", at(x, -0.5, 0), at(x, 0.9 * scale, 0), 1.05 * scale, LACQUER, Enum.Material.SmoothPlastic)
+	end
+	-- The lower tie beam (nuki) runs through the pillars and out past them.
+	kit.piece(model, "ToriiNuki", Vector3.new(span + 2.2 * scale, 0.5 * scale, 0.45 * scale), frame * CFrame.new(0, height - 2.1 * scale, 0), VERMILION, Enum.Material.SmoothPlastic)
+	-- The top: a vermilion beam (shimaki) under a black lintel (kasagi) whose
+	-- two halves sweep up towards their ends.
+	kit.piece(model, "ToriiShimaki", Vector3.new(span + 2.8 * scale, 0.5 * scale, 0.75 * scale), frame * CFrame.new(0, height + 0.25 * scale, 0), VERMILION, Enum.Material.SmoothPlastic)
+	local half = span / 2 + 2.1 * scale
+	for _, side in { -1, 1 } do
+		local piece = frame * CFrame.new(side * half / 2, height + 0.78 * scale, 0) * CFrame.Angles(0, 0, side * math.rad(3.5))
+		kit.piece(model, "ToriiKasagi", Vector3.new(half + 0.15, 0.6 * scale, 1.05 * scale), piece, LACQUER, Enum.Material.SmoothPlastic)
+	end
+	-- The central strut carries a plaque with the diamond on it.
+	kit.piece(model, "ToriiStrut", Vector3.new(0.45, 1.6, 0.4) * scale, frame * CFrame.new(0, height - 1.05 * scale, 0), VERMILION, Enum.Material.SmoothPlastic)
+	local plaque = kit.piece(model, "ToriiPlaque", Vector3.new(1.1, 1.3, 0.12) * scale,
+		frame * CFrame.new(0, height - 1.05 * scale, 0.26 * scale) * CFrame.Angles(0, math.pi, 0), LACQUER, Enum.Material.SmoothPlastic)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 60
+	gui.LightInfluence = 1
+	gui.Parent = plaque
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.TextScaled = true
+	text.Text = "💎"
+	text.Parent = gui
+end
+
+-- A stone lantern (tōrō) with a softly glowing fire box; no light of its own.
+local function lantern(kit: Kit, parent: Instance, at: Vector3)
+	local model = Instance.new("Model")
+	model.Name = "StoneLantern"
+	model.Parent = parent
+	kit.solid(kit.piece(model, "LanternFoot", Vector3.new(1.5, 0.4, 1.5), CFrame.new(at + Vector3.new(0, 0.15, 0)), STONE, Enum.Material.Slate))
+	kit.solid(kit.beam(model, "LanternPost", at + Vector3.new(0, 0.3, 0), at + Vector3.new(0, 2.1, 0), 0.6, STONE, Enum.Material.Slate))
+	kit.piece(model, "LanternShelf", Vector3.new(1.3, 0.3, 1.3), CFrame.new(at + Vector3.new(0, 2.2, 0)), STONE, Enum.Material.Slate)
+	kit.piece(model, "LanternBox", Vector3.new(0.95, 0.9, 0.95), CFrame.new(at + Vector3.new(0, 2.8, 0)), STONE, Enum.Material.Slate)
+	-- The glow shows through windows on all four sides.
+	local glow = kit.piece(model, "LanternGlow", Vector3.new(1.0, 0.5, 0.5), CFrame.new(at + Vector3.new(0, 2.82, 0)), Color3.fromRGB(255, 196, 128), Enum.Material.Neon)
+	glow.CastShadow = false
+	local across = kit.piece(model, "LanternGlow", Vector3.new(0.5, 0.5, 1.0), CFrame.new(at + Vector3.new(0, 2.82, 0)), Color3.fromRGB(255, 196, 128), Enum.Material.Neon)
+	across.CastShadow = false
+	kit.piece(model, "LanternRoof", Vector3.new(1.9, 0.3, 1.9), CFrame.new(at + Vector3.new(0, 3.38, 0)), STONE, Enum.Material.Slate)
+	kit.piece(model, "LanternCap", Vector3.new(1.1, 0.3, 1.1), CFrame.new(at + Vector3.new(0, 3.66, 0)), STONE, Enum.Material.Slate)
+	local jewel = kit.piece(model, "LanternJewel", Vector3.one * 0.5, CFrame.new(at + Vector3.new(0, 4.0, 0)), STONE, Enum.Material.Slate)
+	;(jewel :: Part).Shape = Enum.PartType.Ball
+end
+
+-- A Shinto shrine (a hall with its entrance on the long side) on a stone
+-- plinth. `frame` sits on the plinth's top, its front (-Z) facing the camp;
+-- `drop` is how far the plinth reaches down to the lowest ground under it.
+-- Returns how far in front of the centre its steps end.
+local SHRINE_CLEARANCE = 18 -- studs from the shrine's centre kept free of trees
+local function shrine(kit: Kit, parent: Instance, frame: CFrame, drop: number): number
+	local model = Instance.new("Model")
+	model.Name = "Shrine"
+	model.Parent = parent
+	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
+		return kit.piece(model, name, size, frame * offset, colour, material, kind)
+	end
+	local function rod(name: string, a: Vector3, b: Vector3, width: number, colour: Color3, material: Enum.Material): BasePart
+		return kit.beam(model, name, frame * a, frame * b, width, colour, material)
+	end
+	-- The plinth and the stone steps up to it.
+	kit.solid(put("ShrinePlinth", Vector3.new(17, drop, 14), CFrame.new(0, -drop / 2, 0), STONE, Enum.Material.Slate))
+	local steps = math.max(2, math.ceil(drop / 0.6))
+	for i = 1, steps do
+		local top = -i * drop / (steps + 1)
+		local depth = top + drop + 0.5
+		kit.solid(put("ShrineStep", Vector3.new(6, depth, 0.95), CFrame.new(0, top - depth / 2, -7 - (i - 0.5) * 0.9), STONE, Enum.Material.Slate))
+	end
+	-- The hall: x from -6 to 6, z from -4 to 5, on a raised plank floor.
+	local cz, w, d = 0.5, 6, 4.5
+	kit.solid(put("ShrineFloor", Vector3.new(2 * w + 1, 0.5, 2 * d + 1), CFrame.new(0, 0.25, cz), Color3.fromRGB(150, 106, 68), Enum.Material.WoodPlanks))
+	local top = 6
+	for _, x in { -w, -2, 2, w } do
+		for _, z in { cz - d, cz + d } do
+			kit.solid(rod("ShrinePillar", Vector3.new(x, 0.5, z), Vector3.new(x, top, z), 0.55, VERMILION, Enum.Material.SmoothPlastic))
+		end
+	end
+	for _, x in { -w, w } do
+		kit.solid(rod("ShrinePillar", Vector3.new(x, 0.5, cz), Vector3.new(x, top, cz), 0.55, VERMILION, Enum.Material.SmoothPlastic))
+	end
+	-- Head beams round the top, and a dark frieze above them.
+	for _, z in { cz - d, cz + d } do
+		put("ShrineBeam", Vector3.new(2 * w + 0.6, 0.5, 0.45), CFrame.new(0, top, z), VERMILION, Enum.Material.SmoothPlastic)
+		put("ShrineFrieze", Vector3.new(2 * w + 0.6, 0.55, 0.4), CFrame.new(0, top + 0.52, z), TIMBER, Enum.Material.Wood)
+	end
+	for _, x in { -w, w } do
+		put("ShrineBeam", Vector3.new(0.45, 0.5, 2 * d + 0.6), CFrame.new(x, top, cz), VERMILION, Enum.Material.SmoothPlastic)
+	end
+	-- White plaster walls on three sides; the front has paper screens either
+	-- side of an open doorway.
+	kit.solid(put("ShrineWall", Vector3.new(2 * w, top - 0.5, 0.3), CFrame.new(0, (top + 0.5) / 2, cz + d - 0.05), PLASTER, Enum.Material.Plaster))
+	for _, x in { -w, w } do
+		kit.solid(put("ShrineWall", Vector3.new(0.3, top - 0.5, 2 * d), CFrame.new(x * 0.99, (top + 0.5) / 2, cz), PLASTER, Enum.Material.Plaster))
+	end
+	for _, side in { -1, 1 } do
+		local x = side * (w + 2) / 2
+		kit.solid(put("ShrineScreen", Vector3.new(w - 2.3, 4, 0.15), CFrame.new(x, 2.6, cz - d), Color3.fromRGB(250, 244, 228), Enum.Material.SmoothPlastic))
+		put("ShrineTransom", Vector3.new(w - 2.3, 1.15, 0.2), CFrame.new(x, 5.2, cz - d), PLASTER, Enum.Material.Plaster)
+		-- The screens' wooden lattice.
+		for _, dx in { -0.9, 0, 0.9 } do
+			put("ShrineLattice", Vector3.new(0.08, 4, 0.08), CFrame.new(x + dx, 2.6, cz - d - 0.1), TIMBER, Enum.Material.Wood)
+		end
+		for _, y in { 1.3, 2.6, 3.9 } do
+			put("ShrineLattice", Vector3.new(w - 2.3, 0.08, 0.08), CFrame.new(x, y, cz - d - 0.1), TIMBER, Enum.Material.Wood)
+		end
+	end
+	-- Inside: an altar with a round golden mirror, seen through the doorway.
+	put("ShrineAltar", Vector3.new(3, 1.1, 1.2), CFrame.new(0, 1.05, cz + d - 1), LACQUER, Enum.Material.Wood)
+	local mirror = put("ShrineMirror", Vector3.new(0.12, 1.5, 1.5), CFrame.new(0, 2.6, cz + d - 0.35) * CFrame.Angles(0, math.pi / 2, 0), GOLD, Enum.Material.Foil)
+	;(mirror :: Part).Shape = Enum.PartType.Cylinder
+	-- The roof: copper, its eaves curving out over each long side (a steeper
+	-- upper run and a shallower lower one), closed by timber gables.
+	local ridge = 9.4
+	local length = 2 * w + 4.4
+	for _, side in { -1, 1 } do
+		local upper, lower = math.rad(30), math.rad(14)
+		local breakY = ridge - 4.6 * math.tan(upper)
+		local spans = { { 0, 4.6, ridge, upper }, { 4.6, 6.9, breakY, lower } }
+		for _, span in spans do
+			local from, to, y0, angle = span[1], span[2], span[3], span[4]
+			local run = to - from
+			local slope = run / math.cos(angle) + 0.1
+			local centre = Vector3.new(0, y0 - run / 2 * math.tan(angle), cz + side * (from + run / 2))
+			put("ShrineRoof", Vector3.new(length, 0.35, slope), CFrame.new(centre) * CFrame.Angles(side * angle, 0, 0), COPPER, Enum.Material.RoofShingles)
+		end
+	end
+	local gable = 2.4
+	for _, x in { -w, w } do
+		for _, side in { -1, 1 } do
+			local turn = if side > 0 then CFrame.Angles(0, math.pi, 0) else CFrame.identity
+			put("ShrineGable", Vector3.new(0.3, gable, d), CFrame.new(x, ridge - 0.2 - gable / 2, cz + side * d / 2) * turn, TIMBER, Enum.Material.Wood, "WedgePart")
+		end
+	end
+	put("ShrineRidge", Vector3.new(length + 0.6, 0.6, 0.7), CFrame.new(0, ridge + 0.15, cz), LACQUER, Enum.Material.Wood)
+	-- Crossed finials (chigi) at both ends of the ridge, and short logs
+	-- (katsuogi) along it with gilded ends.
+	for _, x in { -length / 2, length / 2 } do
+		for _, tilt in { -1, 1 } do
+			put("ShrineChigi", Vector3.new(0.22, 3, 0.35), CFrame.new(x, ridge + 0.55, cz) * CFrame.Angles(tilt * math.rad(35), 0, 0), LACQUER, Enum.Material.Wood)
+		end
+	end
+	for _, x in { -3.5, 0, 3.5 } do
+		rod("ShrineKatsuogi", Vector3.new(x, ridge + 0.65, cz - 0.7), Vector3.new(x, ridge + 0.65, cz + 0.7), 0.45, LACQUER, Enum.Material.Wood)
+		for _, z in { -0.72, 0.72 } do
+			rod("ShrineGilt", Vector3.new(x, ridge + 0.65, cz + z - 0.06), Vector3.new(x, ridge + 0.65, cz + z + 0.06), 0.47, GOLD, Enum.Material.Foil)
+		end
+	end
+	-- A sacred straw rope (shimenawa) across the doorway with white paper
+	-- streamers (shide), and a bell with its rope.
+	local rope = { Vector3.new(-2.4, top - 0.35, cz - d - 0.35), Vector3.new(-1.2, top - 0.75, cz - d - 0.35), Vector3.new(0, top - 0.9, cz - d - 0.35),
+		Vector3.new(1.2, top - 0.75, cz - d - 0.35), Vector3.new(2.4, top - 0.35, cz - d - 0.35) }
+	for i = 1, #rope - 1 do
+		rod("ShrineRope", rope[i], rope[i + 1], 0.38, STRAW, Enum.Material.Fabric)
+	end
+	for _, x in { -1.6, -0.6, 0.6, 1.6 } do
+		local hang = top - (if math.abs(x) < 1 then 1.05 else 0.85)
+		for k = 0, 2 do
+			put("ShrineShide", Vector3.new(0.26, 0.32, 0.03), CFrame.new(x + (if k % 2 == 0 then 0 else 0.12), hang - 0.2 - k * 0.3, cz - d - 0.38), Color3.fromRGB(252, 252, 248), Enum.Material.SmoothPlastic)
+		end
+	end
+	local bell = put("ShrineBell", Vector3.one * 0.7, CFrame.new(0, top - 1.45, cz - d - 0.6), GOLD, Enum.Material.Foil)
+	;(bell :: Part).Shape = Enum.PartType.Ball
+	rod("ShrineBellRope", Vector3.new(0, top - 1.8, cz - d - 0.6), Vector3.new(0, 1.7, cz - d - 0.7), 0.14, VERMILION, Enum.Material.Fabric)
+	-- An offering box at the top of the steps, and lanterns at the front corners.
+	kit.solid(put("ShrineOfferingBox", Vector3.new(2.4, 1, 1), CFrame.new(0, 1, cz - d - 1.6), TIMBER, Enum.Material.WoodPlanks))
+	put("ShrineOfferingSlats", Vector3.new(2.3, 0.06, 0.9), CFrame.new(0, 1.53, cz - d - 1.6), LACQUER, Enum.Material.Wood)
+	for _, x in { -7.2, 7.2 } do
+		lantern(kit, model, frame * Vector3.new(x, 0, -6))
+	end
+	return 7 + steps * 0.9
+end
+
+-- Where the shrine goes: a flat, open meadow ahead of the camp, off to one
+-- side of the mountain so it shows from the spawn, facing the camp. Returns
+-- the frame on top of its plinth and how deep the plinth goes, or nil.
+-- `gap` keeps it that far from the valley's trees, rocks and flowers.
+local function shrineSite(kit: Kit, random: Random, gap: number): (CFrame?, number)
+	local best: CFrame? = nil
+	local bestDrop, bestScore = 0, math.huge
+	for attempt = 1, 400 do
+		local angle = random:NextNumber(-1, 1) * math.rad(62)
+		local distance = random:NextNumber(60, 125)
+		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
+		local centre = kit.ground(spot.X, spot.Z)
+		if not kit.clear(centre, 13) and centre.Y < 24 and kit.steepness(centre.X, centre.Z) < 0.4 and kit.spaced(centre, gap) then
+			local flat = Vector3.new(centre.X, 0, centre.Z)
+			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
+			local base = CFrame.lookAt(flat, flat + facing)
+			local gate = base * Vector3.new(0, 0, -14)
+			if not kit.clear(kit.ground(gate.X, gate.Z), 3) then
+				-- The ground under the plinth's corners, edges and steps.
+				local low, high = math.huge, -math.huge
+				for _, offset in { Vector3.new(-8.5, 0, -9.7), Vector3.new(8.5, 0, -9.7), Vector3.new(-8.5, 0, 7), Vector3.new(8.5, 0, 7),
+					Vector3.new(0, 0, 0), Vector3.new(-8.5, 0, 0), Vector3.new(8.5, 0, 0), Vector3.new(0, 0, 7), Vector3.new(0, 0, -9.7) } do
+					local at = base * offset
+					local y = kit.ground(at.X, at.Z).Y
+					low, high = math.min(low, y), math.max(high, y)
+				end
+				local score = math.abs(angle) + distance / 150 + (high - low) * 0.3
+				if high - low < 2.5 and score < bestScore then
+					bestScore = score
+					best = base + Vector3.new(0, high + 0.9, 0)
+					bestDrop = high + 0.9 - low + 0.6
+				end
+			end
+		end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	return best, bestDrop
+end
+
+-- Builds the theme's scenery into a new folder (not yet parented).
+function Sakura.build(kit: Kit): Folder
+	local folder = Instance.new("Folder")
+	folder.Name = "SakuraScenery"
+	-- Its own seed, so the alpine valley is laid out the same with or without it.
+	local random = Random.new(3903)
+	local planted: { Vector3 } = {}
+	-- The shrine goes first, so the cherry trees grow round it.
+	-- Somewhere wide open if there is room, else among the flowers.
+	local site, drop = nil, 0
+	for _, gap in { 14, 9, 5 } do
+		site, drop = shrineSite(kit, random, gap)
+		if site then break end
+	end
+	if site then
+		local approach = shrine(kit, folder, site, drop)
+		-- Its own small torii on the approach from the camp, facing the camp.
+		local gate = site * Vector3.new(0, 0, -(approach + 2.5))
+		torii(kit, folder, CFrame.new(kit.ground(gate.X, gate.Z)) * site.Rotation * CFrame.Angles(0, math.pi, 0), 6, 7)
+	else
+		warn("[DiamondRush] Sakura: no flat open meadow for the shrine, so it is left out.")
+	end
+	local function roomy(at: Vector3, gap: number): boolean
+		if site and (Vector3.new(at.X - site.Position.X, 0, at.Z - site.Position.Z)).Magnitude < SHRINE_CLEARANCE then return false end
+		for _, other in planted do
+			if (Vector3.new(at.X - other.X, 0, at.Z - other.Z)).Magnitude < gap then return false end
+		end
+		return kit.spaced(at, 6)
+	end
+	local function plant(at: Vector3)
+		tree(kit, folder, at, random:NextNumber(11, 16), random)
+		table.insert(planted, at)
+	end
+	-- A ring of blossom just outside the camp frames the view from the spawn.
+	for attempt = 1, 160 do
+		if #planted >= 12 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(30, 46)
+		local at = kit.ground(kit.camp.X + math.cos(angle) * distance, kit.camp.Z + math.sin(angle) * distance)
+		if not kit.clear(at, 4) and at.Y < 20 and kit.steepness(at.X, at.Z) < 0.6 and roomy(at, 10) then plant(at) end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	-- Groves over the low meadows and round the lake.
+	for attempt = 1, 2400 do
+		if #planted >= 48 then break end
+		local angle = random:NextNumber(0, math.pi * 2)
+		local distance = random:NextNumber(kit.radius + 10, 210)
+		local at = kit.ground(math.cos(angle) * distance, math.sin(angle) * distance)
+		local grove = math.noise(at.X / 70, at.Z / 70, 61) > -0.2
+		if grove and not kit.clear(at, 4) and at.Y < 32 and kit.steepness(at.X, at.Z) < 0.6 and roomy(at, 9) then plant(at) end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	-- The torii stands just past the spawn, where the trail leaves the camp,
+	-- so it frames the mountain from the camp; its pillars stay beside the trail.
+	local gateZ = kit.camp.Z - 9
+	torii(kit, folder, CFrame.new(kit.ground(kit.pathCentre(gateZ), gateZ)), 8)
+	-- Stone lanterns at the camp's edge and on the lake dock.
+	for _, offset in { Vector3.new(-13, 0, -3), Vector3.new(13, 0, -4) } do
+		local spot = kit.camp + offset
+		lantern(kit, folder, kit.ground(spot.X, spot.Z))
+	end
+	lantern(kit, folder, kit.lake + Vector3.new(-17, 0.65, 2.3))
+	return folder
+end
+
+return Sakura
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="27">
         <Properties>
           <string name="Name">ScenePack</string>
           <string name="Source"><![CDATA[--!strict
@@ -7011,7 +8104,7 @@ return ScenePack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="25">
+      <Item class="ModuleScript" referent="28">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -7024,10 +8117,22 @@ return ScenePack
 -- (see ScenePack); without it, from smooth terrain (peaks, boulders) and
 -- low-poly wedge trees. The look relies on the place's Future lighting and
 -- 2022 materials (see default.project.json).
+--
+-- Three themes can be switched live (Scenery.setTheme): the alpine default;
+-- sakura, which adds blossoming cherry trees, a torii gate, stone lanterns and
+-- a shrine (see Sakura) under a soft pink spring light; and farm, which fences
+-- the arena in as a ranch corral with a gate on the trail and adds a barn,
+-- silo, cornfield and cows (see Farm) under a warm harvest sun. The alpine
+-- theme has a few things of its own, the camp's festoon lights and a
+-- watchtower (see Watchtower), which make way for the others.
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local PartShapes = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("PartShapes"))
 local ScenePack = require(script.Parent.ScenePack)
+local Sakura = require(script.Parent.Sakura)
+local Watchtower = require(script.Parent.Watchtower)
+local Farm = require(script.Parent.Farm)
 
 local Scenery = {}
 local random = Random.new(4207)
@@ -7172,10 +8277,14 @@ local function terrainHeight(x: number, z: number, site: Site): number
 	return height
 end
 
-local function onPath(x: number, z: number, site: Site): boolean
+-- The trail from the camp to the mountain bends gently; its centre at `z`.
+local function pathCentre(z: number, site: Site): number
 	local camp = site.camp
-	local pathX = math.sin(math.clamp((camp.Z - z) / (camp.Z - 26), 0, 1) * math.pi) * 4
-	return z >= 26 and z <= camp.Z + 5 and math.abs(x - pathX) < 3.3 + math.noise(z / 7, 0, 3) * 0.8
+	return math.sin(math.clamp((camp.Z - z) / (camp.Z - 26), 0, 1) * math.pi) * 4
+end
+
+local function onPath(x: number, z: number, site: Site): boolean
+	return z >= 26 and z <= site.camp.Z + 5 and math.abs(x - pathCentre(z, site)) < 3.3 + math.noise(z / 7, 0, 3) * 0.8
 end
 
 local EXTENT = 384 -- terrain reaches this far from the mountain in every direction
@@ -7247,8 +8356,152 @@ local function landscape(terrain: Terrain, site: Site)
 	end
 end
 
+-- Each theme's light, haze, grade and terrain colours.
+export type Look = {
+	clock: number,
+	brightness: number,
+	ambient: Color3,
+	outdoorAmbient: Color3,
+	colorShiftTop: Color3,
+	exposure: number,
+	atmosphere: { density: number, offset: number, color: Color3, decay: Color3, glare: number, haze: number },
+	grade: { contrast: number, saturation: number, tint: Color3 },
+	bloom: { intensity: number, size: number, threshold: number },
+	rays: number,
+	clouds: { cover: number, density: number, color: Color3 },
+	terrain: { [Enum.Material]: Color3 },
+	water: Color3,
+}
+
+Scenery.THEMES = { "default", "sakura", "farm" }
+Scenery.LOOKS = {
+	-- A clear late-afternoon alpine sun, soft sky light, aerial haze and a
+	-- gentle filmic grade.
+	default = {
+		clock = 15.6,
+		brightness = 2.6,
+		ambient = Color3.fromRGB(74, 78, 88),
+		outdoorAmbient = Color3.fromRGB(126, 130, 140),
+		colorShiftTop = Color3.fromRGB(30, 18, 6),
+		exposure = 0.1,
+		atmosphere = { density = 0.3, offset = 0.22, color = Color3.fromRGB(198, 214, 230), decay = Color3.fromRGB(110, 126, 150), glare = 0.35, haze = 1.6 },
+		grade = { contrast = 0.08, saturation = 0.08, tint = Color3.fromRGB(255, 249, 240) },
+		bloom = { intensity = 0.45, size = 24, threshold = 1.3 },
+		rays = 0.05,
+		clouds = { cover = 0.42, density = 0.5, color = Color3.fromRGB(250, 248, 242) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(102, 126, 64),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(86, 110, 56),
+			[Enum.Material.Ground] = Color3.fromRGB(112, 94, 70),
+			[Enum.Material.Mud] = Color3.fromRGB(84, 72, 58),
+			[Enum.Material.Rock] = Color3.fromRGB(116, 116, 112),
+			[Enum.Material.Snow] = Color3.fromRGB(238, 242, 247),
+		},
+		water = Color3.fromRGB(46, 92, 96),
+	},
+	-- Spring in blossom: a lower golden sun through a pink haze, fresh green
+	-- meadows and blush-tinted clouds and snow, like the control page's shrine.
+	sakura = {
+		clock = 16.3,
+		brightness = 2.45,
+		ambient = Color3.fromRGB(88, 76, 88),
+		outdoorAmbient = Color3.fromRGB(142, 126, 138),
+		colorShiftTop = Color3.fromRGB(42, 18, 16),
+		exposure = 0.14,
+		atmosphere = { density = 0.32, offset = 0.2, color = Color3.fromRGB(242, 208, 222), decay = Color3.fromRGB(156, 116, 146), glare = 0.45, haze = 1.9 },
+		grade = { contrast = 0.06, saturation = 0.14, tint = Color3.fromRGB(255, 242, 246) },
+		bloom = { intensity = 0.55, size = 28, threshold = 1.2 },
+		rays = 0.07,
+		clouds = { cover = 0.38, density = 0.45, color = Color3.fromRGB(255, 233, 240) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(114, 142, 74),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(98, 126, 64),
+			[Enum.Material.Ground] = Color3.fromRGB(122, 98, 80),
+			[Enum.Material.Mud] = Color3.fromRGB(90, 74, 64),
+			[Enum.Material.Rock] = Color3.fromRGB(124, 118, 118),
+			[Enum.Material.Snow] = Color3.fromRGB(250, 240, 245),
+		},
+		water = Color3.fromRGB(56, 102, 116),
+	},
+	-- Harvest time on the ranch: a warm, low summer sun through a golden
+	-- haze, sun-ripened meadows and creamy clouds.
+	farm = {
+		clock = 16.9,
+		brightness = 2.7,
+		ambient = Color3.fromRGB(86, 78, 70),
+		outdoorAmbient = Color3.fromRGB(142, 130, 114),
+		colorShiftTop = Color3.fromRGB(50, 30, 8),
+		exposure = 0.12,
+		atmosphere = { density = 0.28, offset = 0.2, color = Color3.fromRGB(234, 214, 180), decay = Color3.fromRGB(150, 120, 90), glare = 0.4, haze = 1.7 },
+		grade = { contrast = 0.08, saturation = 0.12, tint = Color3.fromRGB(255, 244, 226) },
+		bloom = { intensity = 0.5, size = 26, threshold = 1.25 },
+		rays = 0.08,
+		clouds = { cover = 0.35, density = 0.45, color = Color3.fromRGB(255, 246, 230) },
+		terrain = {
+			[Enum.Material.Grass] = Color3.fromRGB(126, 138, 66),
+			[Enum.Material.LeafyGrass] = Color3.fromRGB(110, 124, 58),
+			[Enum.Material.Ground] = Color3.fromRGB(134, 104, 70),
+			[Enum.Material.Mud] = Color3.fromRGB(96, 76, 56),
+			[Enum.Material.Rock] = Color3.fromRGB(126, 120, 110),
+			[Enum.Material.Snow] = Color3.fromRGB(244, 240, 232),
+		},
+		water = Color3.fromRGB(52, 96, 98),
+	},
+} :: { [string]: Look }
+
+-- Scenery that belongs to one theme: shown with it, kept in ServerStorage otherwise.
+local themed: { alpine: Instance?, home: Instance?, sakura: Instance?, farm: Instance? } = {}
+local effects: { atmosphere: Atmosphere, grade: ColorCorrectionEffect, bloom: BloomEffect, rays: SunRaysEffect, clouds: Clouds }? = nil
+local current: string? = nil
+
+-- Switches the valley to a theme ("default", "sakura" or "farm") straight away.
+-- Returns false for an unknown theme, or before the scenery is built.
+function Scenery.setTheme(name: string): boolean
+	local look = Scenery.LOOKS[name]
+	if look == nil or effects == nil then return false end
+	local fx = effects :: any
+	if themed.alpine then themed.alpine.Parent = if name == "default" then themed.home else ServerStorage end
+	if themed.sakura then themed.sakura.Parent = if name == "sakura" then workspace else ServerStorage end
+	if themed.farm then themed.farm.Parent = if name == "farm" then workspace else ServerStorage end
+	local terrain = workspace.Terrain
+	for material, colour in look.terrain do
+		terrain:SetMaterialColor(material, colour)
+	end
+	terrain.WaterColor = look.water
+	Lighting.ClockTime = look.clock
+	Lighting.Brightness = look.brightness
+	Lighting.Ambient = look.ambient
+	Lighting.OutdoorAmbient = look.outdoorAmbient
+	Lighting.ColorShift_Top = look.colorShiftTop
+	Lighting.ExposureCompensation = look.exposure
+	fx.atmosphere.Density = look.atmosphere.density
+	fx.atmosphere.Offset = look.atmosphere.offset
+	fx.atmosphere.Color = look.atmosphere.color
+	fx.atmosphere.Decay = look.atmosphere.decay
+	fx.atmosphere.Glare = look.atmosphere.glare
+	fx.atmosphere.Haze = look.atmosphere.haze
+	fx.grade.Contrast = look.grade.contrast
+	fx.grade.Saturation = look.grade.saturation
+	fx.grade.TintColor = look.grade.tint
+	fx.bloom.Intensity = look.bloom.intensity
+	fx.bloom.Size = look.bloom.size
+	fx.bloom.Threshold = look.bloom.threshold
+	fx.rays.Intensity = look.rays
+	fx.clouds.Cover = look.clouds.cover
+	fx.clouds.Density = look.clouds.density
+	fx.clouds.Color = look.clouds.color
+	current = name
+	return true
+end
+
+-- The theme showing now ("default" until the scenery is built).
+function Scenery.theme(): string
+	return current or "default"
+end
+
 -- `reserved` keeps trees and boulders out of circles (the leaderboards stand there).
-function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved: { { at: Vector3, radius: number } }?)
+-- `theme` is the theme to show once it is built (see Scenery.setTheme).
+function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved: { { at: Vector3, radius: number } }?, theme: string?)
 	-- Animated grass is enabled in the place/project: Decoration and GrassLength
 	-- are editor-only properties. LeafyGrass keeps the central arena blade-free.
 	local terrain = workspace.Terrain
@@ -7299,15 +8552,9 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 			+ math.abs(terrainHeight(x, z + 3, site) - terrainHeight(x, z - 3, site)) / 6
 	end
 
-	terrain:SetMaterialColor(Enum.Material.Grass, Color3.fromRGB(102, 126, 64))
-	terrain:SetMaterialColor(Enum.Material.LeafyGrass, Color3.fromRGB(86, 110, 56))
-	terrain:SetMaterialColor(Enum.Material.Ground, Color3.fromRGB(112, 94, 70))
-	terrain:SetMaterialColor(Enum.Material.Mud, Color3.fromRGB(84, 72, 58))
-	terrain:SetMaterialColor(Enum.Material.Rock, Color3.fromRGB(116, 116, 112))
-	terrain:SetMaterialColor(Enum.Material.Snow, Color3.fromRGB(238, 242, 247))
+	-- Terrain colours, like the light, come from the theme (see LOOKS).
 	terrain:FillBlock(CFrame.new(0, -8, 0), Vector3.new(EXTENT * 4, 16, EXTENT * 4), Enum.Material.Grass)
 	landscape(terrain, site)
-	terrain.WaterColor = Color3.fromRGB(46, 92, 96)
 	terrain.WaterTransparency = 0.62
 	terrain.WaterReflectance = 0.45
 	terrain.WaterWaveSize = 0.06
@@ -7599,19 +8846,27 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	text.Text = "⛏  DIAMOND MOUNTAIN"
 	text.Parent = gui
 
-	-- Festoon lights over the camp, without a light per bulb.
+	-- What only the alpine theme shows.
+	local alpine = Instance.new("Folder")
+	alpine.Name = "AlpineOnly"
+	alpine.Parent = folder
+	-- Festoon lights over the camp, without a light per bulb. The sakura theme's
+	-- torii and the farm's ranch gate take their place.
+	local festoon = Instance.new("Folder")
+	festoon.Name = "Festoon"
+	festoon.Parent = alpine
 	for i = 0, 14 do
 		local t = i / 14
 		local at = camp + Vector3.new(-10 + t * 20, 7 - 1.4 * math.sin(t * math.pi), -6)
-		local wire = piece(folder, "FestoonWire", Vector3.new(1.5, 0.035, 0.035), CFrame.new(at), Color3.fromRGB(48, 44, 35), Enum.Material.Metal)
+		local wire = piece(festoon, "FestoonWire", Vector3.new(1.5, 0.035, 0.035), CFrame.new(at), Color3.fromRGB(48, 44, 35), Enum.Material.Metal)
 		wire.CastShadow = false
 		if i % 2 == 0 then
-			local bulb = piece(folder, "FestoonBulb", Vector3.new(0.18, 0.27, 0.18), CFrame.new(at + Vector3.new(0, -0.2, 0)), Color3.fromRGB(255, 191, 102), Enum.Material.Neon)
+			local bulb = piece(festoon, "FestoonBulb", Vector3.new(0.18, 0.27, 0.18), CFrame.new(at + Vector3.new(0, -0.2, 0)), Color3.fromRGB(255, 191, 102), Enum.Material.Neon)
 			bulb.CastShadow = false
 		end
 	end
 	for _, x in { -10, 10 } do
-		beam(folder, "FestoonPost", camp + Vector3.new(x, 0, -6), camp + Vector3.new(x, 7.2, -6), 0.25, Color3.fromRGB(96, 70, 48), Enum.Material.Wood)
+		beam(festoon, "FestoonPost", camp + Vector3.new(x, 0, -6), camp + Vector3.new(x, 7.2, -6), 0.25, Color3.fromRGB(96, 70, 48), Enum.Material.Wood)
 	end
 
 	-- The campfire: a stone ring, crossed logs and log benches.
@@ -7648,60 +8903,68 @@ function Scenery.build(mountainRadius: number, spawnPosition: Vector3, reserved:
 	lantern(folder, camp + Vector3.new(-9, 0, -8))
 	lantern(folder, camp + Vector3.new(9, 0, -8))
 
-	-- Light: a clear late-afternoon sun, soft sky light, aerial haze and a
-	-- gentle filmic grade. Technology is Future (set in the place file).
-	Lighting.ClockTime = 15.6
+	-- What the themes' own scenery may use, to stay off the arena, camp,
+	-- trail, lake and boards and clear of the valley's trees and rocks.
+	local kit: Sakura.Kit = {
+		piece = piece,
+		beam = beam,
+		solid = solid,
+		ground = ground,
+		clear = clear,
+		spaced = spaced,
+		steepness = steepness,
+		pathCentre = function(z: number): number return pathCentre(z, site) end,
+		camp = camp,
+		lake = lake,
+		radius = clearRadius,
+	}
+	-- A timber watchtower on a hillside beside the mountain (alpine only).
+	Watchtower.build(kit, alpine)
+	themed.alpine = alpine
+	themed.home = folder
+	-- The sakura theme's scenery, kept out of view until it is chosen.
+	local sakura = Sakura.build(kit)
+	sakura.Parent = ServerStorage
+	themed.sakura = sakura
+	-- The farm theme's ranch, likewise.
+	local farm = Farm.build(kit)
+	farm.Parent = ServerStorage
+	themed.farm = farm
+
+	-- Light that every theme shares; each theme sets the rest (see LOOKS).
+	-- Technology is Future (set in the place file).
 	Lighting.GeographicLatitude = 38
-	Lighting.Brightness = 2.6
 	Lighting.GlobalShadows = true
 	Lighting.ShadowSoftness = 0.22
-	Lighting.Ambient = Color3.fromRGB(74, 78, 88)
-	Lighting.OutdoorAmbient = Color3.fromRGB(126, 130, 140)
-	Lighting.ColorShift_Top = Color3.fromRGB(30, 18, 6)
 	Lighting.ColorShift_Bottom = Color3.fromRGB(0, 0, 0)
 	Lighting.EnvironmentDiffuseScale = 1
 	Lighting.EnvironmentSpecularScale = 0.85
-	Lighting.ExposureCompensation = 0.1
 	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
-	atmosphere.Density = 0.3
-	atmosphere.Offset = 0.22
-	atmosphere.Color = Color3.fromRGB(198, 214, 230)
-	atmosphere.Decay = Color3.fromRGB(110, 126, 150)
-	atmosphere.Glare = 0.35
-	atmosphere.Haze = 1.6
 	atmosphere.Parent = Lighting
 	local grade = Instance.new("ColorCorrectionEffect")
 	grade.Name = "AlpineGrade"
 	grade.Brightness = 0
-	grade.Contrast = 0.08
-	grade.Saturation = 0.08
-	grade.TintColor = Color3.fromRGB(255, 249, 240)
 	grade.Parent = Lighting
 	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.45
-	bloom.Size = 24
-	bloom.Threshold = 1.3
 	bloom.Parent = Lighting
 	local rays = Instance.new("SunRaysEffect")
-	rays.Intensity = 0.05
 	rays.Spread = 0.75
 	rays.Parent = Lighting
 	local clouds = terrain:FindFirstChildOfClass("Clouds") or Instance.new("Clouds")
-	clouds.Cover = 0.42
-	clouds.Density = 0.5
-	clouds.Color = Color3.fromRGB(250, 248, 242)
 	clouds.Parent = terrain
 	local sky = Lighting:FindFirstChildOfClass("Sky") or Instance.new("Sky")
 	sky.SunAngularSize = 12
 	sky.CelestialBodiesShown = true
 	sky.Parent = Lighting
+	effects = { atmosphere = atmosphere, grade = grade, bloom = bloom, rays = rays, clouds = clouds }
+	Scenery.setTheme(theme or "default")
 end
 
 return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="26">
+      <Item class="ModuleScript" referent="29">
         <Properties>
           <string name="Name">Statue</string>
           <string name="Source"><![CDATA[--!strict
@@ -7834,7 +9097,7 @@ return Statue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="27">
+      <Item class="ModuleScript" referent="30">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -7910,7 +9173,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="28">
+      <Item class="ModuleScript" referent="31">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -7925,7 +9188,7 @@ local RunService = game:GetService("RunService")
 
 export type Event = {
 	id: string,
-	type: string, -- "gift" | "like" | "follow" | "share"
+	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "theme" | "skin"
 	user: string?,
 	name: string?,
 	gift: string?,
@@ -7934,6 +9197,8 @@ export type Event = {
 	likes: number?,
 	rocks: number?,
 	keybind: string?,
+	theme: string?, -- "theme" events: the map theme the control page chose
+	skin: string?, -- "skin" events: stone and diamond, or hay and needle
 }
 
 local TikTokFeed = {}
@@ -7956,6 +9221,8 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 	local event: Event = {
 		rocks = if type(raw.rocks) == "number" and raw.rocks == raw.rocks then math.clamp(raw.rocks, -1500000, 1500000) else nil,
 		keybind = if type(raw.keybind) == "string" then string.sub(raw.keybind, 1, 16) else nil,
+		theme = if type(raw.theme) == "string" then string.sub(raw.theme, 1, 16) else nil,
+		skin = if type(raw.skin) == "string" then string.sub(raw.skin, 1, 16) else nil,
 		id = raw.id,
 		type = raw.type,
 		user = if type(raw.user) == "string" then string.sub(raw.user, 1, 40) else nil,
@@ -8052,17 +9319,206 @@ return TikTokFeed
 ]]></string>
         </Properties>
       </Item>
+      <Item class="ModuleScript" referent="32">
+        <Properties>
+          <string name="Name">Watchtower</string>
+          <string name="Source"><![CDATA[--!strict
+-- A timber fire lookout on a hillside beside the mountain, in the alpine theme
+-- only: four tapering log legs braced with crossed timbers, a ladder up to a
+-- plank lookout with half walls and open windows, a shingle roof with a flag,
+-- and a warm lamp inside. It faces the camp and stands where the spawn can
+-- see it, on the other side of the mountain from the sakura shrine. Each leg
+-- reaches down to the ground under it, so it stands true on a slope.
+local Sakura = require(script.Parent.Sakura)
+
+local Watchtower = {}
+
+type Kit = Sakura.Kit
+
+local LOG = Color3.fromRGB(104, 76, 52)
+local BRACE = Color3.fromRGB(92, 68, 48)
+local PLANK = Color3.fromRGB(138, 104, 72)
+local SHINGLE = Color3.fromRGB(70, 62, 58)
+
+Watchtower.HEIGHT = 15 -- studs from the highest leg's ground to the lookout floor
+
+-- Where it goes: open ground ahead of the camp and to the left of the
+-- mountain, preferring higher ground for the view. `gap` keeps it that far
+-- from the valley's trees and rocks. Returns its frame (on the highest
+-- ground under its legs, its front facing the camp), or nil.
+local function site(kit: Kit, random: Random, gap: number): CFrame?
+	local best: CFrame? = nil
+	local bestScore = math.huge
+	for attempt = 1, 400 do
+		local angle = -random:NextNumber(math.rad(25), math.rad(70))
+		local distance = random:NextNumber(65, 130)
+		local spot = kit.camp + Vector3.new(math.sin(angle), 0, -math.cos(angle)) * distance
+		local centre = kit.ground(spot.X, spot.Z)
+		if not kit.clear(centre, 7) and centre.Y < 40 and kit.steepness(centre.X, centre.Z) < 0.8 and kit.spaced(centre, gap) then
+			local flat = Vector3.new(centre.X, 0, centre.Z)
+			local facing = Vector3.new(kit.camp.X - centre.X, 0, kit.camp.Z - centre.Z).Unit
+			local turn = CFrame.lookAt(flat, flat + facing)
+			local high, low = -math.huge, math.huge
+			for _, x in { -2.8, 2.8 } do
+				for _, z in { -3.2, 2.8 } do
+					local foot = turn * Vector3.new(x, 0, z)
+					local y = kit.ground(foot.X, foot.Z).Y
+					high, low = math.max(high, y), math.min(low, y)
+				end
+			end
+			-- Higher ground gives the lookout its view; a gentle slope is fine.
+			local score = math.abs(angle + math.rad(45)) + distance / 200 - centre.Y / 50
+			if high - low < 4 and score < bestScore then
+				bestScore = score
+				best = turn + Vector3.new(0, high, 0)
+			end
+		end
+		if attempt % 64 == 0 then task.wait() end
+	end
+	return best
+end
+
+-- Builds the tower into `parent`. Returns the model, or nil when there is
+-- nowhere open enough for it.
+function Watchtower.build(kit: Kit, parent: Instance): Model?
+	local random = Random.new(5527)
+	local frame: CFrame? = nil
+	for _, gap in { 8, 5, 3 } do
+		frame = site(kit, random, gap)
+		if frame then break end
+	end
+	if frame == nil then
+		warn("[DiamondRush] Scenery: no open ground for the watchtower, so it is left out.")
+		return nil
+	end
+	local base = frame :: CFrame
+	local model = Instance.new("Model")
+	model.Name = "Watchtower"
+	model.Parent = parent
+	local h = Watchtower.HEIGHT
+	local function at(x: number, y: number, z: number): Vector3
+		return base * Vector3.new(x, y, z)
+	end
+	local function put(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
+		return kit.piece(model, name, size, base * offset, colour, material, kind)
+	end
+	local function log(name: string, a: Vector3, b: Vector3, width: number, colour: Color3): BasePart
+		return kit.beam(model, name, a, b, width, colour, Enum.Material.Wood)
+	end
+	-- Where a point of a leg is: the legs taper from 2.8 studs out at the
+	-- ground to 2.2 under the floor. `y` is the height above the frame.
+	local function leg(sx: number, sz: number, y: number): Vector3
+		local spread = 2.8 - 0.6 * math.clamp(y / h, 0, 1)
+		return at(sx * spread, y, sz * spread)
+	end
+	-- The legs, each reaching down into the ground under it.
+	for _, sx in { -1, 1 } do
+		for _, sz in { -1, 1 } do
+			local foot = leg(sx, sz, 0)
+			local ground = kit.ground(foot.X, foot.Z).Y - base.Position.Y
+			kit.solid(log("TowerLeg", leg(sx, sz, ground - 0.6), leg(sx, sz, h + 0.2), 0.62, LOG))
+			kit.solid(put("TowerFooting", Vector3.new(1.3, 0.8, 1.3), CFrame.new(sx * 2.8, ground + 0.2, sz * 2.8), Color3.fromRGB(128, 124, 116), Enum.Material.Cobblestone))
+		end
+	end
+	-- Horizontal girts and crossed braces on every side, in three bays.
+	local levels = { 1.2, 5.8, 10.4, h - 0.2 }
+	local sides = { { { -1, -1 }, { 1, -1 } }, { { 1, -1 }, { 1, 1 } }, { { 1, 1 }, { -1, 1 } }, { { -1, 1 }, { -1, -1 } } }
+	for _, pair in sides do
+		local a, b = pair[1], pair[2]
+		for i, y in levels do
+			if i > 1 then
+				log("TowerGirt", leg(a[1], a[2], y), leg(b[1], b[2], y), 0.34, BRACE)
+			end
+			local up = levels[i + 1]
+			if up then
+				log("TowerBrace", leg(a[1], a[2], y), leg(b[1], b[2], up), 0.26, BRACE)
+				log("TowerBrace", leg(b[1], b[2], y), leg(a[1], a[2], up), 0.26, BRACE)
+			end
+		end
+	end
+	-- The lookout: a plank floor, half walls with a gap for the ladder, corner
+	-- posts up to the roof, and a warm lamp.
+	local half = 2.9
+	kit.solid(put("TowerFloor", Vector3.new(2 * half + 0.4, 0.4, 2 * half + 0.4), CFrame.new(0, h + 0.4, 0), PLANK, Enum.Material.WoodPlanks))
+	local wall = 1.25
+	local wallY = h + 0.6 + wall / 2
+	local gap = 1.4
+	-- Back and sides are whole; the front leaves a gap where the ladder arrives.
+	kit.solid(put("TowerWall", Vector3.new(2 * half, wall, 0.22), CFrame.new(0, wallY, half), PLANK, Enum.Material.WoodPlanks))
+	for _, side in { -1, 1 } do
+		kit.solid(put("TowerWall", Vector3.new(0.22, wall, 2 * half), CFrame.new(side * half, wallY, 0), PLANK, Enum.Material.WoodPlanks))
+		local width = half - gap / 2
+		kit.solid(put("TowerWall", Vector3.new(width, wall, 0.22), CFrame.new(side * (gap / 2 + width / 2), wallY, -half), PLANK, Enum.Material.WoodPlanks))
+	end
+	local roofBase = h + 3.9
+	for _, sx in { -1, 1 } do
+		for _, sz in { -1, 1 } do
+			kit.solid(log("TowerPost", at(sx * half, h + 0.6, sz * half), at(sx * half, roofBase, sz * half), 0.32, LOG))
+		end
+	end
+	for _, side in { -1, 1 } do
+		log("TowerRail", at(-half, roofBase - 0.1, side * half), at(half, roofBase - 0.1, side * half), 0.28, BRACE)
+		log("TowerRail", at(side * half, roofBase - 0.1, -half), at(side * half, roofBase - 0.1, half), 0.28, BRACE)
+	end
+	local lamp = put("TowerLamp", Vector3.new(0.45, 0.6, 0.45), CFrame.new(0, roofBase - 0.6, 0), Color3.fromRGB(255, 196, 118), Enum.Material.Neon)
+	lamp.CastShadow = false
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 190, 120)
+	light.Range = 12
+	light.Brightness = 0.8
+	light.Shadows = false
+	light.Parent = lamp
+	-- A gabled shingle roof, its ridge running front to back over the ladder.
+	local rise = 2.2
+	local span = half + 0.9
+	local pitch = math.atan2(rise, span)
+	for _, side in { -1, 1 } do
+		local length = math.sqrt(rise * rise + span * span) + 0.2
+		put("TowerRoof", Vector3.new(length, 0.3, 2 * half + 1.6), CFrame.new(side * span / 2, roofBase + rise / 2 + 0.15, 0) * CFrame.Angles(0, 0, -side * pitch), SHINGLE, Enum.Material.RoofShingles)
+	end
+	for _, z in { -half, half } do
+		for _, side in { -1, 1 } do
+			-- Each gable is two wedges, rising to the ridge from either side.
+			local turn = if side > 0 then CFrame.Angles(0, -math.pi / 2, 0) else CFrame.Angles(0, math.pi / 2, 0)
+			put("TowerGable", Vector3.new(0.25, rise, half), CFrame.new(side * half / 2, roofBase + rise / 2, z) * turn, PLANK, Enum.Material.WoodPlanks, "WedgePart")
+		end
+	end
+	put("TowerRidge", Vector3.new(0.4, 0.4, 2 * half + 1.8), CFrame.new(0, roofBase + rise + 0.2, 0), BRACE, Enum.Material.Wood)
+	-- A flag flies from the back of the ridge.
+	log("TowerFlagpole", at(0, roofBase + rise, half + 0.5), at(0, roofBase + rise + 4, half + 0.5), 0.14, Color3.fromRGB(210, 206, 196))
+	put("TowerFlag", Vector3.new(0.05, 1.1, 1.7), CFrame.new(0, roofBase + rise + 3.35, half + 1.38), Color3.fromRGB(200, 48, 52), Enum.Material.Fabric)
+	-- The ladder runs up the front, from the ground to the gap in the wall.
+	local front = -3.3
+	local foot = at(0, 0, front)
+	local bottom = kit.ground(foot.X, foot.Z).Y - base.Position.Y - 0.3
+	for _, x in { -0.55, 0.55 } do
+		kit.solid(log("TowerLadderRail", at(x, bottom, front), at(x, h + 1.7, front), 0.18, LOG))
+	end
+	local y = bottom + 0.6
+	while y < h + 1.4 do
+		log("TowerRung", at(-0.55, y, front), at(0.55, y, front), 0.12, BRACE)
+		y += 0.8
+	end
+	-- A short landing joins the ladder to the floor.
+	kit.solid(put("TowerLanding", Vector3.new(1.4, 0.3, 0.8), CFrame.new(0, h + 0.45, -half - 0.35), PLANK, Enum.Material.WoodPlanks))
+	return model
+end
+
+return Watchtower
+]]></string>
+        </Properties>
+      </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="29">
+  <Item class="StarterPlayer" referent="33">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="30">
+    <Item class="StarterPlayerScripts" referent="34">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="31">
+      <Item class="LocalScript" referent="35">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -8079,6 +9535,7 @@ local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
+local Skin = require(Shared:WaitForChild("Skin"))
 local FirstPerson = require(script:WaitForChild("FirstPerson"))
 -- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
 FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
@@ -8177,6 +9634,8 @@ LobbyView.start(Request, State, function(inGame: boolean)
 end)
 -- The diamond bird flies round the mountain; catching it doubles gifts.
 require(script:WaitForChild("BirdView")).start(gui, State)
+-- Cherry petals fall round the camera when the map shows the sakura theme.
+require(script:WaitForChild("PetalView")).start(State)
 
 -- Stone left (top centre) -------------------------------------------------------
 local stoneBox = make("Frame", {
@@ -8187,14 +9646,14 @@ local stoneBox = make("Frame", {
 	BackgroundTransparency = 0.15,
 }, gui)
 rounded(stoneBox, 16)
-make("TextLabel", {
+local stoneTitle = make("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 26),
 	Position = UDim2.fromOffset(0, 6),
 	BackgroundTransparency = 1,
 	Font = FONT,
 	TextSize = 22,
 	TextColor3 = Color3.fromRGB(200, 195, 215),
-	Text = "STONE LEFT",
+	Text = "STONE LEFT", -- or HAY LEFT (see refreshSkin)
 }, stoneBox)
 local stoneValue = make("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 50),
@@ -8391,7 +9850,8 @@ local winBest = winLine(216, 50, 40, GOLD)
 local winNewBest = winLine(282, 44, 34, Color3.fromRGB(120, 255, 150))
 
 local function showWin(data: { [string]: any })
-	winTitle.Text = "💎 DIAMOND SECURED!"
+	local words = Skin.words(attr("Skin", "stone"))
+	winTitle.Text = words.icon .. " " .. string.upper(words.gem) .. " SECURED!"
 	winWho.Text = tostring(data.winner or "") .. " wins!"
 	winTime.Text = "This round's time: " .. Format.duration(tonumber(data.time) or 0)
 	winBest.Text = "Best round's time: " .. Format.duration(tonumber(data.best) or 0)
@@ -8462,7 +9922,7 @@ local function panelBox(text: string, onSubmit: (string) -> ()): TextBox
 	return box
 end
 
-local function panelButtons(buttons: { { any } })
+local function panelButtons(buttons: { { any } }): { TextButton }
 	panelOrder += 1
 	local row = make("Frame", {
 		LayoutOrder = panelOrder,
@@ -8471,6 +9931,7 @@ local function panelButtons(buttons: { { any } })
 		ZIndex = 11,
 	}, panel)
 	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6) }, row)
+	local made: { TextButton } = {}
 	for _, spec in buttons do
 		local button = make("TextButton", {
 			Size = UDim2.new(1 / #buttons, -6, 1, 0),
@@ -8483,7 +9944,9 @@ local function panelButtons(buttons: { { any } })
 		}, row)
 		rounded(button, 8)
 		button.Activated:Connect(spec[2])
+		table.insert(made, button)
 	end
+	return made
 end
 
 local function send(action: string, value: any)
@@ -8658,6 +10121,39 @@ panelLabel("DIAMOND BIRD (every 5 to 7½ minutes)")
 panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
+
+panelLabel("MAP THEME (changes for everyone straight away)")
+local themeButtons = panelButtons({
+	{ "⛰ Alpine", function() send("setTheme", "default") end },
+	{ "🌸 Sakura", function() send("setTheme", "sakura") end },
+	{ "🚜 Farm", function() send("setTheme", "farm") end },
+})
+-- The theme showing now is lit up.
+local function refreshTheme()
+	local theme = attr("Theme", "default")
+	for i, name in { "default", "sakura", "farm" } do
+		themeButtons[i].BackgroundColor3 = if theme == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+	end
+end
+State:GetAttributeChangedSignal("Theme"):Connect(refreshTheme)
+refreshTheme()
+
+panelLabel("MOUNTAIN SKIN (same game, reskinned)")
+local skinButtons = panelButtons({
+	{ "💎 Stone & diamond", function() send("setSkin", "stone") end },
+	{ "🌾 Hay & needle", function() send("setSkin", "hay") end },
+})
+-- The mountain repaints itself and the display's words follow the skin.
+local function refreshSkin()
+	local skin = attr("Skin", "stone")
+	for i, name in Skin.NAMES do
+		skinButtons[i].BackgroundColor3 = if skin == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+	end
+	stoneTitle.Text = string.upper(Skin.words(skin).material) .. " LEFT"
+	view:setSkin(skin)
+end
+State:GetAttributeChangedSignal("Skin"):Connect(refreshSkin)
+refreshSkin()
 
 panelLabel("REBUILD TEST GIFTS (adds blocks)")
 panelLabel("Tests refill dug spaces, then grow new mountain rock.")
@@ -8889,11 +10385,11 @@ RunService.RenderStepped:Connect(function(dt: number)
 		lastCount = -1
 		banner.Visible = phase == "Revealed" or phase == "Rebuilding"
 		if phase == "Rebuilding" then
-			banner.Text = "REBUILDING THE MOUNTAIN"
+			banner.Text = "REBUILDING THE " .. string.upper(Skin.words(attr("Skin", "stone")).heap)
 			banner.TextTransparency = 0
 		end
 		if phase == "Revealed" then
-			banner.Text = "DIAMOND UNCOVERED — FIND IT AND CLICK IT"
+			banner.Text = string.upper(Skin.words(attr("Skin", "stone")).gem) .. " UNCOVERED — FIND IT AND CLICK IT"
 			banner.TextTransparency = 0.25 + 0.25 * math.sin(now * 6)
 		end
 	end
@@ -8909,7 +10405,8 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	elseif kind == "notice" and type(data) == "string" then
 		addFeed(data, 0, "notice")
 	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then
-		addFeed(tostring(data.name) .. (if data.reason == "rebuild" then " — rebuild cancelled the countdown! Pick up the diamond again." else " dropped the diamond!"), 0, "drop")
+		local gem = Skin.words(attr("Skin", "stone")).gem
+		addFeed(tostring(data.name) .. (if data.reason == "rebuild" then " — rebuild cancelled the countdown! Pick up the " .. gem .. " again." else " dropped the " .. gem .. "!"), 0, "drop")
 	end
 end)
 
@@ -9031,7 +10528,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="32">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">BirdView</string>
             <string name="Source"><![CDATA[--!strict
@@ -9184,7 +10681,7 @@ return BirdView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -9307,7 +10804,9 @@ function FirstPerson.start()
 	end
 
 	-- The held gem: anchored facets moved in one call each frame (no welds).
-	local gem = DiamondShape.build(GEM_SIZE, "HeldDiamond")
+	-- In the haystack skin it is a needle (see Skin).
+	local gemKind = if State:GetAttribute("Skin") == "hay" then "needle" else "diamond"
+	local gem = DiamondShape.build(GEM_SIZE, "HeldDiamond", gemKind)
 	local core = part("Core", Vector3.new(0.1, 0.1, 0.1), Color3.new(1, 1, 1))
 	core.Transparency = 1
 	core.Parent = gem.model
@@ -9335,6 +10834,18 @@ function FirstPerson.start()
 	outline.OutlineTransparency = 0.35
 	outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	outline.Parent = gem.model
+	-- A reskin rebuilds the held gem, carrying its light, sparkles and outline over.
+	State:GetAttributeChangedSignal("Skin"):Connect(function()
+		local kind = if State:GetAttribute("Skin") == "hay" then "needle" else "diamond"
+		if kind == gemKind then return end
+		gemKind = kind
+		local old = gem
+		gem = DiamondShape.build(GEM_SIZE, "HeldDiamond", kind)
+		core.Parent = gem.model
+		outline.Parent = gem.model
+		gem.model.Parent = old.model.Parent
+		old.model:Destroy()
+	end)
 
 	local hiddenArms: { [BasePart]: number } = {}
 	local armNames = { RightHand = true, RightLowerArm = true, RightUpperArm = true, LeftHand = true, LeftLowerArm = true, LeftUpperArm = true, ["Right Arm"] = true, ["Left Arm"] = true }
@@ -9532,7 +11043,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -9874,7 +11385,7 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="39">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
@@ -9891,6 +11402,7 @@ local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Format = require(Shared:WaitForChild("Format"))
+local Skin = require(Shared:WaitForChild("Skin"))
 
 local LobbyView = {}
 
@@ -9941,12 +11453,15 @@ local function text(parent: Instance, properties: { [string]: any }): TextLabel
 	return label
 end
 
--- What the Diamond in the Rough card says about the round going on now.
-function LobbyView.status(phase: string, stone: number): string
-	if phase == "Won" then return "🏆 Diamond found! A new round starts soon" end
-	if phase == "Rebuilding" then return "⛰ The mountain is being rebuilt" end
-	if phase == "Holding" then return "💎 Someone is holding the diamond!" end
-	return "🔴 LIVE · " .. Format.commas(stone) .. " stone left"
+-- What the Diamond in the Rough card says about the round going on now, in
+-- the mountain's skin ("stone" by default, or "hay": see Skin).
+function LobbyView.status(phase: string, stone: number, skin: string?): string
+	local words = Skin.words(skin)
+	local gem = words.gem
+	if phase == "Won" then return "🏆 " .. string.upper(string.sub(gem, 1, 1)) .. string.sub(gem, 2) .. " found! A new round starts soon" end
+	if phase == "Rebuilding" then return "⛰ The " .. words.heap .. " is being rebuilt" end
+	if phase == "Holding" then return words.icon .. " Someone is holding the " .. gem .. "!" end
+	return "🔴 LIVE · " .. Format.commas(stone) .. " " .. words.material .. " left"
 end
 
 -- `request` sends joinGame / leaveGame; `onChange(inGame)` runs whenever the
@@ -10184,10 +11699,11 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	end)
 
 	local function refreshLive()
-		live.Text = LobbyView.status(tostring(state:GetAttribute("Phase") or "Digging"), tonumber(state:GetAttribute("Stone")) or 0)
+		live.Text = LobbyView.status(tostring(state:GetAttribute("Phase") or "Digging"), tonumber(state:GetAttribute("Stone")) or 0, state:GetAttribute("Skin"))
 	end
 	state:GetAttributeChangedSignal("Phase"):Connect(refreshLive)
 	state:GetAttributeChangedSignal("Stone"):Connect(refreshLive)
+	state:GetAttributeChangedSignal("Skin"):Connect(refreshLive)
 	refreshLive()
 
 	local inGame: boolean? = nil
@@ -10250,7 +11766,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -10285,9 +11801,13 @@ local DEBRIS_LIMIT = 24
 local REBUILD_LAYERS = 16
 local REBUILD_STEP = 0.15 -- seconds between rebuild layers, matching the server
 
-local MATERIALS: { Enum.Material } = {}
-for index, layer in RockStyle.LAYERS do
-	MATERIALS[index] = (Enum.Material :: any)[layer.material]
+-- Materials per layer for each skin (stone, or hay: see Skin).
+local MATERIALS: { [string]: { Enum.Material } } = {}
+for skin, palette in RockStyle.SKINS do
+	MATERIALS[skin] = {}
+	for index, layer in palette.layers do
+		MATERIALS[skin][index] = (Enum.Material :: any)[layer.material]
+	end
 end
 
 -- Rotation for every shape code, so a wedge slopes down towards open air and a
@@ -10318,6 +11838,7 @@ export type View = typeof(setmetatable({} :: {
 	round: number,
 	height: number,
 	blockSize: number,
+	skin: string,
 	ready: boolean,
 	meta: any,
 	sliceStart: number,
@@ -10344,6 +11865,7 @@ function MountainView.new(): View
 		round = 0,
 		height = 1,
 		blockSize = 0.4,
+		skin = "stone",
 		ready = false,
 		meta = nil,
 		sliceStart = os.clock(),
@@ -10438,6 +11960,30 @@ function MountainView._handle(self: View, kind: string, payload: any)
 		self:_finishSnapshot()
 	elseif kind == "diff" and self.grid and self.ready and payload.round == self.round then
 		self:_applyDiff(payload)
+	elseif kind == "skin" then
+		self:_repaint(payload)
+	end
+end
+
+-- Reskins the mountain (stone or hay, see Skin), in order with the changes
+-- from the server.
+function MountainView.setSkin(self: View, skin: string)
+	if RockStyle.SKINS[skin] == nil then return end
+	self:push("skin", skin)
+end
+
+-- Every drawn cell keeps its shape and layer and takes the new skin's look.
+function MountainView._repaint(self: View, skin: string)
+	if skin == self.skin then return end
+	self.skin = skin
+	local materials = MATERIALS[skin]
+	local count = 0
+	for key, part in self.parts do
+		local layer, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height, skin)
+		part.Material = materials[layer]
+		part.Color = Color3.fromRGB(r, g, b)
+		count += 1
+		if count % 512 == 0 then self:_pace() end
 	end
 end
 
@@ -10492,7 +12038,7 @@ function MountainView._finishSnapshot(self: View)
 			for i = 1, math.min(5, #keys) do
 				local key = keys[math.max(1, math.floor(i * #keys / 5))]
 				local shape = RockStyle.shape(grid, key)
-				local _, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height)
+				local _, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height, self.skin)
 				table.insert(samples, {
 					frame = CFrame.new(self:keyPosition(key)) * (self.rotations[shape] or CFrame.identity),
 					size = self.templates[1].Size,
@@ -10556,7 +12102,7 @@ function MountainView._refresh(self: View, key: number): BasePart?
 		return nil
 	end
 	local shape = RockStyle.shape(grid, key)
-	local layer, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height)
+	local layer, r, g, b = RockStyle.look(key, self.tops[key % LAYER], self.height, self.skin)
 	local code = shape + layer * 16
 	if code == old then return nil end
 	local kind = RockStyle.kind(shape)
@@ -10574,7 +12120,7 @@ function MountainView._refresh(self: View, key: number): BasePart?
 	end
 	local stone = part :: BasePart
 	stone.CFrame = CFrame.new(self:keyPosition(key)) * self.rotations[shape]
-	stone.Material = MATERIALS[layer]
+	stone.Material = MATERIALS[self.skin][layer]
 	stone.Color = Color3.fromRGB(r, g, b)
 	if fresh then stone.Parent = self.folder end
 	self.codes[key] = code
@@ -10718,7 +12264,109 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="41">
+          <Properties>
+            <string name="Name">PetalView</string>
+            <string name="Source"><![CDATA[--!strict
+-- Cherry petals drift down around the camera while the map shows the sakura
+-- theme and this player is in the game (not the lobby). The petals are local
+-- parts in a box that follows the camera: each falls, sways and tumbles on its
+-- own path, wrapping round the box, so the air stays full wherever you look
+-- for the cost of one BulkMoveTo a frame.
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local PetalView = {}
+
+local COUNT = 90
+local BOX = Vector3.new(80, 40, 80) -- studs round the camera
+local PINKS = {
+	Color3.fromRGB(255, 228, 236),
+	Color3.fromRGB(255, 206, 220),
+	Color3.fromRGB(255, 186, 204),
+	Color3.fromRGB(249, 163, 187),
+}
+
+type Petal = { seed: Vector3, fall: number, sway: number, phase: number, spin: Vector3 }
+
+-- Wraps `value` into [0, size).
+local function wrap(value: number, size: number): number
+	return value - math.floor(value / size) * size
+end
+
+-- Where a petal is at time `t`, inside the box round `centre`. Pure, for tests.
+function PetalView.frame(petal: Petal, t: number, centre: Vector3): CFrame
+	local drift = petal.seed + Vector3.new(
+		math.sin(t * petal.sway + petal.phase) * 2.2 + t * 1.1,
+		-t * petal.fall,
+		math.cos(t * petal.sway * 0.8 + petal.phase) * 1.6 + t * 0.4
+	)
+	local corner = centre - BOX / 2
+	local at = corner + Vector3.new(wrap(drift.X - corner.X, BOX.X), wrap(drift.Y - corner.Y, BOX.Y), wrap(drift.Z - corner.Z, BOX.Z))
+	return CFrame.new(at) * CFrame.Angles(t * petal.spin.X, t * petal.spin.Y, t * petal.spin.Z)
+end
+
+function PetalView.start(state: Instance)
+	local player = Players.LocalPlayer
+	local random = Random.new()
+	local folder = Instance.new("Folder")
+	folder.Name = "SakuraPetals"
+	local parts: { BasePart } = {}
+	local petals: { Petal } = {}
+	local frames: { CFrame } = {}
+	for i = 1, COUNT do
+		local part = Instance.new("Part")
+		part.Name = "Petal"
+		part.Size = Vector3.new(0.34, 0.04, 0.26)
+		part.Color = PINKS[random:NextInteger(1, #PINKS)]
+		part.Material = Enum.Material.SmoothPlastic
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+		part.CastShadow = false
+		part.Parent = folder
+		parts[i] = part
+		petals[i] = {
+			seed = Vector3.new(random:NextNumber(0, BOX.X), random:NextNumber(0, BOX.Y), random:NextNumber(0, BOX.Z)),
+			fall = random:NextNumber(1.6, 3.2),
+			sway = random:NextNumber(0.6, 1.4),
+			phase = random:NextNumber(0, math.pi * 2),
+			spin = Vector3.new(random:NextNumber(-2.5, 2.5), random:NextNumber(-1.5, 1.5), random:NextNumber(-2.5, 2.5)),
+		}
+		frames[i] = CFrame.identity
+	end
+	local connection: RBXScriptConnection? = nil
+	local function refresh()
+		local on = state:GetAttribute("Theme") == "sakura" and player:GetAttribute("InGame") == true
+		if on and connection == nil then
+			folder.Parent = workspace
+			connection = RunService.RenderStepped:Connect(function()
+				local camera = workspace.CurrentCamera
+				if camera == nil then return end
+				local t = os.clock()
+				local centre = camera.CFrame.Position
+				for i, petal in petals do
+					frames[i] = PetalView.frame(petal, t, centre)
+				end
+				workspace:BulkMoveTo(parts, frames, Enum.BulkMoveMode.FireCFrameChanged)
+			end)
+		elseif not on and connection ~= nil then
+			(connection :: RBXScriptConnection):Disconnect()
+			connection = nil
+			folder.Parent = nil
+		end
+	end
+	state:GetAttributeChangedSignal("Theme"):Connect(refresh)
+	player:GetAttributeChangedSignal("InGame"):Connect(refresh)
+	refresh()
+end
+
+return PetalView
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="42">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -10845,7 +12493,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="43">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -10961,12 +12609,12 @@ return SceneryView
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="39">
+  <Item class="Workspace" referent="44">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="40">
+    <Item class="Terrain" referent="45">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>

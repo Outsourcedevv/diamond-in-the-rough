@@ -279,6 +279,15 @@
   </section>
 
   <section>
+    <h2>3 · Map theme</h2>
+    <p>Switch the game's map for everyone, straight away. The game remembers the choice.</p>
+    <div class="grid" id="themes"></div>
+    <p style="margin-top:14px">The mountain itself can be stone with a diamond hidden inside, or a haystack with a needle. It's the same game, reskinned.</p>
+    <div class="grid" id="skins"></div>
+    <p id="themeMessage" role="status"></p>
+  </section>
+
+  <section>
     <h2>Recent events</h2>
     <ul id="recent"><li><small>Nothing yet.</small></li></ul>
   </section>
@@ -336,6 +345,42 @@ for (const blocks of [1000, 10000, 100000, 1500000]) {
     finally { button.disabled = false; }
   };
   document.getElementById('rebuildTests').append(button);
+}
+for (const [theme, icon, name] of [['default', '⛰', 'Alpine'], ['sakura', '🌸', 'Sakura'], ['farm', '🚜', 'Farm']]) {
+  const button = document.createElement('button');
+  button.textContent = `${icon} ${name}`;
+  button.className = 'gift';
+  button.onclick = async () => {
+    button.disabled = true;
+    const message = document.getElementById('themeMessage');
+    try {
+      const response = await post('/theme', {theme});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      message.textContent = `${name} theme sent. The map changes when the game receives it.`;
+      await refresh();
+    } catch(error) { message.textContent = error.message; }
+    finally { button.disabled = false; }
+  };
+  document.getElementById('themes').append(button);
+}
+for (const [skin, label] of [['stone', '💎 Stone & diamond'], ['hay', '🌾 Hay & needle']]) {
+  const button = document.createElement('button');
+  button.textContent = label;
+  button.className = 'gift';
+  button.onclick = async () => {
+    button.disabled = true;
+    const message = document.getElementById('themeMessage');
+    try {
+      const response = await post('/skin', {skin});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      message.textContent = skin === 'hay' ? 'Haystack sent. The mountain turns to hay, with a needle to find.' : 'Stone sent. The mountain turns back to stone, with a diamond to find.';
+      await refresh();
+    } catch(error) { message.textContent = error.message; }
+    finally { button.disabled = false; }
+  };
+  document.getElementById('skins').append(button);
 }
 const box = document.getElementById('tests');
 for (const [label, body] of tests) {
@@ -422,6 +467,8 @@ function describe(event) {
   if (event.type === 'gift' && event.rocks < 0) return `${event.name} sent ${event.gift} · rebuild up to ${Math.abs(event.rocks * event.count).toLocaleString()} blocks`;
   if (event.type === 'gift') return `${event.name} sent ${event.gift} x${event.count} · ${event.coins * event.count} coins`;
   if (event.type === 'like') return `${event.name} liked x${event.likes}`;
+  if (event.type === 'theme') return `Map theme: ${({ sakura: 'Sakura', farm: 'Farm' })[event.theme] ?? 'Alpine'}`;
+  if (event.type === 'skin') return `Mountain skin: ${event.skin === 'hay' ? 'Hay & needle' : 'Stone & diamond'}`;
   return `${event.name} ${event.type === 'follow' ? 'followed' : 'shared the live'}`;
 }
 async function refresh() {

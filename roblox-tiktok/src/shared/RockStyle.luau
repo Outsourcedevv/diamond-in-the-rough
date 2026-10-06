@@ -110,10 +110,31 @@ RockStyle.LAYERS = {
 	{ name = "Rock", material = "Rock", colour = { 113, 108, 102 } },
 	{ name = "Slate", material = "Slate", colour = { 98, 96, 97 } },
 }
+-- The haystack skin (see Skin): the same layers in straw. Sun-bleached tops,
+-- greener fresh hay low down, packed hay beneath it and golden bales inside.
+RockStyle.HAY_LAYERS = {
+	{ name = "Bleached straw", material = "Grass", colour = { 236, 218, 152 } },
+	{ name = "Fresh hay", material = "Grass", colour = { 190, 178, 88 } },
+	{ name = "Packed hay", material = "Fabric", colour = { 150, 112, 58 } },
+	{ name = "Straw", material = "Grass", colour = { 222, 184, 94 } },
+	{ name = "Old hay", material = "Grass", colour = { 196, 154, 70 } },
+	{ name = "Bale", material = "Fabric", colour = { 174, 134, 62 } },
+}
+-- Layers and the colour of the rare flecks inside, for each skin.
+RockStyle.SKINS = {
+	stone = { layers = RockStyle.LAYERS, fleck = { 165, 160, 150 } },
+	hay = { layers = RockStyle.HAY_LAYERS, fleck = { 118, 88, 42 } },
+}
+
+-- The layer table for a skin name ("stone" when unknown).
+function RockStyle.layers(skin: string?): { { name: string, material: string, colour: { number } } }
+	return (RockStyle.SKINS[skin or "stone"] or RockStyle.SKINS.stone).layers
+end
 
 -- The layer and colour for a cell. `top` is the column's original summit
--- layer, `height` the original mountain height in layers.
-function RockStyle.look(key: number, top: number?, height: number): (number, number, number, number)
+-- layer, `height` the original mountain height in layers. `skin` picks the
+-- palette ("stone" by default, or "hay"); the layer is the same in both.
+function RockStyle.look(key: number, top: number?, height: number, skin: string?): (number, number, number, number)
 	local column = key % LAYER
 	local x, y, z = column % SPAN - 128, key // LAYER, column // SPAN - 128
 	local h = y / math.max(1, height)
@@ -132,7 +153,8 @@ function RockStyle.look(key: number, top: number?, height: number): (number, num
 		-- Tilted strata show in crater walls.
 		layer = if math.noise(x * 0.05, y * 0.22 + x * 0.03, z * 0.05) > 0.1 then RockStyle.SLATE else RockStyle.ROCK
 	end
-	local base = RockStyle.LAYERS[layer].colour
+	local palette = RockStyle.SKINS[skin or "stone"] or RockStyle.SKINS.stone
+	local base = palette.layers[layer].colour
 	local shade = 0.9 + sample(key, 7321441) * 0.18
 	local r, g, b = base[1] * shade, base[2] * shade, base[3] * shade
 	if layer == RockStyle.GRASS then
@@ -140,8 +162,8 @@ function RockStyle.look(key: number, top: number?, height: number): (number, num
 		local warm = math.clamp(math.noise(x * 0.21, z * 0.21, 9.1) + 0.5, 0, 1)
 		r, g, b = r + warm * 18, g + warm * 12, b + warm * 4
 	elseif layer >= RockStyle.ROCK and sample(key, 517927) > 0.985 then
-		-- Rare pale quartz flecks keep the rock from looking flat.
-		r, g, b = 165, 160, 150
+		-- Rare flecks (pale quartz, or dark stalks in hay) keep it from looking flat.
+		r, g, b = palette.fleck[1], palette.fleck[2], palette.fleck[3]
 	end
 	return layer, math.min(255, r), math.min(255, g), math.min(255, b)
 end

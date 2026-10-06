@@ -89,6 +89,49 @@ for _, p in instances do
 end
 check(facets == 64, "the diamond is a full brilliant cut")
 
+local lobbyParts = #instances - before
+
+-- The haystack skin's needle: a slim steel shaft, point, eye and red thread.
+local needle = DiamondShape.facets(1, "needle")
+local cylinders, thread, glint, farthest = 0, 0, 0, 0
+for _, facet in needle do
+	check(facet.shape ~= nil, "needle parts are blocks, cylinders and a ball, not facets")
+	if facet.shape == "Cylinder" then cylinders += 1 end
+	if facet.colour == Color3.fromRGB(214, 40, 52) then thread += 1 end
+	if facet.material == "Material.Neon" then glint += 1 end
+	farthest = math.max(farthest, facet.offset.Position.Magnitude)
+	check(facet.size.Y <= 0.1 and facet.size.Z <= 0.1, "the needle is slim")
+end
+check(cylinders >= 6 and thread == 3 and glint == 1, "shaft, point, thread and glint")
+check(farthest > 0.5 and farthest < 0.95, "the needle reaches across the gem's space: " .. farthest)
+local heldNeedle = DiamondShape.build(2, "HeldDiamond", "needle")
+check(#heldNeedle.parts == #needle and heldNeedle.parts[1].ClassName == "Part", "a held needle is built from the same parts")
+check(heldNeedle.parts[1].Shape == "PartType.Cylinder", "the shaft is round")
+-- A world gem switches between diamond and needle, keeping its visibility.
+local root = Instance.new("Part")
+root.Size = Vector3.new(0.68, 0.68, 0.68)
+root.CFrame = CFrame.new(0, 10, 0)
+root.Parent = workspace
+DiamondShape.attach(root)
+DiamondShape.visible(root, true)
+local function shown()
+	local list = root:FindFirstChild("Facets"):GetChildren()
+	local visible = 0
+	for _, face in list do if face:IsA("BasePart") and face.Transparency == 0 then visible += 1 end end
+	return #list, visible
+end
+local count, visible = shown()
+check(count == 64 and visible == 64, "the world diamond shows")
+DiamondShape.setKind(root, "needle")
+count, visible = shown()
+check(root:GetAttribute("GemKind") == "needle" and count == #needle and visible == #needle, "it becomes a visible needle")
+DiamondShape.resize(root, Vector3.new(2, 2, 2))
+count = shown()
+check(count == #needle, "a held needle stays a needle when it grows")
+DiamondShape.setKind(root, "diamond")
+count, visible = shown()
+check(count == 64 and visible == 64, "and back to a diamond")
+
 -- The welcome crest faces the spawn and can be seen over the diamond from the
 -- third-person camera behind a player standing on the spawn.
 check(crest ~= nil and crest.CFrame.LookVector:Dot(Vector3.new(0, 0, 1)) > 0.999, "the crest faces the spawn")
@@ -110,7 +153,13 @@ check(LobbyView.status("Revealed", 9) == "🔴 LIVE · 9 stone left", "still liv
 check(LobbyView.status("Holding", 0) == "💎 Someone is holding the diamond!", "holding")
 check(LobbyView.status("Won", 0) == "🏆 Diamond found! A new round starts soon", "won")
 check(LobbyView.status("Rebuilding", 0) == "⛰ The mountain is being rebuilt", "rebuilding")
-print(string.format("PASS: %d lobby checks (%d parts)", passed, #instances - before))
+-- The haystack skin says hay and needle instead.
+check(LobbyView.status("Digging", 1200, "hay") == "🔴 LIVE · 1,200 hay left", "hay left")
+check(LobbyView.status("Holding", 0, "hay") == "🌾 Someone is holding the needle!", "holding the needle")
+check(LobbyView.status("Won", 0, "hay") == "🏆 Needle found! A new round starts soon", "needle found")
+check(LobbyView.status("Rebuilding", 0, "hay") == "⛰ The haystack is being rebuilt", "haystack rebuilt")
+check(LobbyView.status("Won", 0, "stone") == "🏆 Diamond found! A new round starts soon", "stone skin reads as before")
+print(string.format("PASS: %d lobby checks (%d parts)", passed, lobbyParts))
 '''
 
 generated = root / "tests/lobby.generated.luau"

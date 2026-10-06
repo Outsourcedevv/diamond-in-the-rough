@@ -8,7 +8,7 @@ import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue } from './c
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createEventQueue, createGiftTracker, likeEvent, socialEvent, packMessages, rebuildTestEvent } from './events.mjs';
+import { createEventQueue, createGiftTracker, likeEvent, socialEvent, packMessages, rebuildTestEvent, themeEvent, THEMES, skinEvent, SKINS } from './events.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const configPath = path.join(here, 'config.json');
@@ -58,7 +58,7 @@ function emit(event) {
   if (event.type === 'giftRule') return;
   recent.unshift({ at: Date.now(), ...stamped });
   recent.length = Math.min(recent.length, 30);
-  const what = event.type === 'gift' ? `${event.gift} x${event.count} (${event.coins} coins each)` : event.type === 'like' ? `${event.likes} likes` : event.type;
+  const what = event.type === 'gift' ? `${event.gift} x${event.count} (${event.coins} coins each)` : event.type === 'like' ? `${event.likes} likes` : event.type === 'theme' ? `map theme ${THEMES[event.theme]}` : event.type === 'skin' ? `mountain skin ${SKINS[event.skin]}` : event.type;
   log(`${event.name}: ${what}`);
 }
 
@@ -230,6 +230,18 @@ const server = http.createServer(async (request, response) => {
   if (request.method === 'POST' && url.pathname === '/test/rebuild') {
     try {
       emit(rebuildTestEvent((await readBody(request)).blocks));
+      return sendJson(response, 200, { ok: true });
+    } catch (error) { return sendJson(response, 400, { error: error.message }); }
+  }
+  if (request.method === 'POST' && url.pathname === '/theme') {
+    try {
+      emit(themeEvent((await readBody(request)).theme));
+      return sendJson(response, 200, { ok: true });
+    } catch (error) { return sendJson(response, 400, { error: error.message }); }
+  }
+  if (request.method === 'POST' && url.pathname === '/skin') {
+    try {
+      emit(skinEvent((await readBody(request)).skin));
       return sendJson(response, 200, { ok: true });
     } catch (error) { return sendJson(response, 400, { error: error.message }); }
   }

@@ -12,6 +12,7 @@ local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
+local Skin = require(Shared:WaitForChild("Skin"))
 local FirstPerson = require(script:WaitForChild("FirstPerson"))
 -- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
 FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
@@ -110,6 +111,8 @@ LobbyView.start(Request, State, function(inGame: boolean)
 end)
 -- The diamond bird flies round the mountain; catching it doubles gifts.
 require(script:WaitForChild("BirdView")).start(gui, State)
+-- Cherry petals fall round the camera when the map shows the sakura theme.
+require(script:WaitForChild("PetalView")).start(State)
 
 -- Stone left (top centre) -------------------------------------------------------
 local stoneBox = make("Frame", {
@@ -120,14 +123,14 @@ local stoneBox = make("Frame", {
 	BackgroundTransparency = 0.15,
 }, gui)
 rounded(stoneBox, 16)
-make("TextLabel", {
+local stoneTitle = make("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 26),
 	Position = UDim2.fromOffset(0, 6),
 	BackgroundTransparency = 1,
 	Font = FONT,
 	TextSize = 22,
 	TextColor3 = Color3.fromRGB(200, 195, 215),
-	Text = "STONE LEFT",
+	Text = "STONE LEFT", -- or HAY LEFT (see refreshSkin)
 }, stoneBox)
 local stoneValue = make("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 50),
@@ -324,7 +327,8 @@ local winBest = winLine(216, 50, 40, GOLD)
 local winNewBest = winLine(282, 44, 34, Color3.fromRGB(120, 255, 150))
 
 local function showWin(data: { [string]: any })
-	winTitle.Text = "💎 DIAMOND SECURED!"
+	local words = Skin.words(attr("Skin", "stone"))
+	winTitle.Text = words.icon .. " " .. string.upper(words.gem) .. " SECURED!"
 	winWho.Text = tostring(data.winner or "") .. " wins!"
 	winTime.Text = "This round's time: " .. Format.duration(tonumber(data.time) or 0)
 	winBest.Text = "Best round's time: " .. Format.duration(tonumber(data.best) or 0)
@@ -395,7 +399,7 @@ local function panelBox(text: string, onSubmit: (string) -> ()): TextBox
 	return box
 end
 
-local function panelButtons(buttons: { { any } })
+local function panelButtons(buttons: { { any } }): { TextButton }
 	panelOrder += 1
 	local row = make("Frame", {
 		LayoutOrder = panelOrder,
@@ -404,6 +408,7 @@ local function panelButtons(buttons: { { any } })
 		ZIndex = 11,
 	}, panel)
 	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6) }, row)
+	local made: { TextButton } = {}
 	for _, spec in buttons do
 		local button = make("TextButton", {
 			Size = UDim2.new(1 / #buttons, -6, 1, 0),
@@ -416,7 +421,9 @@ local function panelButtons(buttons: { { any } })
 		}, row)
 		rounded(button, 8)
 		button.Activated:Connect(spec[2])
+		table.insert(made, button)
 	end
+	return made
 end
 
 local function send(action: string, value: any)
@@ -591,6 +598,39 @@ panelLabel("DIAMOND BIRD (every 5 to 7½ minutes)")
 panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
+
+panelLabel("MAP THEME (changes for everyone straight away)")
+local themeButtons = panelButtons({
+	{ "⛰ Alpine", function() send("setTheme", "default") end },
+	{ "🌸 Sakura", function() send("setTheme", "sakura") end },
+	{ "🚜 Farm", function() send("setTheme", "farm") end },
+})
+-- The theme showing now is lit up.
+local function refreshTheme()
+	local theme = attr("Theme", "default")
+	for i, name in { "default", "sakura", "farm" } do
+		themeButtons[i].BackgroundColor3 = if theme == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+	end
+end
+State:GetAttributeChangedSignal("Theme"):Connect(refreshTheme)
+refreshTheme()
+
+panelLabel("MOUNTAIN SKIN (same game, reskinned)")
+local skinButtons = panelButtons({
+	{ "💎 Stone & diamond", function() send("setSkin", "stone") end },
+	{ "🌾 Hay & needle", function() send("setSkin", "hay") end },
+})
+-- The mountain repaints itself and the display's words follow the skin.
+local function refreshSkin()
+	local skin = attr("Skin", "stone")
+	for i, name in Skin.NAMES do
+		skinButtons[i].BackgroundColor3 = if skin == name then Color3.fromRGB(214, 92, 138) else Color3.fromRGB(90, 70, 150)
+	end
+	stoneTitle.Text = string.upper(Skin.words(skin).material) .. " LEFT"
+	view:setSkin(skin)
+end
+State:GetAttributeChangedSignal("Skin"):Connect(refreshSkin)
+refreshSkin()
 
 panelLabel("REBUILD TEST GIFTS (adds blocks)")
 panelLabel("Tests refill dug spaces, then grow new mountain rock.")
@@ -822,11 +862,11 @@ RunService.RenderStepped:Connect(function(dt: number)
 		lastCount = -1
 		banner.Visible = phase == "Revealed" or phase == "Rebuilding"
 		if phase == "Rebuilding" then
-			banner.Text = "REBUILDING THE MOUNTAIN"
+			banner.Text = "REBUILDING THE " .. string.upper(Skin.words(attr("Skin", "stone")).heap)
 			banner.TextTransparency = 0
 		end
 		if phase == "Revealed" then
-			banner.Text = "DIAMOND UNCOVERED — FIND IT AND CLICK IT"
+			banner.Text = string.upper(Skin.words(attr("Skin", "stone")).gem) .. " UNCOVERED — FIND IT AND CLICK IT"
 			banner.TextTransparency = 0.25 + 0.25 * math.sin(now * 6)
 		end
 	end
@@ -842,7 +882,8 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	elseif kind == "notice" and type(data) == "string" then
 		addFeed(data, 0, "notice")
 	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then
-		addFeed(tostring(data.name) .. (if data.reason == "rebuild" then " — rebuild cancelled the countdown! Pick up the diamond again." else " dropped the diamond!"), 0, "drop")
+		local gem = Skin.words(attr("Skin", "stone")).gem
+		addFeed(tostring(data.name) .. (if data.reason == "rebuild" then " — rebuild cancelled the countdown! Pick up the " .. gem .. " again." else " dropped the " .. gem .. "!"), 0, "drop")
 	end
 end)
 
