@@ -20,7 +20,7 @@ end
 for _, case in { {1, 1}, {9, 1}, {10, 2}, {99, 2}, {100, 3}, {499, 3}, {500, 4}, {999, 4}, {1000, 5}, {9999, 5}, {10000, 6}, {34999, 6}, {1000000000, 6} } do
 	check(GiftTier.forCoins(case[1]) == case[2], "gift tier boundary " .. case[1])
 end
-check(GiftTier.forCoins(30 * 40) == 5, "gift combos scale by their total coin value")
+check(GiftTier.forCoins(30) == 2 and GiftTier.forCoins(1000) == 5, "a combo's effect comes from one gift's coins (it plays as separate gifts)")
 
 -- Hold countdown: 15 real seconds shown as 10 -> 0, slowing near the end.
 check(HoldTimer.display(0, 15, 10, 0.6) == 10, "countdown starts at 10")

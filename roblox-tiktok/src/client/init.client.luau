@@ -646,18 +646,18 @@ panelLabel("TEST GIFTS (no TikTok needed)")
 local testGifts = {
 	{ "Rose · 1", "Rose", 1, 1 },
 	{ "Finger Heart · 5", "Finger Heart", 5, 1 },
-	{ "Rose x10 · 10", "Rose", 1, 10 },
+	{ "Rose x10", "Rose", 1, 10 },
 	{ "Doughnut · 30", "Doughnut", 30, 1 },
 	{ "Hand Hearts · 100", "Hand Hearts", 100, 1 },
 	{ "Money Gun · 500", "Money Gun", 500, 1 },
 	{ "Galaxy · 1,000", "Galaxy", 1000, 1 },
-	{ "Doughnut x40 · 1,200", "Doughnut", 30, 40 },
-	{ "Galaxy x5 · 5,000", "Galaxy", 1000, 5 },
-	{ "Galaxy x10 · 10,000", "Galaxy", 1000, 10 },
+	{ "Doughnut x40", "Doughnut", 30, 40 },
+	{ "Galaxy x5", "Galaxy", 1000, 5 },
+	{ "Galaxy x10", "Galaxy", 1000, 10 },
 	{ "Lion · 29,999", "Lion", 29999, 1 },
 	{ "Universe · 34,999", "TikTok Universe", 34999, 1 },
 }
-panelLabel("Button numbers show total test coins")
+panelLabel("Numbers show coins. x10 sends ten separate gifts")
 for index = 1, #testGifts, 2 do
 	local buttons = {}
 	for offset = 0, 1 do

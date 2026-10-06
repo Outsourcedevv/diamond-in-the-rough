@@ -4590,6 +4590,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
 local Keybinds = require(Shared:WaitForChild("Keybinds"))
+local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
@@ -5500,7 +5501,10 @@ local function processTikTok(event: TikTokFeed.Event)
 		local coins = math.max(1, event.coins or 1)
 		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
-		text = string.format("%s sent %s x%d", who, event.gift or "a gift", count)
+		text = if event.parts == nil
+			then string.format("%s sent %s x%d", who, event.gift or "a gift", count)
+			elseif count == 1 then string.format("%s sent %s (%d of %d)", who, event.gift or "a gift", event.part or 1, event.parts)
+			else string.format("%s sent %s x%d (%d of %d)", who, event.gift or "a gift", count, event.part or 1, event.parts)
 		recordGifter(event, amount, coins * count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
@@ -5524,10 +5528,12 @@ local function processTikTok(event: TikTokFeed.Event)
 	-- Start the animation promptly while the queued rock work spans frames.
 	if event.type == "gift" then
 		Notify:FireAllClients("giftEffect", {
-			coins = math.max(1, event.coins or 1) * math.max(1, math.floor(event.count or 1)),
+			-- One gift's coins, never the combo total: Galaxy x10 arrives here
+			-- as ten Galaxies, each with the Galaxy's own effect.
+			coins = math.max(1, event.coins or 1),
 			position = preview,
 			name = who,
-			gift = event.gift or "Gift",
+			gift = (event.gift or "Gift") .. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
 			adding = amount < 0,
 			blocks = if amount < 0 then nil else blocks,
 		})
@@ -5542,6 +5548,31 @@ end
 local giftQueue: { TikTokFeed.Event } = {}
 local giftHead = 1
 local giftWorkerRunning = false
+local enqueue: (TikTokFeed.Event) -> ()
+
+-- A gift sent several times at once (Galaxy x10) plays as that many separate
+-- gifts: each one blasts or adds its own stone with its own effect and feed
+-- line, spaced so every effect gets its moment instead of one bigger effect
+-- for the combined coins. Very long combos (Rose x500) are shared out over
+-- at most MAX_SPLIT gifts so the show stays short.
+local MAX_SPLIT = 20
+-- Seconds between the gifts of a combo, by the gift's effect tier: about half
+-- an effect, so at most two overlap (the client plays two at once).
+local SPLIT_SPACING = { 0.6, 0.8, 1.2, 2.2, 2.8, 3.7 }
+local function splitCombo(event: TikTokFeed.Event, doubled: boolean)
+	local count = math.max(1, math.floor(event.count or 1))
+	local parts = math.min(count, MAX_SPLIT)
+	local spacing = SPLIT_SPACING[GiftTier.forCoins(math.max(1, event.coins or 1))]
+	for part = 1, parts do
+		local copy = table.clone(event)
+		copy.count = count // parts + (if part <= count % parts then 1 else 0)
+		copy.part = part
+		copy.parts = parts
+		if doubled then doubledGifts[copy] = true end
+		if part == 1 then enqueue(copy) else task.delay((part - 1) * spacing, enqueue, copy) end
+	end
+end
+
 local function onTikTok(event: TikTokFeed.Event)
 	if event.type == "theme" then
 		-- From the bridge control page's theme buttons: it changes the
@@ -5561,6 +5592,14 @@ local function onTikTok(event: TikTokFeed.Event)
 		event.count = math.max(1, math.floor(event.count or 1)) * multiplier
 		doubledGifts[event] = true
 	end
+	if event.type == "gift" and math.floor(event.count or 1) > 1 then
+		splitCombo(event, doubledGifts[event] == true)
+		return
+	end
+	enqueue(event)
+end
+
+function enqueue(event: TikTokFeed.Event)
 	table.insert(giftQueue, event)
 	State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
 	if giftWorkerRunning then return end
@@ -9447,6 +9486,8 @@ export type Event = {
 	gift: string?,
 	coins: number?, -- coins per gift
 	count: number?, -- gifts in this event
+	part: number?, -- set by the server when it plays a combo as separate gifts: which one this is
+	parts: number?, -- and how many there are
 	likes: number?,
 	rocks: number?,
 	keybind: string?,
@@ -10429,18 +10470,18 @@ panelLabel("TEST GIFTS (no TikTok needed)")
 local testGifts = {
 	{ "Rose · 1", "Rose", 1, 1 },
 	{ "Finger Heart · 5", "Finger Heart", 5, 1 },
-	{ "Rose x10 · 10", "Rose", 1, 10 },
+	{ "Rose x10", "Rose", 1, 10 },
 	{ "Doughnut · 30", "Doughnut", 30, 1 },
 	{ "Hand Hearts · 100", "Hand Hearts", 100, 1 },
 	{ "Money Gun · 500", "Money Gun", 500, 1 },
 	{ "Galaxy · 1,000", "Galaxy", 1000, 1 },
-	{ "Doughnut x40 · 1,200", "Doughnut", 30, 40 },
-	{ "Galaxy x5 · 5,000", "Galaxy", 1000, 5 },
-	{ "Galaxy x10 · 10,000", "Galaxy", 1000, 10 },
+	{ "Doughnut x40", "Doughnut", 30, 40 },
+	{ "Galaxy x5", "Galaxy", 1000, 5 },
+	{ "Galaxy x10", "Galaxy", 1000, 10 },
 	{ "Lion · 29,999", "Lion", 29999, 1 },
 	{ "Universe · 34,999", "TikTok Universe", 34999, 1 },
 }
-panelLabel("Button numbers show total test coins")
+panelLabel("Numbers show coins. x10 sends ten separate gifts")
 for index = 1, #testGifts, 2 do
 	local buttons = {}
 	for offset = 0, 1 do
