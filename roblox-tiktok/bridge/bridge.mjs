@@ -241,6 +241,11 @@ const server = http.createServer(async (request, response) => {
     else emit({ type: 'gift', user: 'tester', name, gift: String(body.gift ?? 'Rose').slice(0, 40), coins: Math.max(1, Number(body.coins) || 1), count: Math.max(1, Math.min(100, Number(body.count) || 1)) });
     return sendJson(response, 200, { ok: true });
   }
+  // three.js (MIT, vendor/three.LICENSE) for the control page's 3D shrine.
+  if (request.method === 'GET' && url.pathname === '/vendor/three.module.min.js') {
+    response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'max-age=86400' });
+    return response.end(fs.readFileSync(path.join(here, 'vendor', 'three.module.min.js')));
+  }
   if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     return response.end(fs.readFileSync(path.join(here, 'control.html')));
