@@ -506,6 +506,15 @@ for _, list in canopies do
 end
 assert(#canopies >= birches, "every birch has a canopy")
 assert(parts < 4000, "decoration count must remain bounded: " .. parts)
+-- Only parts big enough to throw a visible shadow cast one.
+local casters = 0
+for _, p in workspace:FindFirstChild("Scenery"):GetDescendants() do
+	if p.ClassName == "Part" or p.ClassName == "WedgePart" then
+		if p.CastShadow then casters += 1 end
+		assert(p.Size.Magnitude >= 3 or not p.CastShadow, "small props cast no shadow: " .. p.Name)
+	end
+end
+print(string.format("shadows: %d of %d static parts cast one", casters, parts))
 assert(conifers >= 100 and conifers <= 120, "forest reaches its target: " .. conifers)
 assert(birches >= 10 and birches <= 16, "birches dot the meadows: " .. birches)
 assert(outward == conifers * 18, "every conifer wedge was checked")

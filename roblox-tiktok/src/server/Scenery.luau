@@ -28,6 +28,7 @@ local Farm = require(script.Parent.Farm)
 local Scenery = {}
 local random = Random.new(4207)
 
+local SHADOW_SIZE = 3 -- studs across: smaller parts cast no shadow
 local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
 	local p = Instance.new(kind or "Part") :: BasePart
 	p.Name = name
@@ -39,7 +40,9 @@ local function piece(parent: Instance, name: string, size: Vector3, frame: CFram
 	p.CanCollide = false
 	p.CanQuery = false
 	p.CanTouch = false
-	p.CastShadow = true
+	-- Small props (crates, firewood, flowers, trim) cast no shadow: theirs are
+	-- too small to notice and each one costs every frame.
+	p.CastShadow = size.Magnitude >= SHADOW_SIZE
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 	p.Parent = parent

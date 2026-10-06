@@ -370,11 +370,13 @@ local function growthCapacity(): number
 	return math.max(Config.GrowthMaxStone, startingStone * 2)
 end
 -- Long rock work yields every few milliseconds so the server keeps its frame
--- rate. Changes stream to clients while the work continues.
+-- rate. Changes stream to clients while the work continues. The server draws
+-- no rock, so it can spend about half of each 60 Hz frame on a gift.
+local GIFT_WORK_SECONDS = 0.008
 local function workCheckpoint(onYield: (() -> ())?, effect: string?, budget: number?): () -> ()
 	local frameStart = os.clock()
 	local lastCountUpdate = frameStart
-	local slice = budget or 0.003
+	local slice = budget or GIFT_WORK_SECONDS
 	return function()
 		if os.clock() - frameStart >= slice then
 			if os.clock() - lastCountUpdate >= 0.1 then

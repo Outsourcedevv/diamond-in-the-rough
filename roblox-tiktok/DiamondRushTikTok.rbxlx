@@ -861,50 +861,12 @@ function Grid.randomExposed(self: Grid): number?
 	return self.exposedList[self.rand(1, count)]
 end
 
--- A minimal binary heap of {distance, key} pairs, nearest first.
-local function push(heap: { { number } }, item: { number })
-	table.insert(heap, item)
-	local i = #heap
-	while i > 1 do
-		local parent = i // 2
-		if heap[parent][1] <= heap[i][1] then
-			break
-		end
-		heap[parent], heap[i] = heap[i], heap[parent]
-		i = parent
-	end
-end
-
-local function pop(heap: { { number } }): { number }?
-	local count = #heap
-	if count == 0 then
-		return nil
-	end
-	local top = heap[1]
-	heap[1] = heap[count]
-	heap[count] = nil
-	count -= 1
-	local i = 1
-	while true do
-		local left, right, smallest = i * 2, i * 2 + 1, i
-		if left <= count and heap[left][1] < heap[smallest][1] then
-			smallest = left
-		end
-		if right <= count and heap[right][1] < heap[smallest][1] then
-			smallest = right
-		end
-		if smallest == i then
-			break
-		end
-		heap[smallest], heap[i] = heap[i], heap[smallest]
-		i = smallest
-	end
-	return top
-end
-
 -- Blasts up to `count` cells as one crater around a random exposed cell (or
 -- `centre`): the nearest cells to the centre go first, and the crater only
 -- grows through cells it has opened up. Returns the removed keys and the centre.
+-- The nearest-first queue is a binary heap kept in two flat arrays (distance
+-- and key) and the queued marks are bits in buffers, so a big gift allocates
+-- almost nothing per rock.
 function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?, onRemoved: ((number) -> ())?): ({ number }, number?)
 	local removed: { number } = {}
 	local start = if centre ~= nil and self.solid[centre] and self.exposedIndex[centre] then centre else self:randomExposed()
@@ -912,23 +874,48 @@ function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() 
 		return removed, nil
 	end
 	local cx, cy, cz = Grid.coords(start)
-	local heap: { { number } } = {}
-	local queued = (newCellMap())
+	local distances: { number } = {}
+	local keys: { number } = {}
+	local size = 0
+	local queued: { [number]: buffer } = {}
 	local pages = self.solidPages
+	local rand = self.rand
 	local function enqueue(key: number)
-		if queued[key] or not hasBit(pages, key) then
+		local index = key // 4096
+		local page = queued[index]
+		if page == nil then
+			page = buffer.create(512)
+			queued[index] = page
+		end
+		local offset, mask = (key % 4096) // 8, bit32.lshift(1, key % 8)
+		local byte = buffer.readu8(page, offset)
+		if bit32.btest(byte, mask) or not hasBit(pages, key) then
 			return
 		end
-		queued[key] = true
-		local x, y, z = Grid.coords(key)
+		buffer.writeu8(page, offset, bit32.bor(byte, mask))
+		local column = key % LAYER
+		local x, z = column % SPAN - OFFSET, column // SPAN - OFFSET
+		local y = key // LAYER
 		-- Craters dig a little more readily downwards and outwards than up.
 		local dy = (y - cy) * (if y > cy then 1.15 else 0.9)
-		push(heap, { (x - cx) ^ 2 + dy * dy + (z - cz) ^ 2 + self.rand() * 0.6, key })
+		local distance = (x - cx) ^ 2 + dy * dy + (z - cz) ^ 2 + rand() * 0.6
+		-- Sift up: parents move down until the new entry's place is found.
+		size += 1
+		local i = size
+		while i > 1 do
+			local parent = i // 2
+			local above = distances[parent]
+			if above <= distance then
+				break
+			end
+			distances[i], keys[i] = above, keys[parent]
+			i = parent
+		end
+		distances[i], keys[i] = distance, key
 	end
 	enqueue(start)
 	while #removed < count do
-		local item = pop(heap)
-		if item == nil then
+		if size == 0 then
 			-- The crater ran out of reachable rock: carry on from a new spot.
 			local nextStart = self:randomExposed()
 			if nextStart == nil then
@@ -938,7 +925,30 @@ function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() 
 			enqueue(nextStart)
 			continue
 		end
-		local key = item[2]
+		-- Pop the nearest; the last entry sifts down from the top.
+		local key = keys[1]
+		local distance, last = distances[size], keys[size]
+		distances[size], keys[size] = nil, nil
+		size -= 1
+		if size > 0 then
+			local i = 1
+			while true do
+				local left = i * 2
+				local smallest, best = i, distance
+				if left <= size and distances[left] < best then
+					smallest, best = left, distances[left]
+				end
+				if left + 1 <= size and distances[left + 1] < best then
+					smallest = left + 1
+				end
+				if smallest == i then
+					break
+				end
+				distances[i], keys[i] = distances[smallest], keys[smallest]
+				i = smallest
+			end
+			distances[i], keys[i] = distance, last
+		end
 		if self:remove(key) then
 			table.insert(removed, key)
 			if onRemoved then onRemoved(key) end
@@ -4879,11 +4889,13 @@ local function growthCapacity(): number
 	return math.max(Config.GrowthMaxStone, startingStone * 2)
 end
 -- Long rock work yields every few milliseconds so the server keeps its frame
--- rate. Changes stream to clients while the work continues.
+-- rate. Changes stream to clients while the work continues. The server draws
+-- no rock, so it can spend about half of each 60 Hz frame on a gift.
+local GIFT_WORK_SECONDS = 0.008
 local function workCheckpoint(onYield: (() -> ())?, effect: string?, budget: number?): () -> ()
 	local frameStart = os.clock()
 	local lastCountUpdate = frameStart
-	local slice = budget or 0.003
+	local slice = budget or GIFT_WORK_SECONDS
 	return function()
 		if os.clock() - frameStart >= slice then
 			if os.clock() - lastCountUpdate >= 0.1 then
@@ -8096,6 +8108,7 @@ local Farm = require(script.Parent.Farm)
 local Scenery = {}
 local random = Random.new(4207)
 
+local SHADOW_SIZE = 3 -- studs across: smaller parts cast no shadow
 local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, kind: string?): BasePart
 	local p = Instance.new(kind or "Part") :: BasePart
 	p.Name = name
@@ -8107,7 +8120,9 @@ local function piece(parent: Instance, name: string, size: Vector3, frame: CFram
 	p.CanCollide = false
 	p.CanQuery = false
 	p.CanTouch = false
-	p.CastShadow = true
+	-- Small props (crates, firewood, flowers, trim) cast no shadow: theirs are
+	-- too small to notice and each one costs every frame.
+	p.CastShadow = size.Magnitude >= SHADOW_SIZE
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 	p.Parent = parent
@@ -12162,7 +12177,9 @@ function MountainView._makeTemplates(self: View)
 		part.CanCollide = true
 		part.CanQuery = true
 		part.CanTouch = false
-		part.CastShadow = true
+		-- Thousands of small rocks casting shadows cost more than any other
+		-- part of the scene; the mountain still takes shadows and shading.
+		part.CastShadow = false
 		part.TopSurface = Enum.SurfaceType.Smooth
 		part.BottomSurface = Enum.SurfaceType.Smooth
 		self.templates[kind] = part
@@ -12395,8 +12412,11 @@ function MountainView._refresh(self: View, key: number): BasePart?
 	end
 	local stone = part :: BasePart
 	stone.CFrame = CFrame.new(self:keyPosition(key)) * self.rotations[shape]
-	stone.Material = MATERIALS[self.skin][layer]
-	stone.Color = Color3.fromRGB(r, g, b)
+	-- A rock that only changes shape keeps its look: skip the property writes.
+	if fresh or old == nil or old // 16 ~= layer then
+		stone.Material = MATERIALS[self.skin][layer]
+		stone.Color = Color3.fromRGB(r, g, b)
+	end
 	if fresh then stone.Parent = self.folder end
 	self.codes[key] = code
 	return if fresh then stone else nil
@@ -12495,7 +12515,6 @@ function MountainView._throwDebris(self: View, parts: { BasePart }, at: Vector3?
 	for _, part in parts do
 		part.CanCollide = false
 		part.CanQuery = false
-		part.CastShadow = false
 		local away = if at then part.Position - at else Vector3.new(random:NextNumber(-1, 1), 0, random:NextNumber(-1, 1))
 		if away.Magnitude < 0.05 then away = Vector3.new(random:NextNumber(-1, 1), 0.5, random:NextNumber(-1, 1)) end
 		table.insert(self.debris, {
@@ -12520,7 +12539,6 @@ function MountainView._throwDebris(self: View, parts: { BasePart }, at: Vector3?
 				part.Transparency = 0
 				part.CanCollide = true
 				part.CanQuery = true
-				part.CastShadow = true
 				if part.Parent == self.folder then
 					self:_release(part, entry.kind)
 				else
