@@ -1,8 +1,9 @@
 --!strict
 -- The games menu on the left of the screen, in the lobby's royal white and
 -- gold: Diamond in the Rough with its live status and a Join button, more
--- slots marked Coming soon, and Back to lobby while playing. The Hide button
--- hides it to a small tab; the tab (or G) shows it again. Also turns the
+-- slots marked Coming soon, How to play, and Back to lobby while playing. The
+-- Hide button hides it to a small tab; the tab (or G) shows it again. The tab
+-- itself can be hidden from the settings (G still works). Also turns the
 -- lobby's giant diamond on this computer.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -26,9 +27,17 @@ local WIDTH = 360
 local TOGGLE_KEY = Enum.KeyCode.G
 
 local open = false
+local tabHidden = false
+local refreshTab: () -> () = function() end
 
 function LobbyView.isOpen(): boolean
 	return open
+end
+
+-- Hides the GAMES tab (the settings' "Hide buttons"); G still opens the menu.
+function LobbyView.setTabHidden(hidden: boolean)
+	tabHidden = hidden
+	refreshTab()
 end
 
 local function make(className: string, properties: { [string]: any }, parent: Instance?): any
@@ -94,8 +103,9 @@ function LobbyView.status(phase: string, stone: number, skin: string?): string
 end
 
 -- `request` sends joinGame / leaveGame; `onChange(inGame)` runs whenever the
--- player moves between the lobby and the game (and once at the start).
-function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boolean) -> ())
+-- player moves between the lobby and the game (and once at the start);
+-- `onHelp` opens the How to Play guide.
+function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boolean) -> (), onHelp: (() -> ())?)
 	local player = Players.LocalPlayer
 	local gui = make("ScreenGui", {
 		Name = "GamesMenu",
@@ -122,7 +132,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	local panel = make("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, -WIDTH - 40, 0.5, 0),
-		Size = UDim2.fromOffset(WIDTH, 556),
+		Size = UDim2.fromOffset(WIDTH, 608),
 		BackgroundColor3 = IVORY,
 		Visible = false,
 	}, gui)
@@ -263,6 +273,21 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		stroke(badge, GOLD, 1.5)
 	end
 
+	local help = make("TextButton", {
+		LayoutOrder = 9,
+		Size = UDim2.new(1, 0, 0, 44),
+		BackgroundColor3 = ROYAL,
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = "How to play  H",
+	}, list)
+	rounded(help, 12)
+	stroke(help, GOLD, 2)
+	help.Activated:Connect(function()
+		if onHelp then onHelp() end
+	end)
+
 	local back = make("TextButton", {
 		LayoutOrder = 10,
 		Size = UDim2.new(1, 0, 0, 44),
@@ -282,7 +307,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		if show == open then return end
 		open = show
 		if slide then slide:Cancel() end
-		tab.Visible = not show
+		refreshTab()
 		panel.Visible = true
 		local target = if show then UDim2.new(0, 12, 0.5, 0) else UDim2.new(0, -WIDTH - 40, 0.5, 0)
 		local tween = TweenService:Create(panel, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = target })
@@ -291,6 +316,9 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 			if playback == Enum.PlaybackState.Completed and not open then panel.Visible = false end
 		end)
 		tween:Play()
+	end
+	refreshTab = function()
+		tab.Visible = not open and not tabHidden
 	end
 	tab.Activated:Connect(function() setOpen(true) end)
 	hide.Activated:Connect(function() setOpen(false) end)

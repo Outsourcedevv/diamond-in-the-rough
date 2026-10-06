@@ -131,6 +131,27 @@ DiamondShape.setKind(root, "diamond")
 count, visible = shown()
 check(count == 64 and visible == 64, "and back to a diamond")
 
+-- The How to Play board: beside the carpet, facing the spawn, opened by a
+-- prompt (E) or a click, with a drawn face and no lettering.
+local board = built.board
+check(board ~= nil and board.Name == "HowToPlayBoard" and board.Parent == built.model, "a How to Play board stands in the lobby")
+local boardFace, prompt, boardClick, drawn = nil, nil, nil, 0
+for _, object in instances do
+	if object.Name == "BoardFace" and object.Parent == board then boardFace = object end
+end
+check(boardFace ~= nil, "the board has a face")
+for _, object in instances do
+	if object.ClassName == "ProximityPrompt" and object.Parent == boardFace then prompt = object end
+	if object.ClassName == "ClickDetector" and object.Parent == board then boardClick = object end
+	if object.ClassName == "Frame" and object.Parent and object.Parent.Parent == boardFace then drawn += 1 end
+end
+check(prompt ~= nil and prompt.Name == "HowToPlay" and prompt.HoldDuration == 0 and prompt.ActionText == "How to play", "walking up to the board offers How to play")
+check(boardClick ~= nil and boardClick.Name == "HowToPlayClick" and boardClick.MaxActivationDistance >= 20, "the board can be clicked from across the carpet")
+check(drawn == 7, "the board's face is drawn: a gem and three list lines")
+local facing = (Vector3.new(spawn.CFrame.Position.X, 0, spawn.CFrame.Position.Z) - Vector3.new(boardFace.CFrame.Position.X, 0, boardFace.CFrame.Position.Z)).Unit
+check(boardFace.CFrame.LookVector:Dot(facing) > 0.99, "the board faces the spawn")
+check(math.abs(boardFace.CFrame.Position.X - O.X) > 4.5, "the board stands clear of the carpet")
+
 -- No lettered signs: their text renders badly, so the court carries none.
 local lettered = 0
 for _, object in instances do
@@ -150,6 +171,23 @@ check(LobbyView.status("Holding", 0, "hay") == "Someone is holding the needle!",
 check(LobbyView.status("Won", 0, "hay") == "Needle found! A new round starts soon", "needle found")
 check(LobbyView.status("Rebuilding", 0, "hay") == "The haystack is being rebuilt", "haystack rebuilt")
 check(LobbyView.status("Won", 0, "stone") == "Diamond found! A new round starts soon", "stone skin reads as before")
+
+-- The How to Play guide: connecting TikTok, testing without it, the controls
+-- and how to win, in plain rich text with no emojis.
+local titles = {}
+for _, page in HowToPlay.PAGES do
+	table.insert(titles, page.title)
+	local plain = string.gsub(page.text, "</?b>", "")
+	check(not string.find(plain, "[<>&]"), page.title .. ": rich text has no stray < > or &")
+	check(not string.find(page.text, "[\240-\244]"), page.title .. ": no emojis")
+end
+check(table.concat(titles, "|") == "Connect TikTok|Testing|Controls|How to win", "four guide pages")
+local all = ""
+for _, page in HowToPlay.PAGES do all ..= page.text .. "\n" end
+for _, needed in { "Start Bridge.bat", "localhost:8787", "Allow HTTP Requests", "JOIN", "TEST GIFTS", "REBUILD TEST GIFTS", "GIFT KEYBINDS", "<b>Y</b>", "<b>G</b>", "<b>P</b>", "<b>H</b>", "Diamond bird" } do
+	check(string.find(all, needed, 1, true) ~= nil, "the guide covers " .. needed)
+end
+check(HowToPlay.BOARD == "HowToPlay" and HowToPlay.KEY == Enum.KeyCode.H, "the board's prompt and H open the guide")
 print(string.format("PASS: %d lobby checks (%d parts)", passed, lobbyParts))
 '''
 
@@ -161,6 +199,7 @@ try:
         + "\nlocal DiamondShape = " + module("src/shared/DiamondShape.luau")
         + "\nlocal Lobby = " + module("src/server/Lobby.luau")
         + "\nlocal LobbyView = " + module("src/client/LobbyView.luau")
+        + "\nlocal HowToPlay = " + module("src/client/HowToPlay.luau")
         + "\n" + test
     )
     generated.write_text(body, encoding="utf-8")

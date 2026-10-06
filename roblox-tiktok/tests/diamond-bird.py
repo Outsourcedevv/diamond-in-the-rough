@@ -182,6 +182,25 @@ first:FindFirstChildOfClass("ClickDetector").clicked(streamer)
 check(bird.multiplier() == 1, "the bird that is leaving cannot be caught")
 second:FindFirstChildOfClass("ClickDetector").clicked(streamer)
 check(bird.multiplier() == 2, "the new one can")
+
+-- Catching by aim: the client says it clicked the bird it flies; the server
+-- checks the bird is still circling and the player is near where it should be.
+advance(40)
+check(bird.multiplier() == 1, "the second bonus has ended")
+bird.spawn()
+local aimed = birds()[#birds()]
+local head = Instance.new("Part")
+head.Name = "Head"
+head.Parent = character
+head.CFrame = CFrame.new(0, 2000, 0)
+check(bird.catch(streamer) == false and aimed:GetAttribute("LeaveAt") == 0, "a player far from the bird cannot catch it")
+check(bird.catch(lobbyPlayer) == false, "a player in the lobby cannot catch it by aim either")
+advance(10)
+local x, y, z = BirdBonus.position({ radius = aimed:GetAttribute("Radius"), height = aimed:GetAttribute("Height"),
+	angle = aimed:GetAttribute("Angle"), direction = aimed:GetAttribute("Direction") }, 10)
+head.CFrame = CFrame.new(x, y - 30, z + 60)
+check(bird.catch(streamer) == true and bird.multiplier() == 2, "a click aimed at the flying bird catches it")
+check(aimed:GetAttribute("LeaveAt") == clock and bird.catch(streamer) == false, "it cannot be caught twice by aim")
 print(string.format("PASS: %d diamond bird checks", passed))
 '''
 

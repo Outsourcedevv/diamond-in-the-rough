@@ -1,4 +1,6 @@
-export const KEYS = ['', 'F6', 'F7', 'F8', 'J', 'K', 'L', 'U', 'I', 'O', 'P', 'B', 'N', 'M'];
+// Keys a gift can be bound to; the same letters as the game's GIFT KEYBINDS (src/shared/Keybinds.luau).
+// I and O are Roblox's zoom keys, and P opens the game's settings, so none of them is offered.
+export const KEYS = ['', 'F6', 'F7', 'F8', 'B', 'C', 'F', 'J', 'K', 'L', 'M', 'N', 'Q', 'R', 'T', 'U', 'V', 'X', 'Z'];
 export async function fetchCatalogue(Client, username) {
  const client = new Client(username, {});
  await client.fetchRoomId();

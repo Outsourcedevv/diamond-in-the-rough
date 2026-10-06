@@ -13,6 +13,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
 local Skin = require(Shared:WaitForChild("Skin"))
+local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local FirstPerson = require(script:WaitForChild("FirstPerson"))
 -- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
 FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
@@ -125,9 +126,14 @@ local gui = make("ScreenGui", {
 -- The games menu: the game's display, first-person view and hands only show
 -- while playing, not in the lobby.
 local LobbyView = require(script:WaitForChild("LobbyView"))
+-- How to play: from the lobby board, the games menu or H.
+local HowToPlay = require(script:WaitForChild("HowToPlay"))
+HowToPlay.start()
 LobbyView.start(Request, State, function(inGame: boolean)
 	gui.Enabled = inGame
 	FirstPerson.setEnabled(inGame)
+end, function()
+	HowToPlay.setOpen(true)
 end)
 -- The diamond bird flies round the mountain; catching it doubles gifts.
 require(script:WaitForChild("BirdView")).start(gui, State)
@@ -665,6 +671,132 @@ for index = 1, #testGifts, 2 do
 	panelButtons(buttons)
 end
 
+-- Gift keybinds: give any gift a key; pressing it in the game sends that gift,
+-- so the streamer can play without the bridge. The bridge's catalogue can set
+-- keybinds too; both show here.
+panelLabel("GIFT KEYBINDS (press the key in the game to send the gift)")
+panelOrder += 1
+local bindingList = make("Frame", {
+	LayoutOrder = panelOrder,
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	ZIndex = 11,
+}, panel)
+make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) }, bindingList)
+local bindingGift = panelBox("", function() end)
+bindingGift.PlaceholderText = "Gift name, e.g. Rose"
+local bindingCoins = panelBox("", function() end)
+bindingCoins.PlaceholderText = "Coins per gift, e.g. 1"
+local chosenKey: string? = nil
+local capturingKey = false
+local bindingButtons: { TextButton } = {}
+bindingButtons = panelButtons({
+	{ "Key: choose", function() end },
+	{ "Save keybind", function()
+		local coins = tonumber((string.gsub(bindingCoins.Text, "[^%d]", "")))
+		if chosenKey == nil or bindingGift.Text == "" or coins == nil then
+			addFeed("Type a gift name and its coins, then choose a key.", 0, "notice")
+			return
+		end
+		send("setGiftBinding", { key = chosenKey, gift = bindingGift.Text, coins = coins })
+		bindingGift.Text = ""
+		bindingCoins.Text = ""
+		chosenKey = nil
+		bindingButtons[1].Text = "Key: choose"
+	end },
+})
+local keyButton = bindingButtons[1]
+bindingButtons[2].BackgroundColor3 = SELECTED
+local freeKeys = {}
+for _, key in Keybinds.KEYS do table.insert(freeKeys, Keybinds.label(key)) end
+panelLabel("Free keys: " .. table.concat(freeKeys, " "))
+keyButton.Activated:Connect(function()
+	capturingKey = true
+	keyButton.Text = "Press a key..."
+end)
+UserInputService.InputBegan:Connect(function(input: InputObject)
+	if not capturingKey or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	capturingKey = false
+	local name = input.KeyCode.Name
+	if Keybinds.allowed(name) then
+		chosenKey = name
+		keyButton.Text = "Key: " .. Keybinds.label(name)
+	else
+		chosenKey = nil
+		keyButton.Text = "Key: choose"
+		addFeed(Keybinds.label(name) .. " is used by the game. Pick one of the free keys.", 0, "notice")
+	end
+end)
+local function refreshBindings()
+	for _, child in bindingList:GetChildren() do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	local ok, bindings = pcall(function()
+		return game:GetService("HttpService"):JSONDecode(attr("GiftBindings", "{}"))
+	end)
+	if not ok or type(bindings) ~= "table" then return end
+	local keys = {}
+	for key in bindings do table.insert(keys, tostring(key)) end
+	table.sort(keys)
+	if #keys == 0 then
+		local row = make("Frame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, ZIndex = 11 }, bindingList)
+		make("TextLabel", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Font = FONT_MEDIUM,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextColor3 = MUTED,
+			Text = "No keybinds yet.",
+			ZIndex = 12,
+		}, row)
+		return
+	end
+	for index, key in keys do
+		local binding = bindings[key]
+		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, bindingList)
+		local cap = make("TextLabel", {
+			Size = UDim2.fromOffset(36, 30),
+			BackgroundColor3 = BUTTON,
+			Font = FONT,
+			TextSize = 14,
+			TextColor3 = WHITE,
+			Text = Keybinds.label(key),
+			ZIndex = 12,
+		}, row)
+		rounded(cap, 8)
+		make("TextLabel", {
+			Position = UDim2.fromOffset(44, 0),
+			Size = UDim2.new(1, -86, 1, 0),
+			BackgroundTransparency = 1,
+			Font = FONT_MEDIUM,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextColor3 = WHITE,
+			Text = string.format("%s · %s coins", tostring(type(binding) == "table" and binding.gift or "?"),
+				Format.commas(tonumber(type(binding) == "table" and binding.coins or 0) or 0)),
+			ZIndex = 12,
+		}, row)
+		local remove = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.fromOffset(34, 30),
+			BackgroundColor3 = DANGER,
+			Font = FONT,
+			TextSize = 14,
+			TextColor3 = WHITE,
+			Text = "X",
+			ZIndex = 12,
+		}, row)
+		rounded(remove, 8)
+		remove.Activated:Connect(function() send("removeGiftBinding", key) end)
+	end
+end
+State:GetAttributeChangedSignal("GiftBindings"):Connect(refreshBindings)
+refreshBindings()
+
 panelLabel("DIAMOND BIRD (every 5 to 7.5 minutes)")
 panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
@@ -852,9 +984,10 @@ local function refreshPanelFields()
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
 end
 
--- Settings (every player): the field of view, from the Settings button or O.
--- The hands are refitted to it, so digging looks the same at any FOV.
-local SETTINGS_KEY = Enum.KeyCode.O
+-- Settings (every player): the field of view and hiding the buttons, from the
+-- Settings button or P (O is Roblox's zoom-out key, which swallows it). The
+-- hands are refitted to the FOV, so digging looks the same at any FOV.
+local SETTINGS_KEY = Enum.KeyCode.P
 local settingsButton = make("TextButton", {
 	Position = UDim2.fromOffset(12, 10),
 	Size = UDim2.fromOffset(0, 32),
@@ -862,14 +995,14 @@ local settingsButton = make("TextButton", {
 	Font = FONT,
 	TextSize = 13,
 	TextColor3 = WHITE,
-	Text = "SETTINGS  <font color=\"#A8AEBE\">O</font>",
+	Text = "SETTINGS  <font color=\"#A8AEBE\">P</font>",
 	RichText = true,
 }, gui)
 glass(settingsButton, 16)
 make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, settingsButton)
 local settingsCard = make("Frame", {
 	Position = UDim2.fromOffset(12, 50),
-	Size = UDim2.fromOffset(300, 150),
+	Size = UDim2.fromOffset(300, 214),
 	Visible = false,
 	ZIndex = 15,
 }, gui)
@@ -915,7 +1048,7 @@ local fovKnob = make("Frame", {
 rounded(fovKnob, 9)
 local function settingsAction(text: string, x: number, colour: Color3): TextButton
 	local button = make("TextButton", {
-		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 96),
+		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 160),
 		Size = UDim2.new(0.5, -4, 0, 30),
 		BackgroundColor3 = colour,
 		Font = FONT,
@@ -927,6 +1060,45 @@ local function settingsAction(text: string, x: number, colour: Color3): TextButt
 	rounded(button, 8)
 	return button
 end
+-- Hide buttons: tucks away the GAMES tab and this SETTINGS button (G and P
+-- still open them), so they stay off the stream. Remembered by the server.
+settingsText({ Position = UDim2.fromOffset(0, 96), Size = UDim2.new(1, -60, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = "Hide buttons" })
+settingsText({ Position = UDim2.fromOffset(0, 118), Size = UDim2.new(1, -60, 0, 30), Font = FONT_MEDIUM, TextSize = 12, TextColor3 = MUTED, TextWrapped = true,
+	TextYAlignment = Enum.TextYAlignment.Top, Text = "Hides GAMES and SETTINGS. G and P still open them." })
+local hideSwitch = make("TextButton", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, 0, 0, 98),
+	Size = UDim2.fromOffset(46, 26),
+	BackgroundColor3 = BUTTON,
+	AutoButtonColor = false,
+	Text = "",
+	ZIndex = 16,
+}, settingsCard)
+rounded(hideSwitch, 13)
+local hideKnob = make("Frame", {
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.new(0, 3, 0.5, 0),
+	Size = UDim2.fromOffset(20, 20),
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
+	ZIndex = 17,
+}, hideSwitch)
+rounded(hideKnob, 10)
+local function refreshHidden()
+	local hidden = player:GetAttribute("HideButtons") == true
+	hideSwitch.BackgroundColor3 = if hidden then SELECTED else BUTTON
+	hideKnob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
+	settingsButton.Visible = not hidden
+	LobbyView.setTabHidden(hidden)
+end
+player:GetAttributeChangedSignal("HideButtons"):Connect(refreshHidden)
+refreshHidden()
+hideSwitch.Activated:Connect(function()
+	local hidden = player:GetAttribute("HideButtons") ~= true
+	-- Shown at once; the server keeps it for next time.
+	player:SetAttribute("HideButtons", hidden)
+	Request:FireServer("setHideButtons", hidden)
+end)
 local fovReset = settingsAction("Reset", 0, BUTTON)
 local settingsDone = settingsAction("Done", 0.5, SELECTED)
 
@@ -976,7 +1148,7 @@ local function setSettingsOpen(show: boolean)
 end
 settingsButton.Activated:Connect(function() setSettingsOpen(not settingsCard.Visible) end)
 settingsDone.Activated:Connect(function() setSettingsOpen(false) end)
--- O toggles the settings in the game, unless the streamer bound O to a test gift.
+-- P toggles the settings in the game, unless the streamer bound P to a test gift.
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed or input.KeyCode ~= SETTINGS_KEY or not gui.Enabled or UserInputService:GetFocusedTextBox() then return end
 	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
@@ -1138,6 +1310,25 @@ local rockOutline = make("Highlight", {
 	Enabled = false,
 }, workspace)
 local aimTarget: BasePart? = nil
+-- True while the aim is on (or close to) a diamond bird that is still circling.
+-- The bird is small and moving, so a click within a few degrees counts.
+local aimBird = false
+local function birdNear(ray: Ray): boolean
+	for _, child in workspace:GetChildren() do
+		local root = if child.Name == "DiamondBird" and child:IsA("Model") then child.PrimaryPart else nil
+		if root and child:GetAttribute("LeaveAt") == 0 then
+			local offset = root.Position - ray.Origin
+			local distance = offset.Magnitude
+			if distance > 1e-3 and distance < 400 then
+				local tolerance = math.max(math.rad(4), math.atan(7 / distance))
+				if math.acos(math.clamp(offset.Unit:Dot(ray.Direction.Unit), -1, 1)) <= tolerance then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
 local aimParams = RaycastParams.new()
 aimParams.FilterType = Enum.RaycastFilterType.Exclude
 RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value + 3, function()
@@ -1146,18 +1337,26 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local phase = attr("Phase", "Digging")
 	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
-		and player:GetAttribute("InGame") == true and not LobbyView.isOpen()
+		and player:GetAttribute("InGame") == true and not LobbyView.isOpen() and not HowToPlay.isOpen()
 		and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	aimDot.Visible = active
 	UserInputService.MouseIconEnabled = not active
 	aimTarget = nil
+	aimBird = false
 	if active and camera then
 		aimParams.FilterDescendantsInstances = if character then { character } else {}
 		local viewport = camera.ViewportSize
 		local ray = camera:ViewportPointToRay(viewport.X / 2, viewport.Y / 2)
 		local result = workspace:Raycast(ray.Origin, ray.Direction * 500, aimParams)
 		if result then aimTarget = result.Instance end
+		aimBird = birdNear(ray)
+	end
+	-- The dot turns gold over the bird, so players know a click will catch it.
+	local dotColour = if aimBird then GOLD else WHITE
+	if aimDot.BackgroundColor3 ~= dotColour then
+		aimDot.BackgroundColor3 = dotColour
+		aimDot.Size = if aimBird then UDim2.fromOffset(9, 9) else UDim2.fromOffset(5, 5)
 	end
 	local target = aimTarget
 	local stone = target ~= nil and view:keyForPart(target) ~= nil
@@ -1171,10 +1370,22 @@ local function isDigInput(input: InputObject): boolean
 end
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if not processed and isDigInput(input) then
-		-- A fresh click on the diamond or the diamond bird goes to its
-		-- ClickDetector, never to digging.
+		-- A click on (or close to) the diamond bird catches it. A tap aims
+		-- where the finger is; a click aims at the screen centre.
+		local camera = workspace.CurrentCamera
+		local catching = aimBird
+		if not catching and input.UserInputType == Enum.UserInputType.Touch and camera
+			and player:GetAttribute("InGame") == true then
+			catching = birdNear(camera:ScreenPointToRay(input.Position.X, input.Position.Y))
+		end
 		local target = aimTarget
-		if target == workspace:FindFirstChild("Diamond") or (target and target.Parent and target.Parent.Name == "DiamondBird") then
+		if catching or (target and target.Parent and target.Parent.Name == "DiamondBird") then
+			Request:FireServer("catchBird")
+			digging = false
+			return
+		end
+		-- A fresh click on the diamond goes to its ClickDetector, never to digging.
+		if target == workspace:FindFirstChild("Diamond") then
 			digging = false
 			return
 		end
@@ -1195,7 +1406,7 @@ local function digTarget(): number?
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	local target = aimTarget
-	local allowed = digging and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
+	local allowed = digging and not panel.Visible and not settingsOpen() and not HowToPlay.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	local key = if allowed and target then view:keyForPart(target) else nil
 	if key == nil or root == nil or not root:IsA("BasePart") or (root.Position - (target :: BasePart).Position).Magnitude > 16 then

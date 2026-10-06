@@ -15,6 +15,7 @@ local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
+local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
@@ -55,6 +56,8 @@ local settings = {
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
+	-- Players who hid the GAMES tab and SETTINGS button (by user id).
+	hiddenButtons = {} :: { [string]: boolean },
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
@@ -320,6 +323,8 @@ end
 -- Players whose client asked for the mountain; only they receive changes.
 local synced: { [Player]: boolean } = {}
 local readyAt: { [Player]: number } = {}
+local catchAt: { [Player]: number } = {}
+local hideAt: { [Player]: number } = {}
 local function sendMessages(messages: { { any } }, player: Player?)
 	for _, message in messages do
 		if player then
@@ -847,9 +852,11 @@ local diamondBird = require(script.DiamondBird).start({
 	state = State,
 	notify = Notify,
 	radius = mountainRadius + 12,
+	-- Low enough to see and click from the trail: about halfway up the
+	-- mountain, never lower than head height above the camp.
 	height = function(): number
 		local top = if mountain then mountain:summit() else nil
-		return (if top then top.Y else mountainRadius) + 8
+		return math.max(12, (if top then top.Y else mountainRadius) * 0.5 + 4)
 	end,
 })
 -- Gifts that arrived during the bonus, so the feed can say so.
@@ -860,8 +867,10 @@ local function processTikTok(event: TikTokFeed.Event)
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
 		local name = string.lower(event.gift)
 		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
+		-- The bridge's own keybind for this gift replaces its old one; keys
+		-- set in the game's GIFT KEYBINDS stay.
 		for key, binding in settings.giftBindings do
-			if string.lower(binding.gift) == name then settings.giftBindings[key] = nil end
+			if string.lower(binding.gift) == name and binding.game ~= true then settings.giftBindings[key] = nil end
 		end
 		if event.keybind and event.keybind ~= "" then
 			settings.giftBindings[event.keybind] = { gift = event.gift, coins = event.coins or 1 }
@@ -1230,6 +1239,26 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "setSkin" and type(value) == "string" then
 		setSkin(value)
 		return
+	elseif action == "setGiftBinding" and type(value) == "table" then
+		-- GIFT KEYBINDS in the Y panel: pressing the key in the game sends the gift.
+		local binding = Keybinds.clean(value.gift, value.coins)
+		local key = value.key
+		if binding == nil or not Keybinds.allowed(key) then
+			notice(player, "Pick a gift name, its coins and one of the free keys.")
+			return
+		end
+		if settings.giftBindings[key] == nil then
+			local count = 0
+			for _ in settings.giftBindings do count += 1 end
+			if count >= Keybinds.MAX then
+				notice(player, string.format("You can keep up to %d keybinds. Remove one first.", Keybinds.MAX))
+				return
+			end
+		end
+		settings.giftBindings[key] = { gift = binding.gift, coins = binding.coins, game = true }
+	elseif action == "removeGiftBinding" and type(value) == "string" then
+		if settings.giftBindings[value] == nil then return end
+		settings.giftBindings[value] = nil
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
 		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1
@@ -1297,6 +1326,32 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 	end
 	if action == "joinGame" or action == "leaveGame" then
 		setInGame(player, action == "joinGame")
+		return
+	end
+	if action == "setHideButtons" then
+		-- Any player can tuck away the GAMES tab and SETTINGS button (their
+		-- keys still work); it is remembered for next time.
+		if type(value) ~= "boolean" then return end
+		local now = os.clock()
+		if now - (hideAt[player] or -math.huge) < 0.2 then return end
+		hideAt[player] = now
+		player:SetAttribute("HideButtons", value)
+		local id = tostring(player.UserId)
+		if (settings.hiddenButtons[id] == true) ~= value then
+			local count = 0
+			for _ in settings.hiddenButtons do count += 1 end
+			if value and count >= 500 then return end
+			settings.hiddenButtons[id] = if value then true else nil
+			Store.save(settings)
+		end
+		return
+	end
+	if action == "catchBird" then
+		-- A click aimed at the bird this player sees (see the client's aim).
+		local now = os.clock()
+		if now - (catchAt[player] or -math.huge) < 0.25 then return end
+		catchAt[player] = now
+		diamondBird.catch(player)
 		return
 	end
 	if admins[player] then
@@ -1370,6 +1425,7 @@ local function onPlayer(player: Player)
 	end
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
+	player:SetAttribute("HideButtons", settings.hiddenButtons[tostring(player.UserId)] == true)
 	if not modernChat then
 		player.Chatted:Connect(function(message)
 			onChat(player, message)
@@ -1387,6 +1443,8 @@ Players.PlayerRemoving:Connect(function(player)
 	mineCooldown[player] = nil
 	synced[player] = nil
 	readyAt[player] = nil
+	catchAt[player] = nil
+	hideAt[player] = nil
 end)
 
 publishSettings()

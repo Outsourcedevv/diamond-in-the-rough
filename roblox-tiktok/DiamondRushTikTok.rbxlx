@@ -1371,6 +1371,57 @@ return Inflate
       </Item>
       <Item class="ModuleScript" referent="13">
         <Properties>
+          <string name="Name">Keybinds</string>
+          <string name="Source"><![CDATA[--!strict
+-- Gift keybinds: keys the streamer can give a gift to, so pressing the key in
+-- the game sends that gift (no TikTok or bridge needed). Set from the Y
+-- panel's GIFT KEYBINDS or from the bridge's catalogue; the server publishes
+-- them as the State attribute "GiftBindings" (JSON {KeyName: {gift, coins}}).
+local Keybinds = {}
+
+Keybinds.MAX = 24 -- bindings kept at once
+
+-- Keys that can carry a gift. Movement (W A S D, Space), the game's own keys
+-- (E for prompts, G games, H how to play, P settings, Y the streamer panel)
+-- and Roblox's zoom keys (I, O) are left out, so a binding never fights them.
+Keybinds.KEYS = {
+	"B", "C", "F", "J", "K", "L", "M", "N", "Q", "R", "T", "U", "V", "X", "Z",
+	"One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Zero",
+	"F6", "F7", "F8",
+}
+local allowed: { [string]: boolean } = {}
+for _, key in Keybinds.KEYS do allowed[key] = true end
+
+local DIGITS = {
+	One = "1", Two = "2", Three = "3", Four = "4", Five = "5",
+	Six = "6", Seven = "7", Eight = "8", Nine = "9", Zero = "0",
+}
+
+-- True for a KeyCode name (e.g. "K", "One", "F6") a gift can be bound to.
+function Keybinds.allowed(key: any): boolean
+	return type(key) == "string" and allowed[key] == true
+end
+
+-- How a key is written on screen: "1" for One, otherwise its name.
+function Keybinds.label(key: string): string
+	return DIGITS[key] or key
+end
+
+-- A binding as the server keeps it, or nil if it is not a valid one.
+function Keybinds.clean(gift: any, coins: any): { gift: string, coins: number }?
+	if type(gift) ~= "string" or type(coins) ~= "number" or coins ~= coins then return nil end
+	local name = string.sub(string.gsub(gift, "^%s+", ""), 1, 40)
+	name = string.gsub(name, "%s+$", "")
+	if name == "" then return nil end
+	return { gift = name, coins = math.clamp(math.floor(coins), 1, 100000) }
+end
+
+return Keybinds
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="14">
+        <Properties>
           <string name="Name">MeshPack</string>
           <string name="Source"><![CDATA[--!strict
 --!native
@@ -1577,7 +1628,7 @@ return MeshPack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="14">
+      <Item class="ModuleScript" referent="15">
         <Properties>
           <string name="Name">MountainCodec</string>
           <string name="Source"><![CDATA[--!strict
@@ -1700,7 +1751,7 @@ return MountainCodec
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="15">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">PartShapes</string>
           <string name="Source"><![CDATA[--!strict
@@ -1780,7 +1831,7 @@ return PartShapes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="16">
+      <Item class="ModuleScript" referent="17">
         <Properties>
           <string name="Name">RockStyle</string>
           <string name="Source"><![CDATA[--!strict
@@ -1957,7 +2008,7 @@ return RockStyle
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">ScenePackData</string>
           <string name="Source"><![CDATA[--!strict
@@ -4470,7 +4521,7 @@ H44kTFtpTKosYs80HUUjx6lJBM1IIhU0wjFDne44YDAzkYybTsIMTzUjZp3NIMZikzorJ1U5ftJ0mVVJ
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="18">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">Skin</string>
           <string name="Source"><![CDATA[--!strict
@@ -4509,11 +4560,11 @@ return Skin
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="19">
+  <Item class="ServerScriptService" referent="20">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="20">
+    <Item class="Script" referent="21">
       <Properties>
         <string name="Name">DiamondRushServer</string>
         <token name="RunContext">0</token>
@@ -4534,6 +4585,7 @@ local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
+local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
@@ -4574,6 +4626,8 @@ local settings = {
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
+	-- Players who hid the GAMES tab and SETTINGS button (by user id).
+	hiddenButtons = {} :: { [string]: boolean },
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
@@ -4839,6 +4893,8 @@ end
 -- Players whose client asked for the mountain; only they receive changes.
 local synced: { [Player]: boolean } = {}
 local readyAt: { [Player]: number } = {}
+local catchAt: { [Player]: number } = {}
+local hideAt: { [Player]: number } = {}
 local function sendMessages(messages: { { any } }, player: Player?)
 	for _, message in messages do
 		if player then
@@ -5366,9 +5422,11 @@ local diamondBird = require(script.DiamondBird).start({
 	state = State,
 	notify = Notify,
 	radius = mountainRadius + 12,
+	-- Low enough to see and click from the trail: about halfway up the
+	-- mountain, never lower than head height above the camp.
 	height = function(): number
 		local top = if mountain then mountain:summit() else nil
-		return (if top then top.Y else mountainRadius) + 8
+		return math.max(12, (if top then top.Y else mountainRadius) * 0.5 + 4)
 	end,
 })
 -- Gifts that arrived during the bonus, so the feed can say so.
@@ -5379,8 +5437,10 @@ local function processTikTok(event: TikTokFeed.Event)
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
 		local name = string.lower(event.gift)
 		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
+		-- The bridge's own keybind for this gift replaces its old one; keys
+		-- set in the game's GIFT KEYBINDS stay.
 		for key, binding in settings.giftBindings do
-			if string.lower(binding.gift) == name then settings.giftBindings[key] = nil end
+			if string.lower(binding.gift) == name and binding.game ~= true then settings.giftBindings[key] = nil end
 		end
 		if event.keybind and event.keybind ~= "" then
 			settings.giftBindings[event.keybind] = { gift = event.gift, coins = event.coins or 1 }
@@ -5749,6 +5809,26 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "setSkin" and type(value) == "string" then
 		setSkin(value)
 		return
+	elseif action == "setGiftBinding" and type(value) == "table" then
+		-- GIFT KEYBINDS in the Y panel: pressing the key in the game sends the gift.
+		local binding = Keybinds.clean(value.gift, value.coins)
+		local key = value.key
+		if binding == nil or not Keybinds.allowed(key) then
+			notice(player, "Pick a gift name, its coins and one of the free keys.")
+			return
+		end
+		if settings.giftBindings[key] == nil then
+			local count = 0
+			for _ in settings.giftBindings do count += 1 end
+			if count >= Keybinds.MAX then
+				notice(player, string.format("You can keep up to %d keybinds. Remove one first.", Keybinds.MAX))
+				return
+			end
+		end
+		settings.giftBindings[key] = { gift = binding.gift, coins = binding.coins, game = true }
+	elseif action == "removeGiftBinding" and type(value) == "string" then
+		if settings.giftBindings[value] == nil then return end
+		settings.giftBindings[value] = nil
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
 		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1
@@ -5816,6 +5896,32 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 	end
 	if action == "joinGame" or action == "leaveGame" then
 		setInGame(player, action == "joinGame")
+		return
+	end
+	if action == "setHideButtons" then
+		-- Any player can tuck away the GAMES tab and SETTINGS button (their
+		-- keys still work); it is remembered for next time.
+		if type(value) ~= "boolean" then return end
+		local now = os.clock()
+		if now - (hideAt[player] or -math.huge) < 0.2 then return end
+		hideAt[player] = now
+		player:SetAttribute("HideButtons", value)
+		local id = tostring(player.UserId)
+		if (settings.hiddenButtons[id] == true) ~= value then
+			local count = 0
+			for _ in settings.hiddenButtons do count += 1 end
+			if value and count >= 500 then return end
+			settings.hiddenButtons[id] = if value then true else nil
+			Store.save(settings)
+		end
+		return
+	end
+	if action == "catchBird" then
+		-- A click aimed at the bird this player sees (see the client's aim).
+		local now = os.clock()
+		if now - (catchAt[player] or -math.huge) < 0.25 then return end
+		catchAt[player] = now
+		diamondBird.catch(player)
 		return
 	end
 	if admins[player] then
@@ -5889,6 +5995,7 @@ local function onPlayer(player: Player)
 	end
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
+	player:SetAttribute("HideButtons", settings.hiddenButtons[tostring(player.UserId)] == true)
 	if not modernChat then
 		player.Chatted:Connect(function(message)
 			onChat(player, message)
@@ -5906,6 +6013,8 @@ Players.PlayerRemoving:Connect(function(player)
 	mineCooldown[player] = nil
 	synced[player] = nil
 	readyAt[player] = nil
+	catchAt[player] = nil
+	hideAt[player] = nil
 end)
 
 publishSettings()
@@ -5913,7 +6022,7 @@ State:SetAttribute("TikTok", "Starting…")
 newRound()
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="21">
+      <Item class="ModuleScript" referent="22">
         <Properties>
           <string name="Name">DiamondBird</string>
           <string name="Source"><![CDATA[--!strict
@@ -6050,7 +6159,12 @@ export type Options = {
 export type Bird = {
 	multiplier: () -> number,
 	spawn: () -> (),
+	catch: (player: Player) -> boolean,
 }
+
+-- How far from the bird a catch may be: the bird is flown by each client, so
+-- the server checks the player is roughly in sight of where it should be.
+DiamondBird.CATCH_RANGE = 300
 
 function DiamondBird.start(options: Options): Bird
 	local random = options.random or Random.new()
@@ -6070,11 +6184,11 @@ function DiamondBird.start(options: Options): Bird
 		task.delay(BirdBonus.LEAVE_SECONDS + 0.5, function() bird:Destroy() end)
 	end
 
-	local function caught(player: Player, bird: Model)
-		if bird ~= current or bird:GetAttribute("LeaveAt") ~= 0 or player:GetAttribute("InGame") ~= true then return end
+	local function caught(player: Player, bird: Model): boolean
+		if bird ~= current or bird:GetAttribute("LeaveAt") ~= 0 or player:GetAttribute("InGame") ~= true then return false end
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if humanoid == nil or humanoid.Health <= 0 then return end
+		if humanoid == nil or humanoid.Health <= 0 then return false end
 		leave(bird)
 		-- Catching another bird while the bonus runs restarts the 30 seconds.
 		boostUntil = workspace:GetServerTimeNow() + Config.BirdBoostSeconds
@@ -6091,6 +6205,29 @@ function DiamondBird.start(options: Options): Bird
 			if boostId ~= id then return end
 			options.notify:FireAllClients("feed", { text = "Double gifts are over", stone = 0, kind = "notice" })
 		end)
+		return true
+	end
+
+	-- A click the client aimed at the bird it flies (see BirdView). Clicks in
+	-- first person don't always reach the ClickDetector, so this is the main way
+	-- to catch it; the server checks the bird is still circling and that the
+	-- player is within range of where the shared flight path puts it now.
+	local function catch(player: Player): boolean
+		local bird = current
+		if bird == nil or bird:GetAttribute("LeaveAt") ~= 0 then return false end
+		local character = player.Character
+		local head = character and (character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart"))
+		if head == nil or not head:IsA("BasePart") then return false end
+		local path: BirdBonus.Path = {
+			radius = tonumber(bird:GetAttribute("Radius")) or options.radius,
+			height = tonumber(bird:GetAttribute("Height")) or 0,
+			angle = tonumber(bird:GetAttribute("Angle")) or 0,
+			direction = tonumber(bird:GetAttribute("Direction")) or 1,
+		}
+		local start = tonumber(bird:GetAttribute("Start")) or workspace:GetServerTimeNow()
+		local x, y, z = BirdBonus.position(path, workspace:GetServerTimeNow() - start)
+		if (head.Position - Vector3.new(x, y, z)).Magnitude > DiamondBird.CATCH_RANGE then return false end
+		return caught(player, bird)
 	end
 
 	local function spawn()
@@ -6134,6 +6271,7 @@ function DiamondBird.start(options: Options): Bird
 			return BirdBonus.multiplier(workspace:GetServerTimeNow(), boostUntil, Config.BirdMultiplier)
 		end,
 		spawn = spawn,
+		catch = catch,
 	}
 end
 
@@ -6141,7 +6279,7 @@ return DiamondBird
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="22">
+      <Item class="ModuleScript" referent="23">
         <Properties>
           <string name="Name">Farm</string>
           <string name="Source"><![CDATA[--!strict
@@ -6645,7 +6783,7 @@ return Farm
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="23">
+      <Item class="ModuleScript" referent="24">
         <Properties>
           <string name="Name">Leaderboards</string>
           <string name="Source"><![CDATA[--!strict
@@ -6978,7 +7116,7 @@ return Leaderboards
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="24">
+      <Item class="ModuleScript" referent="25">
         <Properties>
           <string name="Name">Lobby</string>
           <string name="Source"><![CDATA[--!strict
@@ -6987,6 +7125,7 @@ return Leaderboards
 -- gold capitals carries royal blue banners; a royal blue carpet leads from the
 -- spawn to a stepped dais where a giant diamond turns slowly (each client
 -- spins it, see GamesMenu). Games are joined from the games menu on the side of the screen.
+-- A How to Play board beside the carpet opens the on-screen guide.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
@@ -7004,7 +7143,7 @@ local MARBLE_SHADE = Color3.fromRGB(222, 218, 210)
 local GOLD = Color3.fromRGB(224, 178, 72)
 local ROYAL = Color3.fromRGB(34, 52, 140)
 
-export type Built = { model: Model, spawn: SpawnLocation, diamond: Model }
+export type Built = { model: Model, spawn: SpawnLocation, diamond: Model, board: Model }
 
 local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, solid: boolean?): Part
 	local p = Instance.new("Part")
@@ -7198,6 +7337,65 @@ function Lobby.build(parent: Instance): Built
 		end
 	end
 
+	-- The How to Play board beside the carpet, angled to the spawn. Its face is
+	-- drawn, not lettered (lettered signs render badly): a gold gem over three
+	-- list lines. Walking up and pressing E, or clicking it, opens the guide on
+	-- screen (see the client's HowToPlay).
+	local boardModel = Instance.new("Model")
+	boardModel.Name = "HowToPlayBoard"
+	boardModel.Parent = model
+	local boardAt = O + Vector3.new(9, 0, 30)
+	local boardFrame = CFrame.lookAt(boardAt, Vector3.new(spawnAt.X, boardAt.Y, spawnAt.Z))
+	for _, x in { -4.3, 4.3 } do
+		piece(boardModel, "BoardPost", Vector3.new(0.7, 9, 0.7), boardFrame * CFrame.new(x, 4.5, 0), GOLD, Enum.Material.Metal, true)
+	end
+	piece(boardModel, "BoardBase", Vector3.new(10, 0.6, 2), boardFrame * CFrame.new(0, 0.3, 0), MARBLE_SHADE, Enum.Material.Marble, true)
+	piece(boardModel, "BoardFrame", Vector3.new(8.6, 6, 0.4), boardFrame * CFrame.new(0, 5.6, 0), GOLD, Enum.Material.Metal, true)
+	local face = piece(boardModel, "BoardFace", Vector3.new(8, 5.4, 0.5), boardFrame * CFrame.new(0, 5.6, 0), ROYAL, Enum.Material.SmoothPlastic, true)
+	piece(boardModel, "BoardCap", Vector3.new(9.4, 0.5, 0.9), boardFrame * CFrame.new(0, 8.85, 0), GOLD, Enum.Material.Metal)
+	local drawing = Instance.new("SurfaceGui")
+	drawing.Face = Enum.NormalId.Front
+	drawing.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	drawing.PixelsPerStud = 30
+	drawing.LightInfluence = 0.6
+	drawing.Parent = face
+	-- Squares (gems, turned on a corner) are sized by the face's height.
+	local function mark(x: number, y: number, w: number, h: number, colour: Color3, gem: boolean)
+		local frame = Instance.new("Frame")
+		frame.AnchorPoint = Vector2.new(0.5, 0.5)
+		frame.Position = UDim2.fromScale(x, y)
+		frame.Size = UDim2.fromScale(w, h)
+		if gem then
+			frame.SizeConstraint = Enum.SizeConstraint.RelativeYY
+			frame.Rotation = 45
+		end
+		frame.BackgroundColor3 = colour
+		frame.BorderSizePixel = 0
+		frame.Parent = drawing
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.2, 0)
+		corner.Parent = frame
+	end
+	mark(0.5, 0.22, 0.2, 0.2, GOLD, true)
+	for row = 0, 2 do
+		local y = 0.5 + row * 0.15
+		mark(0.2, y, 0.08, 0.08, GOLD, true)
+		mark(0.55, y, 0.52 - row * 0.08, 0.06, MARBLE, false)
+	end
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "HowToPlay"
+	prompt.ActionText = "How to play"
+	prompt.ObjectText = "Guide"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 14
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = face
+	local click = Instance.new("ClickDetector")
+	click.Name = "HowToPlayClick"
+	click.MaxActivationDistance = 40
+	click.Parent = boardModel
+
 	-- A marble balustrade with a gold rail rings the edge; an invisible wall
 	-- behind it stops anyone jumping off.
 	local edge = 60
@@ -7220,14 +7418,14 @@ function Lobby.build(parent: Instance): Built
 		wall.CastShadow = false
 	end
 
-	return { model = model, spawn = spawn, diamond = gem.model }
+	return { model = model, spawn = spawn, diamond = gem.model, board = boardModel }
 end
 
 return Lobby
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="25">
+      <Item class="ModuleScript" referent="26">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
@@ -7543,7 +7741,7 @@ return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="26">
+      <Item class="ModuleScript" referent="27">
         <Properties>
           <string name="Name">Sakura</string>
           <string name="Source"><![CDATA[--!strict
@@ -7927,7 +8125,7 @@ return Sakura
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="27">
+      <Item class="ModuleScript" referent="28">
         <Properties>
           <string name="Name">ScenePack</string>
           <string name="Source"><![CDATA[--!strict
@@ -8081,7 +8279,7 @@ return ScenePack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="28">
+      <Item class="ModuleScript" referent="29">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -8924,7 +9122,7 @@ return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="29">
+      <Item class="ModuleScript" referent="30">
         <Properties>
           <string name="Name">Statue</string>
           <string name="Source"><![CDATA[--!strict
@@ -9057,7 +9255,7 @@ return Statue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="30">
+      <Item class="ModuleScript" referent="31">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -9133,7 +9331,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="31">
+      <Item class="ModuleScript" referent="32">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -9279,7 +9477,7 @@ return TikTokFeed
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="32">
+      <Item class="ModuleScript" referent="33">
         <Properties>
           <string name="Name">Watchtower</string>
           <string name="Source"><![CDATA[--!strict
@@ -9470,15 +9668,15 @@ return Watchtower
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="33">
+  <Item class="StarterPlayer" referent="34">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="34">
+    <Item class="StarterPlayerScripts" referent="35">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="35">
+      <Item class="LocalScript" referent="36">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -9496,6 +9694,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
 local Skin = require(Shared:WaitForChild("Skin"))
+local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local FirstPerson = require(script:WaitForChild("FirstPerson"))
 -- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
 FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
@@ -9608,9 +9807,14 @@ local gui = make("ScreenGui", {
 -- The games menu: the game's display, first-person view and hands only show
 -- while playing, not in the lobby.
 local LobbyView = require(script:WaitForChild("LobbyView"))
+-- How to play: from the lobby board, the games menu or H.
+local HowToPlay = require(script:WaitForChild("HowToPlay"))
+HowToPlay.start()
 LobbyView.start(Request, State, function(inGame: boolean)
 	gui.Enabled = inGame
 	FirstPerson.setEnabled(inGame)
+end, function()
+	HowToPlay.setOpen(true)
 end)
 -- The diamond bird flies round the mountain; catching it doubles gifts.
 require(script:WaitForChild("BirdView")).start(gui, State)
@@ -10148,6 +10352,132 @@ for index = 1, #testGifts, 2 do
 	panelButtons(buttons)
 end
 
+-- Gift keybinds: give any gift a key; pressing it in the game sends that gift,
+-- so the streamer can play without the bridge. The bridge's catalogue can set
+-- keybinds too; both show here.
+panelLabel("GIFT KEYBINDS (press the key in the game to send the gift)")
+panelOrder += 1
+local bindingList = make("Frame", {
+	LayoutOrder = panelOrder,
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	ZIndex = 11,
+}, panel)
+make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) }, bindingList)
+local bindingGift = panelBox("", function() end)
+bindingGift.PlaceholderText = "Gift name, e.g. Rose"
+local bindingCoins = panelBox("", function() end)
+bindingCoins.PlaceholderText = "Coins per gift, e.g. 1"
+local chosenKey: string? = nil
+local capturingKey = false
+local bindingButtons: { TextButton } = {}
+bindingButtons = panelButtons({
+	{ "Key: choose", function() end },
+	{ "Save keybind", function()
+		local coins = tonumber((string.gsub(bindingCoins.Text, "[^%d]", "")))
+		if chosenKey == nil or bindingGift.Text == "" or coins == nil then
+			addFeed("Type a gift name and its coins, then choose a key.", 0, "notice")
+			return
+		end
+		send("setGiftBinding", { key = chosenKey, gift = bindingGift.Text, coins = coins })
+		bindingGift.Text = ""
+		bindingCoins.Text = ""
+		chosenKey = nil
+		bindingButtons[1].Text = "Key: choose"
+	end },
+})
+local keyButton = bindingButtons[1]
+bindingButtons[2].BackgroundColor3 = SELECTED
+local freeKeys = {}
+for _, key in Keybinds.KEYS do table.insert(freeKeys, Keybinds.label(key)) end
+panelLabel("Free keys: " .. table.concat(freeKeys, " "))
+keyButton.Activated:Connect(function()
+	capturingKey = true
+	keyButton.Text = "Press a key..."
+end)
+UserInputService.InputBegan:Connect(function(input: InputObject)
+	if not capturingKey or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	capturingKey = false
+	local name = input.KeyCode.Name
+	if Keybinds.allowed(name) then
+		chosenKey = name
+		keyButton.Text = "Key: " .. Keybinds.label(name)
+	else
+		chosenKey = nil
+		keyButton.Text = "Key: choose"
+		addFeed(Keybinds.label(name) .. " is used by the game. Pick one of the free keys.", 0, "notice")
+	end
+end)
+local function refreshBindings()
+	for _, child in bindingList:GetChildren() do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	local ok, bindings = pcall(function()
+		return game:GetService("HttpService"):JSONDecode(attr("GiftBindings", "{}"))
+	end)
+	if not ok or type(bindings) ~= "table" then return end
+	local keys = {}
+	for key in bindings do table.insert(keys, tostring(key)) end
+	table.sort(keys)
+	if #keys == 0 then
+		local row = make("Frame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, ZIndex = 11 }, bindingList)
+		make("TextLabel", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Font = FONT_MEDIUM,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextColor3 = MUTED,
+			Text = "No keybinds yet.",
+			ZIndex = 12,
+		}, row)
+		return
+	end
+	for index, key in keys do
+		local binding = bindings[key]
+		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, bindingList)
+		local cap = make("TextLabel", {
+			Size = UDim2.fromOffset(36, 30),
+			BackgroundColor3 = BUTTON,
+			Font = FONT,
+			TextSize = 14,
+			TextColor3 = WHITE,
+			Text = Keybinds.label(key),
+			ZIndex = 12,
+		}, row)
+		rounded(cap, 8)
+		make("TextLabel", {
+			Position = UDim2.fromOffset(44, 0),
+			Size = UDim2.new(1, -86, 1, 0),
+			BackgroundTransparency = 1,
+			Font = FONT_MEDIUM,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextColor3 = WHITE,
+			Text = string.format("%s · %s coins", tostring(type(binding) == "table" and binding.gift or "?"),
+				Format.commas(tonumber(type(binding) == "table" and binding.coins or 0) or 0)),
+			ZIndex = 12,
+		}, row)
+		local remove = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.fromOffset(34, 30),
+			BackgroundColor3 = DANGER,
+			Font = FONT,
+			TextSize = 14,
+			TextColor3 = WHITE,
+			Text = "X",
+			ZIndex = 12,
+		}, row)
+		rounded(remove, 8)
+		remove.Activated:Connect(function() send("removeGiftBinding", key) end)
+	end
+end
+State:GetAttributeChangedSignal("GiftBindings"):Connect(refreshBindings)
+refreshBindings()
+
 panelLabel("DIAMOND BIRD (every 5 to 7.5 minutes)")
 panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
@@ -10335,9 +10665,10 @@ local function refreshPanelFields()
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
 end
 
--- Settings (every player): the field of view, from the Settings button or O.
--- The hands are refitted to it, so digging looks the same at any FOV.
-local SETTINGS_KEY = Enum.KeyCode.O
+-- Settings (every player): the field of view and hiding the buttons, from the
+-- Settings button or P (O is Roblox's zoom-out key, which swallows it). The
+-- hands are refitted to the FOV, so digging looks the same at any FOV.
+local SETTINGS_KEY = Enum.KeyCode.P
 local settingsButton = make("TextButton", {
 	Position = UDim2.fromOffset(12, 10),
 	Size = UDim2.fromOffset(0, 32),
@@ -10345,14 +10676,14 @@ local settingsButton = make("TextButton", {
 	Font = FONT,
 	TextSize = 13,
 	TextColor3 = WHITE,
-	Text = "SETTINGS  <font color=\"#A8AEBE\">O</font>",
+	Text = "SETTINGS  <font color=\"#A8AEBE\">P</font>",
 	RichText = true,
 }, gui)
 glass(settingsButton, 16)
 make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, settingsButton)
 local settingsCard = make("Frame", {
 	Position = UDim2.fromOffset(12, 50),
-	Size = UDim2.fromOffset(300, 150),
+	Size = UDim2.fromOffset(300, 214),
 	Visible = false,
 	ZIndex = 15,
 }, gui)
@@ -10398,7 +10729,7 @@ local fovKnob = make("Frame", {
 rounded(fovKnob, 9)
 local function settingsAction(text: string, x: number, colour: Color3): TextButton
 	local button = make("TextButton", {
-		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 96),
+		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 160),
 		Size = UDim2.new(0.5, -4, 0, 30),
 		BackgroundColor3 = colour,
 		Font = FONT,
@@ -10410,6 +10741,45 @@ local function settingsAction(text: string, x: number, colour: Color3): TextButt
 	rounded(button, 8)
 	return button
 end
+-- Hide buttons: tucks away the GAMES tab and this SETTINGS button (G and P
+-- still open them), so they stay off the stream. Remembered by the server.
+settingsText({ Position = UDim2.fromOffset(0, 96), Size = UDim2.new(1, -60, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = "Hide buttons" })
+settingsText({ Position = UDim2.fromOffset(0, 118), Size = UDim2.new(1, -60, 0, 30), Font = FONT_MEDIUM, TextSize = 12, TextColor3 = MUTED, TextWrapped = true,
+	TextYAlignment = Enum.TextYAlignment.Top, Text = "Hides GAMES and SETTINGS. G and P still open them." })
+local hideSwitch = make("TextButton", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, 0, 0, 98),
+	Size = UDim2.fromOffset(46, 26),
+	BackgroundColor3 = BUTTON,
+	AutoButtonColor = false,
+	Text = "",
+	ZIndex = 16,
+}, settingsCard)
+rounded(hideSwitch, 13)
+local hideKnob = make("Frame", {
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.new(0, 3, 0.5, 0),
+	Size = UDim2.fromOffset(20, 20),
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
+	ZIndex = 17,
+}, hideSwitch)
+rounded(hideKnob, 10)
+local function refreshHidden()
+	local hidden = player:GetAttribute("HideButtons") == true
+	hideSwitch.BackgroundColor3 = if hidden then SELECTED else BUTTON
+	hideKnob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
+	settingsButton.Visible = not hidden
+	LobbyView.setTabHidden(hidden)
+end
+player:GetAttributeChangedSignal("HideButtons"):Connect(refreshHidden)
+refreshHidden()
+hideSwitch.Activated:Connect(function()
+	local hidden = player:GetAttribute("HideButtons") ~= true
+	-- Shown at once; the server keeps it for next time.
+	player:SetAttribute("HideButtons", hidden)
+	Request:FireServer("setHideButtons", hidden)
+end)
 local fovReset = settingsAction("Reset", 0, BUTTON)
 local settingsDone = settingsAction("Done", 0.5, SELECTED)
 
@@ -10459,7 +10829,7 @@ local function setSettingsOpen(show: boolean)
 end
 settingsButton.Activated:Connect(function() setSettingsOpen(not settingsCard.Visible) end)
 settingsDone.Activated:Connect(function() setSettingsOpen(false) end)
--- O toggles the settings in the game, unless the streamer bound O to a test gift.
+-- P toggles the settings in the game, unless the streamer bound P to a test gift.
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed or input.KeyCode ~= SETTINGS_KEY or not gui.Enabled or UserInputService:GetFocusedTextBox() then return end
 	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
@@ -10621,6 +10991,25 @@ local rockOutline = make("Highlight", {
 	Enabled = false,
 }, workspace)
 local aimTarget: BasePart? = nil
+-- True while the aim is on (or close to) a diamond bird that is still circling.
+-- The bird is small and moving, so a click within a few degrees counts.
+local aimBird = false
+local function birdNear(ray: Ray): boolean
+	for _, child in workspace:GetChildren() do
+		local root = if child.Name == "DiamondBird" and child:IsA("Model") then child.PrimaryPart else nil
+		if root and child:GetAttribute("LeaveAt") == 0 then
+			local offset = root.Position - ray.Origin
+			local distance = offset.Magnitude
+			if distance > 1e-3 and distance < 400 then
+				local tolerance = math.max(math.rad(4), math.atan(7 / distance))
+				if math.acos(math.clamp(offset.Unit:Dot(ray.Direction.Unit), -1, 1)) <= tolerance then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
 local aimParams = RaycastParams.new()
 aimParams.FilterType = Enum.RaycastFilterType.Exclude
 RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value + 3, function()
@@ -10629,18 +11018,26 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local phase = attr("Phase", "Digging")
 	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
-		and player:GetAttribute("InGame") == true and not LobbyView.isOpen()
+		and player:GetAttribute("InGame") == true and not LobbyView.isOpen() and not HowToPlay.isOpen()
 		and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	aimDot.Visible = active
 	UserInputService.MouseIconEnabled = not active
 	aimTarget = nil
+	aimBird = false
 	if active and camera then
 		aimParams.FilterDescendantsInstances = if character then { character } else {}
 		local viewport = camera.ViewportSize
 		local ray = camera:ViewportPointToRay(viewport.X / 2, viewport.Y / 2)
 		local result = workspace:Raycast(ray.Origin, ray.Direction * 500, aimParams)
 		if result then aimTarget = result.Instance end
+		aimBird = birdNear(ray)
+	end
+	-- The dot turns gold over the bird, so players know a click will catch it.
+	local dotColour = if aimBird then GOLD else WHITE
+	if aimDot.BackgroundColor3 ~= dotColour then
+		aimDot.BackgroundColor3 = dotColour
+		aimDot.Size = if aimBird then UDim2.fromOffset(9, 9) else UDim2.fromOffset(5, 5)
 	end
 	local target = aimTarget
 	local stone = target ~= nil and view:keyForPart(target) ~= nil
@@ -10654,10 +11051,22 @@ local function isDigInput(input: InputObject): boolean
 end
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if not processed and isDigInput(input) then
-		-- A fresh click on the diamond or the diamond bird goes to its
-		-- ClickDetector, never to digging.
+		-- A click on (or close to) the diamond bird catches it. A tap aims
+		-- where the finger is; a click aims at the screen centre.
+		local camera = workspace.CurrentCamera
+		local catching = aimBird
+		if not catching and input.UserInputType == Enum.UserInputType.Touch and camera
+			and player:GetAttribute("InGame") == true then
+			catching = birdNear(camera:ScreenPointToRay(input.Position.X, input.Position.Y))
+		end
 		local target = aimTarget
-		if target == workspace:FindFirstChild("Diamond") or (target and target.Parent and target.Parent.Name == "DiamondBird") then
+		if catching or (target and target.Parent and target.Parent.Name == "DiamondBird") then
+			Request:FireServer("catchBird")
+			digging = false
+			return
+		end
+		-- A fresh click on the diamond goes to its ClickDetector, never to digging.
+		if target == workspace:FindFirstChild("Diamond") then
 			digging = false
 			return
 		end
@@ -10678,7 +11087,7 @@ local function digTarget(): number?
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	local target = aimTarget
-	local allowed = digging and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
+	local allowed = digging and not panel.Visible and not settingsOpen() and not HowToPlay.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	local key = if allowed and target then view:keyForPart(target) else nil
 	if key == nil or root == nil or not root:IsA("BasePart") or (root.Position - (target :: BasePart).Position).Magnitude > 16 then
@@ -10708,7 +11117,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">BirdView</string>
             <string name="Source"><![CDATA[--!strict
@@ -10855,7 +11264,7 @@ return BirdView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -11340,7 +11749,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="39">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -12407,14 +12816,295 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="39">
+        <Item class="ModuleScript" referent="40">
+          <Properties>
+            <string name="Name">HowToPlay</string>
+            <string name="Source"><![CDATA[--!strict
+-- The How to Play guide: a card in the lobby's white and gold with four
+-- pages (connecting TikTok, testing without TikTok, the controls and how to
+-- win). It opens from the board beside the lobby spawn, the games menu's
+-- How to play button, or H anywhere, and frees the mouse while it is open.
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+
+local HowToPlay = {}
+
+local IVORY = Color3.fromRGB(250, 248, 243)
+local GOLD = Color3.fromRGB(224, 178, 72)
+local ROYAL = Color3.fromRGB(34, 52, 140)
+local INK = Color3.fromRGB(46, 44, 56)
+local MUTED = Color3.fromRGB(140, 132, 118)
+local TITLE_FONT = Enum.Font.Merriweather
+HowToPlay.KEY = Enum.KeyCode.H
+-- The lobby board's prompt and click detector carry this name.
+HowToPlay.BOARD = "HowToPlay"
+
+-- Each page: its tab name and its text (Roblox rich text, so no < > or &).
+HowToPlay.PAGES = {
+	{
+		title = "Connect TikTok",
+		text = table.concat({
+			"<b>You need</b> a Windows PC with Roblox Studio and Node.js LTS (free from nodejs.org, installed once).",
+			"",
+			"<b>1.</b>  Open the <b>bridge</b> folder and double-click <b>Start Bridge.bat</b>. Keep the black window open: that is the bridge.",
+			"<b>2.</b>  The control page opens in your browser at <b>localhost:8787</b>.",
+			"<b>3.</b>  Go LIVE on TikTok, type your TikTok username on the control page and press <b>Connect</b>. It remembers you next time.",
+			"<b>4.</b>  In Studio, HTTP requests must be allowed (Home, Game Settings, Security, Allow HTTP Requests). It is already on in this game.",
+			"<b>5.</b>  Press Play, then <b>JOIN</b> Diamond in the Rough. The control page says <b>Roblox: connected</b> and the bottom right of the game shows the TikTok connection.",
+			"<b>6.</b>  Capture the Studio window in TikTok LIVE Studio or OBS.",
+			"",
+			"No bridge? You can still send gifts yourself with test gifts and gift keybinds: see <b>Testing</b>.",
+		}, "\n"),
+	},
+	{
+		title = "Testing",
+		text = table.concat({
+			"Only the streamer and admins can do this (in Studio, everyone can).",
+			"",
+			"<b>Y</b> opens the streamer panel in the game and frees the mouse. Press Y again to close it.",
+			"",
+			"<b>TEST GIFTS</b> send pretend gifts with no TikTok needed, from Rose (1 coin) up to Universe. Bigger gifts make bigger blasts.",
+			"<b>REBUILD TEST GIFTS</b> add stone back, from +100 up to Grow to limit.",
+			"<b>Send a diamond bird now</b> calls the diamond bird straight away.",
+			"",
+			"<b>GIFT KEYBINDS</b>: type a gift name and its coins, press <b>Key</b>, then press the key you want, and press <b>Save keybind</b>. Pressing that key in the game now sends that gift, with or without the bridge.",
+			"",
+			"The control page at localhost:8787 has the same test buttons.",
+		}, "\n"),
+	},
+	{
+		title = "Controls",
+		text = table.concat({
+			"<b>W A S D</b> to walk, <b>Space</b> to jump, move the mouse to look.",
+			"<b>Hold left mouse</b> on the mountain to dig. Stand close to the rock you aim at.",
+			"<b>Click</b> the diamond to pick it up, and the diamond bird to catch it.",
+			"",
+			"<b>G</b>  games menu: join, or go back to the lobby",
+			"<b>P</b>  settings: field of view, and hiding the GAMES and SETTINGS buttons",
+			"<b>H</b>  this guide",
+			"<b>Y</b>  streamer panel (streamer and admins only)",
+			"",
+			"On a phone or tablet, tap to dig and use the on-screen buttons.",
+		}, "\n"),
+	},
+	{
+		title = "How to win",
+		text = table.concat({
+			"Dig into the mountain to find the <b>diamond</b> hidden inside. TikTok gifts blast big holes in it, and likes, follows and shares break rocks too. Some gifts add stone back instead: the streamer chooses which.",
+			"",
+			"When the diamond shows, aim at it and click it from close by to pick it up.",
+			"",
+			"Hold it until the countdown ends (it takes 15 seconds) to win the round. You can't move while you hold it, and a gift that rebuilds rock makes you drop it.",
+			"",
+			"<b>Diamond bird</b>: every 5 to 7 and a half minutes a diamond bird circles the mountain. Aim at it until the dot turns gold and click: every gift counts double for 30 seconds.",
+			"",
+			"The leaderboards behind the mountain show the top helpers (gifts that break the mountain) and the top griefers (gifts that add stone).",
+		}, "\n"),
+	},
+}
+
+local open = false
+local setOpenHandler: ((boolean, number?) -> ())? = nil
+
+function HowToPlay.isOpen(): boolean
+	return open
+end
+
+-- Opens the guide (on `page`, or where it was left) or closes it.
+function HowToPlay.setOpen(show: boolean, page: number?)
+	if setOpenHandler then setOpenHandler(show, page) end
+end
+
+function HowToPlay.toggle()
+	HowToPlay.setOpen(not open)
+end
+
+local function make(className: string, properties: { [string]: any }, parent: Instance?): any
+	local instance = Instance.new(className)
+	for key, value in properties do
+		(instance :: any)[key] = value
+	end
+	if parent ~= nil then
+		instance.Parent = parent
+	end
+	return instance
+end
+
+local function rounded(parent: Instance, radius: number)
+	make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+end
+
+local function stroke(parent: Instance, colour: Color3, thickness: number)
+	make("UIStroke", { Color = colour, Thickness = thickness, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, parent)
+end
+
+function HowToPlay.start()
+	local player = Players.LocalPlayer
+	local gui = make("ScreenGui", {
+		Name = "HowToPlay",
+		ResetOnSpawn = false,
+		DisplayOrder = 20,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Enabled = false,
+	}, player:WaitForChild("PlayerGui"))
+	local card = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(0.92, 0, 0.86, 0),
+		BackgroundColor3 = IVORY,
+	}, gui)
+	make("UISizeConstraint", { MaxSize = Vector2.new(620, 520) }, card)
+	rounded(card, 18)
+	stroke(card, GOLD, 3)
+	make("UIPadding", {
+		PaddingLeft = UDim.new(0, 18),
+		PaddingRight = UDim.new(0, 18),
+		PaddingTop = UDim.new(0, 14),
+		PaddingBottom = UDim.new(0, 16),
+	}, card)
+	make("TextLabel", {
+		Size = UDim2.new(1, -110, 0, 38),
+		BackgroundTransparency = 1,
+		Font = TITLE_FONT,
+		TextSize = 28,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = ROYAL,
+		Text = "How to play",
+	}, card)
+	local close = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 4),
+		Size = UDim2.fromOffset(96, 30),
+		BackgroundColor3 = ROYAL,
+		Font = Enum.Font.GothamBold,
+		TextSize = 13,
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = "Close  H",
+	}, card)
+	rounded(close, 15)
+
+	-- The page tabs.
+	local tabs = make("Frame", {
+		Position = UDim2.fromOffset(0, 48),
+		Size = UDim2.new(1, 0, 0, 32),
+		BackgroundTransparency = 1,
+	}, card)
+	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6) }, tabs)
+	make("Frame", {
+		Position = UDim2.fromOffset(0, 88),
+		Size = UDim2.new(1, 0, 0, 2),
+		BackgroundColor3 = GOLD,
+		BorderSizePixel = 0,
+	}, card)
+	local body = make("ScrollingFrame", {
+		Position = UDim2.fromOffset(0, 100),
+		Size = UDim2.new(1, 0, 1, -122),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		CanvasSize = UDim2.fromOffset(0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 4,
+		ScrollBarImageColor3 = GOLD,
+	}, card)
+	local text = make("TextLabel", {
+		Size = UDim2.new(1, -10, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 16,
+		LineHeight = 1.15,
+		TextWrapped = true,
+		RichText = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		TextColor3 = INK,
+		Text = "",
+	}, body)
+
+	local buttons: { TextButton } = {}
+	local current = 1
+	local function show(page: number)
+		current = math.clamp(page, 1, #HowToPlay.PAGES)
+		for index, button in buttons do
+			local on = index == current
+			button.BackgroundColor3 = if on then ROYAL else Color3.new(1, 1, 1)
+			button.TextColor3 = if on then Color3.new(1, 1, 1) else ROYAL
+		end
+		text.Text = HowToPlay.PAGES[current].text
+		body.CanvasPosition = Vector2.zero
+	end
+	for index, page in HowToPlay.PAGES do
+		local button = make("TextButton", {
+			Size = UDim2.new(1 / #HowToPlay.PAGES, -6, 1, 0),
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			TextScaled = false,
+			Text = page.title,
+		}, tabs)
+		rounded(button, 10)
+		stroke(button, ROYAL, 1.5)
+		button.Activated:Connect(function() show(index) end)
+		table.insert(buttons, button)
+	end
+	make("TextLabel", {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.fromScale(0, 1),
+		Size = UDim2.new(1, 0, 0, 14),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = MUTED,
+		Text = "Open this again from the board by the lobby spawn, the games menu, or H.",
+	}, card)
+	show(1)
+
+	setOpenHandler = function(visible: boolean, page: number?)
+		if page then show(page) end
+		open = visible
+		gui.Enabled = visible
+	end
+	close.Activated:Connect(function() HowToPlay.setOpen(false) end)
+	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+		if processed or input.KeyCode ~= HowToPlay.KEY or UserInputService:GetFocusedTextBox() then return end
+		HowToPlay.toggle()
+	end)
+	-- The lobby board: walk up and press E, or click it.
+	ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt, who: Player)
+		if prompt.Name == HowToPlay.BOARD and who == player then HowToPlay.setOpen(true, 1) end
+	end)
+	task.spawn(function()
+		local lobby = workspace:WaitForChild("Lobby", math.huge)
+		local board = lobby:WaitForChild("HowToPlayBoard", math.huge)
+		local click = board:WaitForChild(HowToPlay.BOARD .. "Click", math.huge)
+		if click:IsA("ClickDetector") then
+			click.MouseClick:Connect(function() HowToPlay.setOpen(true, 1) end)
+		end
+	end)
+	-- First person locks the mouse; free it while the guide is open.
+	RunService.RenderStepped:Connect(function()
+		if open then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			UserInputService.MouseIconEnabled = true
+		end
+	end)
+end
+
+return HowToPlay
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="41">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
 -- The games menu on the left of the screen, in the lobby's royal white and
 -- gold: Diamond in the Rough with its live status and a Join button, more
--- slots marked Coming soon, and Back to lobby while playing. The Hide button
--- hides it to a small tab; the tab (or G) shows it again. Also turns the
+-- slots marked Coming soon, How to play, and Back to lobby while playing. The
+-- Hide button hides it to a small tab; the tab (or G) shows it again. The tab
+-- itself can be hidden from the settings (G still works). Also turns the
 -- lobby's giant diamond on this computer.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12438,9 +13128,17 @@ local WIDTH = 360
 local TOGGLE_KEY = Enum.KeyCode.G
 
 local open = false
+local tabHidden = false
+local refreshTab: () -> () = function() end
 
 function LobbyView.isOpen(): boolean
 	return open
+end
+
+-- Hides the GAMES tab (the settings' "Hide buttons"); G still opens the menu.
+function LobbyView.setTabHidden(hidden: boolean)
+	tabHidden = hidden
+	refreshTab()
 end
 
 local function make(className: string, properties: { [string]: any }, parent: Instance?): any
@@ -12506,8 +13204,9 @@ function LobbyView.status(phase: string, stone: number, skin: string?): string
 end
 
 -- `request` sends joinGame / leaveGame; `onChange(inGame)` runs whenever the
--- player moves between the lobby and the game (and once at the start).
-function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boolean) -> ())
+-- player moves between the lobby and the game (and once at the start);
+-- `onHelp` opens the How to Play guide.
+function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boolean) -> (), onHelp: (() -> ())?)
 	local player = Players.LocalPlayer
 	local gui = make("ScreenGui", {
 		Name = "GamesMenu",
@@ -12534,7 +13233,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 	local panel = make("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, -WIDTH - 40, 0.5, 0),
-		Size = UDim2.fromOffset(WIDTH, 556),
+		Size = UDim2.fromOffset(WIDTH, 608),
 		BackgroundColor3 = IVORY,
 		Visible = false,
 	}, gui)
@@ -12675,6 +13374,21 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		stroke(badge, GOLD, 1.5)
 	end
 
+	local help = make("TextButton", {
+		LayoutOrder = 9,
+		Size = UDim2.new(1, 0, 0, 44),
+		BackgroundColor3 = ROYAL,
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = "How to play  H",
+	}, list)
+	rounded(help, 12)
+	stroke(help, GOLD, 2)
+	help.Activated:Connect(function()
+		if onHelp then onHelp() end
+	end)
+
 	local back = make("TextButton", {
 		LayoutOrder = 10,
 		Size = UDim2.new(1, 0, 0, 44),
@@ -12694,7 +13408,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 		if show == open then return end
 		open = show
 		if slide then slide:Cancel() end
-		tab.Visible = not show
+		refreshTab()
 		panel.Visible = true
 		local target = if show then UDim2.new(0, 12, 0.5, 0) else UDim2.new(0, -WIDTH - 40, 0.5, 0)
 		local tween = TweenService:Create(panel, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = target })
@@ -12703,6 +13417,9 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (boole
 			if playback == Enum.PlaybackState.Completed and not open then panel.Visible = false end
 		end)
 		tween:Play()
+	end
+	refreshTab = function()
+		tab.Visible = not open and not tabHidden
 	end
 	tab.Activated:Connect(function() setOpen(true) end)
 	hide.Activated:Connect(function() setOpen(false) end)
@@ -12792,7 +13509,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="40">
+        <Item class="ModuleScript" referent="42">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -13293,7 +14010,7 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="41">
+        <Item class="ModuleScript" referent="43">
           <Properties>
             <string name="Name">PetalView</string>
             <string name="Source"><![CDATA[--!strict
@@ -13395,7 +14112,7 @@ return PetalView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="42">
+        <Item class="ModuleScript" referent="44">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -13523,7 +14240,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="43">
+        <Item class="ModuleScript" referent="45">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -13639,12 +14356,12 @@ return SceneryView
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="44">
+  <Item class="Workspace" referent="46">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="45">
+    <Item class="Terrain" referent="47">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>
