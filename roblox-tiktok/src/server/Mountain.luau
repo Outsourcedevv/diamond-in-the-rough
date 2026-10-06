@@ -268,11 +268,14 @@ end
 
 -- If rock fills the space between `bottom` and `top` at or around `position`
 -- (a character buried by a rebuild), the height of the rock surface above it.
-function Mountain.coveredTop(self: Mountain, position: Vector3, bottom: number, top: number): number?
+local AROUND = { { 0, 0 }, { 0.7, 0 }, { -0.7, 0 }, { 0, 0.7 }, { 0, -0.7 } }
+local CENTRE = { { 0, 0 } }
+function Mountain.coveredTop(self: Mountain, position: Vector3, bottom: number, top: number, centreOnly: boolean?): number?
 	local size = self.blockSize
 	local grid = self.grid
 	local best: number? = nil
-	for _, offset in { { 0, 0 }, { 0.7, 0 }, { -0.7, 0 }, { 0, 0.7 }, { 0, -0.7 } } do
+	-- `centreOnly` checks the column the body is in, not the rock beside it.
+	for _, offset in (if centreOnly then CENTRE else AROUND) do
 		local x = math.floor((position.X + offset[1]) / size + 0.5)
 		local z = math.floor((position.Z + offset[2]) / size + 0.5)
 		if math.abs(x) <= 124 and math.abs(z) <= 124 then

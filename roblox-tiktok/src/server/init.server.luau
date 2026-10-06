@@ -665,35 +665,61 @@ cancelHoldForRebuild = function()
 	if interrupted then drop("rebuild") end
 	return interrupted
 end
+-- Puts a player on top of the rock: at `destination` if given, else out of
+-- any restored rock their body is inside (`centreOnly`: only rock right where
+-- they stand, not rock beside them).
+local function liftOut(current: Mountain.Mountain, player: Player, destination: Vector3?, centreOnly: boolean?)
+	if player:GetAttribute("InGame") ~= true or player == holder then return end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if character == nil or root == nil or not root:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then return end
+	local clearance = humanoid.HipHeight + root.Size.Y / 2
+	-- R6 rigs use zero HipHeight; account for their legs.
+	if humanoid.RigType == Enum.HumanoidRigType.R6 then clearance += 2 end
+	if destination == nil then
+		-- Lift players whose body is now inside restored rock onto its surface.
+		local feet = root.Position.Y - clearance
+		local top = current:coveredTop(root.Position, feet + 0.15, root.Position.Y + 1.5, centreOnly)
+		if top then destination = Vector3.new(root.Position.X, top, root.Position.Z) end
+	end
+	if destination then
+		local target = destination + Vector3.new(0, clearance + 1, 0)
+		character:PivotTo(character:GetPivot() + (target - root.Position))
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+-- Each client draws the rock itself, a moment after the server restores it.
+-- A player lifted onto rock their client has not drawn yet falls back into
+-- the old hole, and the rock then appears round them (the holder, moved to
+-- the summit after a big rebuild, was trapped like this). So for a few
+-- seconds after rock comes back, anyone standing inside it is lifted again.
+local UNBURY_SECONDS, UNBURY_EVERY = 6, 0.4
+local unburySerial = 0
+local function keepUnburying()
+	unburySerial += 1
+	local serial = unburySerial
+	task.spawn(function()
+		for _ = 1, math.ceil(UNBURY_SECONDS / UNBURY_EVERY) do
+			task.wait(UNBURY_EVERY)
+			local current = mountain
+			if serial ~= unburySerial or current == nil then return end
+			for _, player in Players:GetPlayers() do
+				liftOut(current, player, nil, true)
+			end
+		end
+	end)
+end
 interruptRebuildHold = function(restored: number, interrupted: Player?)
 	local current = mountain
 	if current == nil then return end
 	-- The former holder goes to the highest restored surface after a big rebuild.
 	local summit = if interrupted and restored >= 10000 then current:summit() else nil
 	for _, player in Players:GetPlayers() do
-		if player:GetAttribute("InGame") ~= true then continue end
-		local character = player.Character
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if character == nil or root == nil or not root:IsA("BasePart") or humanoid == nil or humanoid.Health <= 0 then continue end
-		local clearance = humanoid.HipHeight + root.Size.Y / 2
-		-- R6 rigs use zero HipHeight; account for their legs.
-		if humanoid.RigType == Enum.HumanoidRigType.R6 then clearance += 2 end
-		local destination = if player == interrupted then summit else nil
-		if destination == nil then
-			-- Lift players whose body is now inside restored rock onto its surface.
-			local feet = root.Position.Y - clearance
-			local top = current:coveredTop(root.Position, feet + 0.15, root.Position.Y + 1.5)
-			if top then destination = Vector3.new(root.Position.X, top, root.Position.Z) end
-		end
-		if destination then
-			local target = destination + Vector3.new(0, clearance + 1, 0)
-			character:PivotTo(character:GetPivot() + (target - root.Position))
-			root.AssemblyLinearVelocity = Vector3.zero
-			root.AssemblyAngularVelocity = Vector3.zero
-		end
-
+		liftOut(current, player, if player == interrupted then summit else nil)
 	end
+	if restored > 0 then keepUnburying() end
 end
 
 local function win(player: Player)
