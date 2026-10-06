@@ -24,7 +24,7 @@ local Notify = Remotes:WaitForChild("Notify") :: RemoteEvent
 local Request = Remotes:WaitForChild("Request") :: RemoteEvent
 local RebuildEffects = require(script:WaitForChild("RebuildEffects"))
 local GiftEffects = require(script:WaitForChild("GiftEffects"))
-GiftEffects.start(player:WaitForChild("PlayerGui"))
+GiftEffects.start(player:WaitForChild("PlayerGui"), State)
 
 -- The rock is drawn here, not replicated from the server: the server sends a
 -- snapshot and compact change lists, and MountainView keeps local parts in step.
