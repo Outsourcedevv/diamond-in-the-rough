@@ -1,5 +1,7 @@
 --!strict
--- Saves the win counter, its look, the best round time and the starting stone.
+-- Saves the win counter, its look, the best round time and the starting stone,
+-- the statues, leaderboards, theme, skin and keybinds. In single player each
+-- player has their own save (useKey); otherwise the game shares one.
 -- DataStores need the game to be published (and, in Studio, "Enable Studio
 -- Access to API Services"). Without them everything still works; it just is
 -- not remembered between sessions.
@@ -7,7 +9,8 @@ local DataStoreService = game:GetService("DataStoreService")
 
 local Store = {}
 
-local KEY = "settings"
+Store.SHARED_KEY = "settings"
+local KEY = Store.SHARED_KEY
 local store: DataStore? = nil
 local pending: { [string]: any }? = nil
 local saving = false
@@ -22,19 +25,26 @@ local function open(): DataStore?
 	return store
 end
 
-function Store.load(): { [string]: any }?
+-- Where saves go from now on, e.g. "player_123" for one player's own save.
+function Store.useKey(key: string)
+	KEY = key
+end
+
+-- The save under `key` (the current one by default), and whether it could be
+-- read: nil and true means there is no save there yet.
+function Store.load(key: string?): ({ [string]: any }?, boolean)
 	local target = open()
 	if target == nil then
-		return nil
+		return nil, false
 	end
-	local ok, data = pcall(target.GetAsync, target, KEY)
+	local ok, data = pcall(target.GetAsync, target, key or KEY)
 	if ok and type(data) == "table" then
-		return data
+		return data, true
 	end
 	if not ok then
 		warn("[DiamondRush] Settings are not saved between sessions: " .. tostring(data))
 	end
-	return nil
+	return nil, ok
 end
 
 -- Saves a few seconds after the last change, so quick edits make one write.

@@ -4639,7 +4639,21 @@ local settings = {
 	theme = "default", -- the map's look: "default" (alpine), "sakura" or "farm"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 }
-local saved = Store.load()
+-- Single player: every player has their own save (statues, wins, theme,
+-- keybinds and the rest), so the server waits for its player and loads theirs.
+-- A first visit starts from the game's old shared save.
+if Config.SinglePlayer then
+	local waitUntil = os.clock() + 30
+	while #Players:GetPlayers() == 0 and os.clock() < waitUntil do
+		task.wait(0.1)
+	end
+	local owner = Players:GetPlayers()[1]
+	if owner then Store.useKey("player_" .. tostring(owner.UserId)) end
+end
+local saved, readable = Store.load()
+if saved == nil and readable and Config.SinglePlayer then
+	saved = Store.load(Store.SHARED_KEY)
+end
 if saved then
 	for key, value in saved do
 		if settings[key] ~= nil and type(value) == type(settings[key]) then
@@ -9263,7 +9277,9 @@ return Statue
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
--- Saves the win counter, its look, the best round time and the starting stone.
+-- Saves the win counter, its look, the best round time and the starting stone,
+-- the statues, leaderboards, theme, skin and keybinds. In single player each
+-- player has their own save (useKey); otherwise the game shares one.
 -- DataStores need the game to be published (and, in Studio, "Enable Studio
 -- Access to API Services"). Without them everything still works; it just is
 -- not remembered between sessions.
@@ -9271,7 +9287,8 @@ local DataStoreService = game:GetService("DataStoreService")
 
 local Store = {}
 
-local KEY = "settings"
+Store.SHARED_KEY = "settings"
+local KEY = Store.SHARED_KEY
 local store: DataStore? = nil
 local pending: { [string]: any }? = nil
 local saving = false
@@ -9286,19 +9303,26 @@ local function open(): DataStore?
 	return store
 end
 
-function Store.load(): { [string]: any }?
+-- Where saves go from now on, e.g. "player_123" for one player's own save.
+function Store.useKey(key: string)
+	KEY = key
+end
+
+-- The save under `key` (the current one by default), and whether it could be
+-- read: nil and true means there is no save there yet.
+function Store.load(key: string?): ({ [string]: any }?, boolean)
 	local target = open()
 	if target == nil then
-		return nil
+		return nil, false
 	end
-	local ok, data = pcall(target.GetAsync, target, KEY)
+	local ok, data = pcall(target.GetAsync, target, key or KEY)
 	if ok and type(data) == "table" then
-		return data
+		return data, true
 	end
 	if not ok then
 		warn("[DiamondRush] Settings are not saved between sessions: " .. tostring(data))
 	end
-	return nil
+	return nil, ok
 end
 
 -- Saves a few seconds after the last change, so quick edits make one write.

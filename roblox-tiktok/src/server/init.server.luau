@@ -65,7 +65,21 @@ local settings = {
 	theme = "default", -- the map's look: "default" (alpine), "sakura" or "farm"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 }
-local saved = Store.load()
+-- Single player: every player has their own save (statues, wins, theme,
+-- keybinds and the rest), so the server waits for its player and loads theirs.
+-- A first visit starts from the game's old shared save.
+if Config.SinglePlayer then
+	local waitUntil = os.clock() + 30
+	while #Players:GetPlayers() == 0 and os.clock() < waitUntil do
+		task.wait(0.1)
+	end
+	local owner = Players:GetPlayers()[1]
+	if owner then Store.useKey("player_" .. tostring(owner.UserId)) end
+end
+local saved, readable = Store.load()
+if saved == nil and readable and Config.SinglePlayer then
+	saved = Store.load(Store.SHARED_KEY)
+end
 if saved then
 	for key, value in saved do
 		if settings[key] ~= nil and type(value) == type(settings[key]) then
