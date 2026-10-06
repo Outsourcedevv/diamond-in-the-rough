@@ -46,7 +46,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 
 Open the updated bridge control page at **http://localhost:8787**. Enter your TikTok username, then use **Refresh from TikTok** in the catalogue to load every gift returned for that LIVE. This is the room's available list, which can vary; the offline starter list is explicitly labelled and is not the full catalogue. The last successful catalogue is cached for later use.
 
-Search by gift name or coin price, click a gift, choose **Add blocks** or **Remove blocks**, enter the amount per gift, and pick an optional keybind. **Save & test** sends a simulated gift through the same path as live gifts. Settings are saved locally and synced to Roblox, including published games configured with Open Cloud. Keybinds work in the bridge window and in Roblox for admins once synced; they do not fire while typing or using the settings panel. Duplicate keybinds are rejected. The keys on offer leave out I and O (Roblox's zoom keys) and P (the game's settings).
+Search by gift name or coin price, click a gift, choose **Add blocks** or **Remove blocks**, enter the amount per gift, and pick an optional keybind. **Save & test** sends a simulated gift through the same path as live gifts. Settings are saved locally and synced to Roblox, including published games configured with Open Cloud. Keybinds work in the bridge window and in Roblox once synced; they do not fire while typing or using the settings panel. Duplicate keybinds are rejected. The keys on offer leave out I and O (Roblox's zoom keys) and P (the game's settings).
 
 **Keybinds without the bridge.** In the game's **Y** panel, **GIFT KEYBINDS** lists every keybind and lets the streamer add their own: type the gift name (a gift rule with that name applies, otherwise its coins times rocks per coin) and its coins, press **Key: choose** and then the key, and press **Save keybind**. **X** removes one. Pressing the key in the game then sends that gift, with or without the bridge, through the same path as the test gifts. The free keys are B, C, F, J, K, L, M, N, Q, R, T, U, V, X, Z, 1 to 0 and F6 to F8 (W A S D, E, G, H, I, O, P and Y are kept for the game and Roblox). Up to 24 keybinds are kept and saved with the game. A keybind set in the game stays when the bridge resends its catalogue; the bridge only replaces its own.
 
@@ -220,6 +220,8 @@ A published Roblox server cannot reach the bridge on your PC, so the bridge send
 4. On the control page, open **Published game (optional)**, paste both and press **Save**.
 
 The game listens on the topic `DiamondRushTikTok`. Studio keeps working at the same time.
+
+The game is **single player** (`SinglePlayer = true` in `src/shared/Config.luau`). Whoever plays is treated as the streamer and gets the **Y** panel, test gifts and gift keybinds, and those settings are saved for the whole game. So keep the published game private, or set its maximum players to 1, so nobody else can join and change them. Set `SinglePlayer = false` to go back to owner-and-Admins only.
 
 To show the Blender mountains and trees in the published game, also turn on **Enable Mesh / Image APIs** (see [Blender scenery](#blender-scenery)).
 

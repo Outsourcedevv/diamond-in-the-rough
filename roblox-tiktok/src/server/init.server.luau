@@ -991,7 +991,7 @@ end)
 
 -- Pickaxe mining and settings ---------------------------------------------------------
 local function isAdmin(player: Player): boolean
-	if RunService:IsStudio() then
+	if Config.SinglePlayer or RunService:IsStudio() then
 		return true
 	end
 	if table.find(Config.Admins, player.UserId) then

@@ -40,8 +40,6 @@ HowToPlay.PAGES = {
 	{
 		title = "Testing",
 		text = table.concat({
-			"Only the streamer and admins can do this (in Studio, everyone can).",
-			"",
 			"<b>Y</b> opens the streamer panel in the game and frees the mouse. Press Y again to close it.",
 			"",
 			"<b>TEST GIFTS</b> send pretend gifts with no TikTok needed, from Rose (1 coin) up to Universe. Bigger gifts make bigger blasts.",
@@ -63,7 +61,7 @@ HowToPlay.PAGES = {
 			"<b>G</b>  games menu: join, or go back to the lobby",
 			"<b>P</b>  settings: field of view, and hiding the GAMES and SETTINGS buttons",
 			"<b>H</b>  this guide",
-			"<b>Y</b>  streamer panel (streamer and admins only)",
+			"<b>Y</b>  streamer panel: test gifts, keybinds, map and settings",
 			"",
 			"On a phone or tablet, tap to dig and use the on-screen buttons.",
 		}, "\n"),
