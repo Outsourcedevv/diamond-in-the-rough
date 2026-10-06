@@ -172,6 +172,19 @@ check(LobbyView.status("Won", 0, "hay") == "Needle found! A new round starts soo
 check(LobbyView.status("Rebuilding", 0, "hay") == "The haystack is being rebuilt", "haystack rebuilt")
 check(LobbyView.status("Won", 0, "stone") == "Diamond found! A new round starts soon", "stone skin reads as before")
 
+-- The Diamond Climb card's status line, and where a player is.
+check(LobbyView.climbStatus(0, 0) == "Platform 0 of 1,000", "climb status at the start")
+check(LobbyView.climbStatus(999, 1) == "Platform 999 of 1,000 · 1 climb", "climb status with a win")
+check(LobbyView.climbStatus(57, 3) == "Platform 57 of 1,000 · 3 climbs", "climb status with wins")
+local someone = newInstance("Player")
+check(LobbyView.place(someone) == "lobby", "a new player is in the lobby")
+someone:SetAttribute("InGame", true)
+check(LobbyView.place(someone) == "rough", "InGame is Diamond in the Rough")
+someone:SetAttribute("InClimb", true)
+check(LobbyView.place(someone) == "climb", "InClimb is Diamond Climb, even mid-move")
+someone:SetAttribute("InGame", false)
+check(LobbyView.place(someone) == "climb", "climbing")
+
 -- The How to Play guide: connecting TikTok, testing without it, the controls
 -- and how to win, in plain rich text with no emojis.
 local titles = {}
@@ -181,10 +194,10 @@ for _, page in HowToPlay.PAGES do
 	check(not string.find(plain, "[<>&]"), page.title .. ": rich text has no stray < > or &")
 	check(not string.find(page.text, "[\240-\244]"), page.title .. ": no emojis")
 end
-check(table.concat(titles, "|") == "Connect TikTok|Testing|Controls|How to win", "four guide pages")
+check(table.concat(titles, "|") == "Connect TikTok|Testing|Controls|How to win|Diamond Climb", "five guide pages")
 local all = ""
 for _, page in HowToPlay.PAGES do all ..= page.text .. "\n" end
-for _, needed in { "Start Bridge.bat", "localhost:8787", "Allow HTTP Requests", "JOIN", "TEST GIFTS", "REBUILD TEST GIFTS", "GIFT KEYBINDS", "<b>Y</b>", "<b>G</b>", "<b>P</b>", "<b>H</b>", "Diamond bird" } do
+for _, needed in { "1,000 platforms", "checkpoint", "Jump height", "DIAMOND CLIMB", "Start Bridge.bat", "localhost:8787", "Allow HTTP Requests", "JOIN", "TEST GIFTS", "REBUILD TEST GIFTS", "GIFT KEYBINDS", "<b>Y</b>", "<b>G</b>", "<b>P</b>", "<b>H</b>", "Diamond bird" } do
 	check(string.find(all, needed, 1, true) ~= nil, "the guide covers " .. needed)
 end
 check(HowToPlay.BOARD == "HowToPlay" and HowToPlay.KEY == Enum.KeyCode.H, "the board's prompt and H open the guide")

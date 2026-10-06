@@ -123,15 +123,30 @@ local gui = make("ScreenGui", {
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, player:WaitForChild("PlayerGui"))
 
+-- Diamond in the Rough's own display (stone, wins, time, the hold countdown
+-- and the win card); the feed, settings and streamer panel serve both games.
+local roughHud = make("Frame", {
+	Name = "RoughHud",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+}, gui)
+
+-- Diamond Climb: its display, sliders, landings and gift rides.
+local ClimbView = require(script:WaitForChild("ClimbView"))
+local climb = ClimbView.start(Request, State)
+
 -- The games menu: the game's display, first-person view and hands only show
--- while playing, not in the lobby.
+-- while playing Diamond in the Rough, not in the lobby; Diamond Climb has a
+-- third-person camera and its own display.
 local LobbyView = require(script:WaitForChild("LobbyView"))
 -- How to play: from the lobby board, the games menu or H.
 local HowToPlay = require(script:WaitForChild("HowToPlay"))
 HowToPlay.start()
-LobbyView.start(Request, State, function(inGame: boolean)
-	gui.Enabled = inGame
-	FirstPerson.setEnabled(inGame)
+LobbyView.start(Request, State, function(place: string)
+	gui.Enabled = place ~= "lobby"
+	roughHud.Visible = place == "rough"
+	FirstPerson.setEnabled(place == "rough")
+	climb.setActive(place == "climb")
 end, function()
 	HowToPlay.setOpen(true)
 end)
@@ -145,7 +160,7 @@ local stoneBox = make("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0),
 	Position = UDim2.new(0.5, 0, 0, 10),
 	Size = UDim2.fromOffset(300, 84),
-}, gui)
+}, roughHud)
 glass(stoneBox, 14)
 local stoneTitle = make("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 16),
@@ -181,7 +196,7 @@ local boostTag = make("Frame", {
 	Position = UDim2.new(0.5, 158, 0, 10),
 	Size = UDim2.fromOffset(84, 84),
 	Visible = false,
-}, gui)
+}, roughHud)
 glass(boostTag, 14)
 local boostStroke = boostTag:FindFirstChildOfClass("UIStroke")
 if boostStroke then
@@ -219,7 +234,7 @@ local winsBox = make("TextLabel", {
 	Font = FONT_HEAVY,
 	TextSize = 26,
 	Text = "WINS: 0",
-}, gui)
+}, roughHud)
 rounded(winsBox, 14)
 make("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, winsBox)
 local winsStroke = make("UIStroke", { Thickness = 2, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
@@ -235,7 +250,7 @@ local timerLabel = make("TextLabel", {
 	TextColor3 = WHITE,
 	RichText = true,
 	Text = "",
-}, gui)
+}, roughHud)
 glass(timerLabel, 13)
 make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, timerLabel)
 
@@ -250,7 +265,7 @@ local banner = make("TextLabel", {
 	TextColor3 = ACCENT,
 	Text = "",
 	Visible = false,
-}, gui)
+}, roughHud)
 glass(banner, 22, 0.2)
 make("UIPadding", { PaddingLeft = UDim.new(0, 22), PaddingRight = UDim.new(0, 22) }, banner)
 
@@ -260,7 +275,7 @@ local countdown = make("Frame", {
 	Size = UDim2.fromOffset(320, 140),
 	BackgroundTransparency = 1,
 	Visible = false,
-}, gui)
+}, roughHud)
 local countHolder = make("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 36),
 	BackgroundTransparency = 1,
@@ -373,7 +388,7 @@ local winScreen = make("Frame", {
 	BackgroundTransparency = 0.35,
 	Visible = false,
 	ZIndex = 20,
-}, gui)
+}, roughHud)
 local winCard = make("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.fromScale(0.5, 0.5),
@@ -796,6 +811,27 @@ local function refreshBindings()
 end
 State:GetAttributeChangedSignal("GiftBindings"):Connect(refreshBindings)
 refreshBindings()
+
+panelLabel("DIAMOND CLIMB")
+panelLabel("While climbing, gifts send you up and adding gifts send you down.")
+panelButtons({
+	{ "Restart at platform 0", function() send("climbRestart") end },
+})
+panelLabel("Climb gift strength (platforms per gift)")
+local CLIMB_STRENGTHS = { { "Half", 0.5 }, { "Normal", 1 }, { "Double", 2 } }
+local strengthButtons = panelButtons({
+	{ "Half", function() send("setClimbStrength", 0.5) end },
+	{ "Normal", function() send("setClimbStrength", 1) end },
+	{ "Double", function() send("setClimbStrength", 2) end },
+})
+local function refreshStrength()
+	local strength = attr("ClimbStrength", 1)
+	for i, entry in CLIMB_STRENGTHS do
+		strengthButtons[i].BackgroundColor3 = if strength == entry[2] then SELECTED else BUTTON
+	end
+end
+State:GetAttributeChangedSignal("ClimbStrength"):Connect(refreshStrength)
+refreshStrength()
 
 panelLabel("DIAMOND BIRD (every 5 to 7.5 minutes)")
 panelButtons({
@@ -1278,6 +1314,12 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
 	elseif kind == "win" and type(data) == "table" then
 		showWin(data)
+	elseif kind == "climbGift" then
+		climb.onGift(data)
+	elseif kind == "climbWin" then
+		climb.onWin(data)
+	elseif kind == "climbRestart" then
+		climb.onRestart()
 	elseif kind == "notice" and type(data) == "string" then
 		addFeed(data, 0, "notice")
 	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then

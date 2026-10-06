@@ -20,6 +20,7 @@ local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
+local ClimbGame = require(script.ClimbGame)
 
 -- Shared state lives in attributes, so every client sees it without extra code.
 local State = Instance.new("Configuration")
@@ -65,6 +66,8 @@ local settings = {
 	statues = {} :: { any },
 	theme = "default", -- the map's look: "default" (alpine), "sakura", "farm", "desert" or "haunted"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
+	-- Diamond Climb's progress, chosen speed and jump, and gift strength (see ClimbGame).
+	climb = ClimbGame.defaults() :: any,
 }
 -- Single player: every player has their own save (statues, wins, theme,
 -- keybinds and the rest), so the server waits for its player and loads theirs.
@@ -158,6 +161,14 @@ spawn.Color = Color3.fromRGB(129, 105, 79)
 spawn.Enabled = false
 spawn.Parent = workspace
 local lobby = require(script.Lobby).build(workspace)
+-- Diamond Climb: the tower of 1000 platforms, far off in the sky.
+local climbGame = ClimbGame.start({
+	settings = settings,
+	save = function() Store.save(settings) end,
+	state = State,
+	notify = Notify,
+	parent = workspace,
+})
 
 -- Leaderboards stand behind the mountain; the scenery keeps their ground clear.
 local Leaderboards = require(script.Leaderboards)
@@ -943,6 +954,26 @@ local function processTikTok(event: TikTokFeed.Event)
 		amount = settings.perShare
 		text = who .. " shared the live"
 	end
+	if climbGame.climber() ~= nil then
+		-- In Diamond Climb gifts send the climber up the tower (gifts that would
+		-- break the mountain) or down it (gifts that add stone); follows and
+		-- shares lift them one platform. Likes leave the climb alone.
+		if event.type == "like" then return end
+		local coins = math.max(1, event.coins or 1)
+		local move = if event.type == "gift"
+			then ClimbGame.giftMove(amount, coins, event.count or 1, climbGame.progress.strength)
+			elseif amount > 0 then 1 else 0
+		local from, to = climbGame.gift(who, move, {
+			coins = if event.type == "gift" then coins else 1,
+			gift = (event.gift or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"))
+				.. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
+		})
+		local moved = to - from
+		if doubledGifts[event] then text = "2X " .. text end
+		text ..= if moved > 0 then string.format("  UP %d", moved) elseif moved < 0 then string.format("  DOWN %d", -moved) else ""
+		Notify:FireAllClients("feed", { text = text, stone = 0, kind = event.type })
+		return
+	end
 	if amount <= 0 and event.type ~= "gift" then return end
 	local current = mountain
 	local centreKey = if current then current.grid:randomExposed() else nil
@@ -1188,40 +1219,57 @@ local function removeNearestStatue(player: Player)
 	removeStatue(player, index)
 end
 
--- The lobby and the game ------------------------------------------------------------
--- Players arrive in the lobby and join Diamond in the Rough from the games
--- menu; "Back to lobby" returns them. Respawns follow where they are.
+-- The lobby and the games ------------------------------------------------------------
+-- Players arrive in the lobby and join Diamond in the Rough (the InGame
+-- attribute) or Diamond Climb (InClimb) from the games menu; "Back to lobby"
+-- returns them. Respawns follow where they are: the climb puts them back on
+-- their checkpoint.
 local lastMove: { [Player]: number } = {}
-local function placeFor(player: Player): SpawnLocation
-	return if player:GetAttribute("InGame") == true then spawn else lobby.spawn
+local function placeOf(player: Player): string
+	if player:GetAttribute("InClimb") == true then return "climb" end
+	return if player:GetAttribute("InGame") == true then "rough" else "lobby"
 end
-local function setInGame(player: Player, joining: boolean)
-	if (player:GetAttribute("InGame") == true) == joining then return end
-	if not joining and holder == player then
-		notice(player, "You're holding the " .. Skin.words(settings.skin).gem .. "! Win or lose it first, then go back to the lobby.")
+local function placeFor(player: Player): (CFrame, SpawnLocation)
+	local place = placeOf(player)
+	if place == "climb" then return climbGame.standFrame(), climbGame.built.spawn end
+	local target = if place == "rough" then spawn else lobby.spawn
+	return target.CFrame + Vector3.new(0, 4, 0), target
+end
+local function setPlace(player: Player, place: string)
+	local from = placeOf(player)
+	if from == place then return end
+	if from == "rough" and holder == player then
+		notice(player, "You're holding the " .. Skin.words(settings.skin).gem .. "! Win or lose it first, then leave the game.")
 		return
 	end
 	local now = os.clock()
 	if now - (lastMove[player] or -math.huge) < 1 then return end
 	lastMove[player] = now
-	player:SetAttribute("InGame", joining)
-	local target = placeFor(player)
+	-- The attribute turning on goes first, so the player is never seen in neither game on the way.
+	if place == "climb" then player:SetAttribute("InClimb", true) end
+	if place == "rough" then player:SetAttribute("InGame", true) end
+	if place ~= "climb" then player:SetAttribute("InClimb", false) end
+	if place ~= "rough" then player:SetAttribute("InGame", false) end
+	if from == "climb" or place == "climb" then climbGame.entered(player, place == "climb") end
+	local frame, target = placeFor(player)
 	player.RespawnLocation = target
 	local character = player.Character
 	if character then
-		character:PivotTo(target.CFrame + Vector3.new(0, 4, 0))
+		character:PivotTo(frame)
 	end
 end
--- A new character starts at the lobby or the camp, whichever the player is in.
+-- A new character starts at the lobby, the camp or the climb's checkpoint,
+-- wherever the player is.
 local function placeCharacter(player: Player, character: Model)
 	local root = character:WaitForChild("HumanoidRootPart", 10)
 	if root == nil or not root:IsA("BasePart") then return end
 	task.wait()
 	if character.Parent == nil then return end
-	local target = placeFor(player)
-	if (root.Position - target.Position).Magnitude > 30 then
-		character:PivotTo(target.CFrame + Vector3.new(0, 4, 0))
+	local frame = placeFor(player)
+	if (root.Position - frame.Position).Magnitude > 30 then
+		character:PivotTo(frame)
 	end
+	climbGame.characterAdded(player, character)
 end
 
 local function applySetting(player: Player, action: string, value: any)
@@ -1308,6 +1356,12 @@ local function applySetting(player: Player, action: string, value: any)
 		local coins = REBUILD_TEST_COINS[value]
 		if coins == nil then return end
 		testGift(coins, 1, "Rebuild test", -value)
+		return
+	elseif action == "climbRestart" then
+		climbGame.restart()
+		return
+	elseif action == "setClimbStrength" and type(value) == "number" then
+		climbGame.setStrength(value)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
@@ -1403,8 +1457,20 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		return
 	end
-	if action == "joinGame" or action == "leaveGame" then
-		setInGame(player, action == "joinGame")
+	if action == "joinGame" then
+		setPlace(player, if value == "DiamondClimb" then "climb" else "rough")
+		return
+	elseif action == "leaveGame" then
+		setPlace(player, "lobby")
+		return
+	end
+	if action == "climbLand" then
+		-- Sent by a climber's game each time they land on a new platform.
+		climbGame.land(player, value)
+		return
+	elseif action == "setClimbMove" then
+		-- The climb's speed and jump sliders.
+		climbGame.setMove(player, value)
 		return
 	end
 	if action == "setHideButtons" then
@@ -1495,6 +1561,7 @@ end
 
 local function onPlayer(player: Player)
 	player:SetAttribute("InGame", false)
+	player:SetAttribute("InClimb", false)
 	player.RespawnLocation = lobby.spawn
 	player.CharacterAdded:Connect(function(character)
 		placeCharacter(player, character)
@@ -1524,6 +1591,7 @@ Players.PlayerRemoving:Connect(function(player)
 	readyAt[player] = nil
 	catchAt[player] = nil
 	hideAt[player] = nil
+	climbGame.removing(player)
 end)
 
 publishSettings()

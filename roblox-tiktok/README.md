@@ -2,7 +2,7 @@
 
 A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 rocks** (one rock is one stone) is shown counting down at the top of the screen. The rock slopes smoothly towards open air, with snow on the summit, grassy foothills over a dirt layer and layered stone inside: finding the one small diamond should feel like finding a needle in a haystack. Every gift, like, follow and share from your viewers blasts stone out of it. Once the diamond is exposed, find it, click it and **hold it for 15 seconds** to win.
 
-- **Royal lobby.** Everyone arrives in a white marble court floating in the sky, with gold trim, royal blue banners, a ring of columns and a giant turning diamond. A games menu on the left joins **Diamond in the Rough**; more games are marked *Coming soon*. See [The lobby and the games menu](#the-lobby-and-the-games-menu).
+- **Royal lobby.** Everyone arrives in a white marble court floating in the sky, with gold trim, royal blue banners, a ring of columns and a giant turning diamond. A games menu on the left joins **Diamond in the Rough** or **Diamond Climb**; more games are marked *Coming soon*. See [The lobby and the games menu](#the-lobby-and-the-games-menu).
 - **Stone counter.** The top of the screen shows how much stone is left (250,000 to start), with a progress bar.
 - **Gifts blast the mountain.** Each TikTok coin removes 100 rocks, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. The counter always equals the rocks really left. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
 - **Diamond bird.** Every 5 to 7½ minutes (at random) a sparkling bird made of diamond swoops down from the sky and circles the mountain about halfway up, flapping its glass wings. Click it and **every gift counts double for 30 seconds**: gifts that blast stone remove twice as much, gifts with an add rule add twice as much, the gift animation is sized for the doubled gift and the coins count double on the leaderboard. The display shows **DIAMOND BIRD · CLICK IT FOR 2X GIFTS** while it is flying, and a gold **2X** card with the seconds left sits beside the stone count while the bonus runs; doubled gifts show 2X in the feed. Gifts are doubled if they arrive during the 30 seconds, even if the mountain is still busy with earlier gifts. Aim the dot at it in first person: the dot turns gold and grows when a click will catch it, so you don't have to hit the bird exactly (it counts within a few degrees), and on a phone you tap it. The click goes to the server, which checks the bird is still circling and that you are within 300 studs of where it is flying. If nobody catches it, it flies off when the next bird arrives. Catching another bird during the bonus restarts the 30 seconds (gifts are doubled, never quadrupled). The **Y** panel has **Send a diamond bird now** for testing, and the timings are in `src/shared/Config.luau` (`BirdMinSeconds`, `BirdMaxSeconds`, `BirdBoostSeconds`, `BirdMultiplier`).
@@ -107,13 +107,28 @@ Players start in the lobby, a white and gold royal court floating high in the sk
 The **GAMES** menu on the left of the screen lists the games:
 
 - **Diamond in the Rough** shows what is happening right now (stone left, or that the diamond was found). Press **JOIN** to go to the mining camp.
+- **Diamond Climb** shows the climber's platform and how many climbs they have won. Press **JOIN** to go to the tower (see [Diamond Climb](#diamond-climb)).
 - The other cards say **Coming soon**, ready for future games.
 
-Beside the carpet stands a **How to Play** board (drawn, with no lettering). Walk up and press **E**, or click it, and a guide opens on screen with four pages: **Connect TikTok** (the bridge, the control page, HTTP requests and joining), **Testing** (the Y panel's test gifts, rebuild tests, the bird button and gift keybinds), **Controls** and **How to win**. The games menu's **How to play** button and the **H** key open it too, anywhere.
+Beside the carpet stands a **How to Play** board (drawn, with no lettering). Walk up and press **E**, or click it, and a guide opens on screen with five pages: **Connect TikTok** (the bridge, the control page, HTTP requests and joining), **Testing** (the Y panel's test gifts, rebuild tests, the bird button and gift keybinds), **Controls**, **How to win** and **Diamond Climb**. The games menu's **How to play** button and the **H** key open it too, anywhere.
 
 Press **Hide** to hide the menu. The **GAMES** tab on the left, or the **G** key, brings it back. The key matters in the game, where the mouse is locked to first person. While you play, the menu has **Back to lobby**. You can't go back while you are holding the diamond.
 
 The mountain keeps going while you are in the lobby: gifts still blast it, and the game's display shows again as soon as you join. If you gave **G** to a gift keybind (see [Gift catalogue and keybinds](#gift-catalogue-and-keybinds)), G keeps doing that. To reach the menu in the game then, press **Y** to free the mouse and click the **GAMES** tab.
+
+## Diamond Climb
+
+The second game: jump up **1,000 platforms** spiralling round a tall crystal pillar in the sky to the diamond at the top. Each platform is a little higher than the one before (1.2 studs at the bottom, 3.5 at the top) and every jump is a short hop, so it is easy with the normal jump. Every hundredth platform is bigger, with a gold rim and a gold ring round the pillar, and the gem colour changes: sapphire, emerald, ruby and on up to diamond.
+
+- **Checkpoints.** Every platform you land on is your checkpoint. Fall off (or reset) and you are put straight back on it. Progress, best and climbs are saved with the rest of the game.
+- **Landing.** Each landing makes the platform's rim swell and flash, a ring of light races out, sparkles fly up and a chime plays, rising in pitch through each ten platforms. Every hundredth platform adds fireworks and a gold shout on screen.
+- **Movement.** The **MOVEMENT** card (bottom right) has **Speed** (8 to 40, 16 normally) and **Jump height** (4 to 15, 7.2 normally) sliders and **Reset**. They change straight away and are remembered. The camera is a normal third-person one you can zoom out further.
+- **Gifts send you up or down.** While you climb, TikTok gifts that would break the mountain send you **up**, and gifts set to add stone send you **down**: 2 platforms for a Rose, 6 for 10 coins, 20 for 100 coins, 45 for 500, 63 for a Galaxy and 200 for 10,000 coins (each gift of a combo counts). Follows and shares lift you one platform; likes leave the climb alone. Gifts still count on the leaderboards, and the diamond bird's bonus still doubles them.
+- **The rides.** Each gift picks you up and carries you round the tower to your new platform, and the display counts the platforms going by. Up: Bounce Pad, Spring Launch, Rocket Boost, Diamond Cannon, Starlight Ascent and Galactic Ascension. Down: Banana Slip, Spike Bounce, Anvil Smash, Meteor Strike, Thunder Hammer and Black Hole Plunge. From 100 coins the ride takes over the camera with fire, lightning, portals, fireworks and colour, and each tier is wilder than the last. Gifts that arrive together ride one after another, faster while more are waiting.
+- **Winning.** Reach the diamond to win a climb; after the celebration the next climb starts at the bottom.
+- **Streamer panel (Y).** **DIAMOND CLIMB** has **Restart at platform 0** and the climb's gift strength (**Half**, **Normal** or **Double** platforms per gift). **TEST GIFTS** send you up and **REBUILD TEST GIFTS** send you down, so every ride can be tried without TikTok.
+
+While you climb, gifts move you instead of the mountain. Back in the lobby or the mine, they work on the mountain as before.
 
 ## Customise the win counter
 
@@ -243,8 +258,8 @@ To show the Blender mountains and trees in the published game, also turn on **En
 The source is a [Rojo](https://rojo.space) project:
 
 - `src/shared`: config, the rock grid, rock shapes and looks, the network codec, the diamond shape, the hold countdown curve, formatting, and the Blender scenery meshes with their unpacker.
-- `src/server`: rounds, the authoritative mountain grid, the diamond, scenery, the royal lobby (`Lobby`), the TikTok feed and saving.
-- `src/client`: the mountain renderer (`MountainView`), the scenery mesh builder (`SceneryView`), the games menu (`LobbyView`), first-person hands, effects, the on-screen display and the settings panel.
+- `src/server`: rounds, the authoritative mountain grid, the diamond, scenery, the royal lobby (`Lobby`), Diamond Climb's tower (`Climb`) and game (`ClimbGame`), the TikTok feed and saving.
+- `src/client`: the mountain renderer (`MountainView`), the scenery mesh builder (`SceneryView`), the games menu (`LobbyView`), Diamond Climb's display and landings (`ClimbView`) and gift rides (`ClimbEffects`), first-person hands, effects, the on-screen display and the settings panel. `src/shared/ClimbPath.luau` lays out the climb's platforms for both.
 
 Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o DiamondRushTikTok.rbxlx`), or use `rojo serve` with the Studio plugin while editing. `python3 tools/build_place.py --check` fails if the committed place is out of date; `--sourcemap` writes a `sourcemap.json` for luau-lsp.
 
@@ -256,6 +271,7 @@ Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o Diamond
 - The diamond bird and its double-gifts bonus: `python3 tests/diamond-bird.py [path/to/luau]`.
 - Every gift tier's effect on a simulated clock (budgets, cleanup, camera shake): `python3 tests/gift-effects.py [path/to/luau]`.
 - The lobby and the games menu's status line: `python3 tests/lobby.py [path/to/luau]`.
+- Diamond Climb (the path's gaps, steps and head room, the tower, and every gift ride on a simulated clock): `python3 tests/climb.py [path/to/luau]`.
 
 The Blender scenery pack is generated by `art/scenery_assets.py` (no hand-made files): every mesh is closed, vertex-coloured, under Roblox's 20,000-triangle limit, and modelled at real size. Rebuild it with `pip install bpy` (Python 3.11), then `python art/scenery_assets.py`, or with `blender --background --python art/scenery_assets.py`. This writes `src/shared/ScenePackData.luau`, the `.fbx`, `art/manifest.json` and the preview renders. `ScenePackData` holds each mesh as quantised, delta-coded geometry with a colour palette, compressed with DEFLATE and stored as base64: about 290 KB for 72,000 triangles. `python3 tests/scenery.py --dump` writes the game's layout so the build also renders `art/previews/game_view.png`.
 
