@@ -328,7 +328,7 @@ const tests = [
   ['Share', { type: 'share' }],
 ];
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-for (const blocks of [1000, 10000, 100000, 1500000]) {
+for (const blocks of [100, 1000, 10000, 50000, 100000, 1500000]) {
   const button = document.createElement('button');
   button.textContent = blocks === 1500000 ? 'Grow to limit' : `+${blocks.toLocaleString()} blocks`;
   button.className = 'rebuild';

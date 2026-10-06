@@ -705,9 +705,14 @@ refreshSkin()
 
 panelLabel("REBUILD TEST GIFTS (adds blocks)")
 panelLabel("Tests refill dug spaces, then grow new mountain rock.")
+panelLabel("Each plays the next adding effect, smallest to biggest.")
 panelButtons({
+	{ "+100 blocks", function() send("testRebuildGift", 100) end },
 	{ "+1,000 blocks", function() send("testRebuildGift", 1000) end },
+})
+panelButtons({
 	{ "+10,000 blocks", function() send("testRebuildGift", 10000) end },
+	{ "+50,000 blocks", function() send("testRebuildGift", 50000) end },
 })
 panelButtons({
 	{ "+100,000 blocks", function() send("testRebuildGift", 100000) end },

@@ -1003,6 +1003,8 @@ local function filtered(player: Player, text: string): string?
 	return if ok then result else nil
 end
 
+-- Rebuild test presets: blocks added -> the coins that pick its effect tier.
+local REBUILD_TEST_COINS: { [number]: number } = { [100] = 1, [1000] = 10, [10000] = 100, [50000] = 500, [100000] = 1000, [1500000] = 10000 }
 local function testGift(coins: number, count: number, name: string, rocks: number?)
 	onTikTok({
 		id = "test-" .. tostring(os.clock()),
@@ -1214,8 +1216,10 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "testRebuildGift" and type(value) == "number" then
 		-- Admin-only presets bypass saved destructive rules without changing them.
-		if value ~= 1000 and value ~= 10000 and value ~= 100000 and value ~= 1500000 then return end
-		testGift(1, 1, "Rebuild test", -value)
+		-- Each carries the coins of one adding-effect tier, smallest to biggest.
+		local coins = REBUILD_TEST_COINS[value]
+		if coins == nil then return end
+		testGift(coins, 1, "Rebuild test", -value)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
