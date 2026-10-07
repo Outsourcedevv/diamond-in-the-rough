@@ -80,7 +80,7 @@ async function refreshCatalogue(username = config.tiktokUsername) {
   try { gifts=await fetchCatalogue(TikTokLiveConnection, username); }
   catch(error) { throw new Error(catalogueError(error)); }
   if(!gifts.length) throw new Error('TikTok returned no gifts. Try refreshing while your account is LIVE.');
-  catalogue=gifts; catalogueStatus=`${gifts.length} gifts loaded from TikTok`;
+  catalogue=mergeGifts(catalogue,gifts); catalogueStatus=`${gifts.length} gifts loaded from TikTok`;
   fs.writeFileSync(cataloguePath,JSON.stringify(gifts,null,2));
   config.tiktokUsername=username; saveConfig();
  })().finally(()=>{catalogueLoading=null;});
@@ -149,6 +149,7 @@ async function connectTikTok(username) {
     if (connection === live) {
       tiktokStatus = `connected to @${username}`;
       log(`Connected to @${username}'s LIVE`);
+      refreshCatalogue(username).catch(error=>{catalogueStatus=error.message;});
     }
   } catch (error) {
     if (connection !== live) return;

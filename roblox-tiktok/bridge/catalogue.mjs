@@ -1,15 +1,32 @@
 // Keys a gift can be bound to; the same letters as the game's GIFT KEYBINDS (src/shared/Keybinds.luau).
 // I and O are Roblox's zoom keys, and P opens the game's settings, so none of them is offered.
 export const KEYS = ['', 'F6', 'F7', 'F8', 'B', 'C', 'F', 'J', 'K', 'L', 'M', 'N', 'Q', 'R', 'T', 'U', 'V', 'X', 'Z'];
+// Every gift TikTok offers in the streamer's room. TikTok's own gift list is
+// asked for directly first (free, no signing); the signed route through Euler
+// Stream, a paid feature, is only the fallback.
 export async function fetchCatalogue(Client, username) {
  const client = new Client(username, {});
- await client.fetchRoomId();
- return normalizeGifts(await client.fetchAvailableGifts());
+ const roomId = await client.fetchRoomId();
+ const web = client.webClient;
+ let direct = null;
+ if (typeof web?.getJsonObjectFromWebcastApi === 'function') {
+  try {
+   const gifts = normalizeGifts(await web.getJsonObjectFromWebcastApi('gift/list/', { ...(web.clientParams ?? {}), room_id: roomId || web.roomId }, false));
+   if (gifts.length) return gifts;
+  } catch (error) { direct = error; }
+ }
+ try {
+  return normalizeGifts(await client.fetchAvailableGifts());
+ } catch (error) {
+  if (direct && !/premium|permission|402|403/i.test(`${error?.name} ${error?.message}`)) throw direct;
+  throw error;
+ }
 }
-export const STARTER = [['Rose',1],['GG',1],['Heart Me',1],['Ice Cream Cone',1],['Finger Heart',5],['Rosa',10],['Perfume',20],['Doughnut',30],['Hand Hearts',100],['Confetti',100],['Sunglasses',199],['Corgi',299],['Money Gun',500],['Swan',699],['Train',899],['Galaxy',1000],['Interstellar',10000],['Lion',29999],['TikTok Universe',34999]].map(([name,coins])=>({id:name,name,coins}));
-// How the bridge connects to a LIVE. TikTok's gift list (enableExtendedGiftInfo)
-// is a paid Euler Stream feature, so it stays off: gift messages already carry
-// each gift's name and coins.
+export const STARTER = [['Rose',1],['GG',1],['Heart Me',1],['Ice Cream Cone',1],['Finger Heart',5],['Rosa',10],['Perfume',20],['Doughnut',30],['Hand Hearts',100],['Confetti',100],['Corgi',299],['Money Gun',500],['Swan',699],['Train',899],['Galaxy',1000],['Interstellar',10000],['Lion',29999],['TikTok Universe',34999]].map(([name,coins])=>({id:name,name,coins}));
+// How the bridge connects to a LIVE. enableExtendedGiftInfo fetches the gift
+// list through Euler Stream's signing, a paid feature, so it stays off: gift
+// messages already carry each gift's name and coins, and the catalogue is
+// loaded separately (fetchCatalogue).
 export const CONNECT_OPTIONS = { processInitialData: false, enableExtendedGiftInfo: false };
 // Adds a gift seen on the LIVE to the catalogue, or corrects its coins.
 // Returns the new catalogue, or null when nothing changed.
@@ -31,7 +48,7 @@ export function mergeGifts(base, saved) {
 // What the page shows when TikTok's full gift list can't be loaded.
 export function catalogueError(error) {
  const text = `${error?.name ?? ''} ${error?.message ?? error}`;
- if (/premium|permission|402|403|paid|plan/i.test(text)) return 'TikTok\'s full gift list needs a paid sign-server plan, so the starter list is used. Every gift you receive on your LIVE is added here automatically.';
+ if (/premium|permission|402|403|paid|plan/i.test(text)) return 'TikTok didn\'t send its gift list, and the backup way needs a paid sign-server plan. Try Refresh again while you are LIVE. Until then, every gift you receive is added here automatically.';
  return `Couldn't load gifts from TikTok (${error?.message ?? error}). The starter list is used, and gifts you receive on your LIVE are added automatically.`;
 }
 export function normalizeGifts(raw) {

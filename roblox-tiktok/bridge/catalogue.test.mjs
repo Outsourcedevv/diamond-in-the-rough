@@ -69,3 +69,29 @@ test('a saved list keeps the starter gifts and a failed refresh explains itself'
  assert.match(catalogueError(premium),/paid sign-server plan/);
  assert.match(catalogueError(new Error('timeout')),/timeout/);
 });
+
+test('the full gift list is asked of TikTok directly, without paid signing',async()=>{
+ const asked=[];
+ class Client {
+  constructor(username, options) { this.webClient = { clientParams: { aid: '1988' }, getJsonObjectFromWebcastApi: async (path, params, sign) => { asked.push({ path, params, sign }); return { data: { gifts: [{ id: 1, name: 'Rose', diamond_count: 1 }, { id: 2, name: 'Paper Crane', diamond_count: 99 }] } }; } }; }
+  async fetchRoomId() { return '7123'; }
+  async fetchAvailableGifts() { throw new Error('the paid route must not be used'); }
+ }
+ const gifts=await fetchCatalogue(Client,'Niamh');
+ assert.deepEqual(gifts.map(g=>g.name),['Rose','Paper Crane']);
+ assert.deepEqual(asked,[{ path: 'gift/list/', params: { aid: '1988', room_id: '7123' }, sign: false }]);
+});
+test('the signed route is only a fallback, and a paid-plan refusal is reported as such',async()=>{
+ class Empty {
+  constructor() { this.webClient = { getJsonObjectFromWebcastApi: async () => ({ data: { gifts: [] } }) }; }
+  async fetchRoomId() { return '1'; }
+  async fetchAvailableGifts() { return [{ id: 9, name: 'Galaxy', diamond_count: 1000 }]; }
+ }
+ assert.equal((await fetchCatalogue(Empty,'a'))[0].name,'Galaxy');
+ class Blocked {
+  constructor() { this.webClient = { getJsonObjectFromWebcastApi: async () => { throw new Error('socket hang up'); } }; }
+  async fetchRoomId() { return '1'; }
+  async fetchAvailableGifts() { throw Object.assign(new Error('You do not have permission from the signature provider to sign this URL.'), { name: 'PremiumFeatureError' }); }
+ }
+ await assert.rejects(fetchCatalogue(Blocked,'a'), /permission/);
+});
