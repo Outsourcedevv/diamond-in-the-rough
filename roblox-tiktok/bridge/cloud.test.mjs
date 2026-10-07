@@ -61,3 +61,22 @@ test('a rule keeps its id while it stays the same', () => {
   assert.equal(ruleId({ gift: 'Rose', rocks: 5 }), ruleId({ gift: 'Rose', rocks: 5 }));
   assert.notEqual(ruleId({ gift: 'Rose', rocks: 5 }), ruleId({ gift: 'Rose', rocks: 6 }));
 });
+
+test('the key is hidden in the program and read back', async () => {
+  const { SLOT } = await import('./sealed-slot.mjs');
+  const { sealBinary, readSlot, SLOT_SIZE } = await import('./cloud.mjs');
+  assert.equal(SLOT.length, SLOT_SIZE);
+  assert.equal(readSlot(SLOT), null); // an unsealed program has no key
+  const settings = { universeId: '1234567890', apiKey: 'Zk'.repeat(600) };
+  const program = Buffer.concat([Buffer.from('MZ program start\0'), Buffer.from(`const SLOT = '${SLOT}';`), Buffer.from('\0the end')]);
+  const sealed = sealBinary(program, settings);
+  assert.equal(sealed.length, program.length);
+  assert.ok(!sealed.includes(Buffer.from(settings.apiKey)), 'the key is not in plain sight');
+  const start = sealed.indexOf(Buffer.from('DRSEAL1['));
+  assert.deepEqual(readSlot(sealed.subarray(start, start + SLOT_SIZE).toString('latin1')), settings);
+  // Sealing again (a new key) works on an already sealed copy.
+  const again = sealBinary(sealed, { universeId: '42424242', apiKey: 'Q'.repeat(900) });
+  assert.equal(readSlot(again.subarray(start, start + SLOT_SIZE).toString('latin1')).universeId, '42424242');
+  assert.throws(() => sealBinary(Buffer.from('no slot here'), settings));
+  assert.throws(() => sealBinary(program, { universeId: '1', apiKey: 'x'.repeat(5000) }));
+});

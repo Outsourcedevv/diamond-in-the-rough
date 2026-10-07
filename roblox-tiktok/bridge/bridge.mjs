@@ -10,7 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createEventQueue, createGiftTracker, likeEvent, socialEvent, themeEvent, THEMES, skinEvent, SKINS } from './events.mjs';
-import { codeFor, topicFor, parseCloudFile, takeMessage, ruleId, SEND_EVERY_MS } from './cloud.mjs';
+import { codeFor, topicFor, parseCloudFile, takeMessage, ruleId, SEND_EVERY_MS, readSlot, sealBinary } from './cloud.mjs';
+import { SLOT } from './sealed-slot.mjs';
 import { randomBytes } from 'node:crypto';
 
 // Packaged as DiamondRushBridge.exe (see tools/build-exe.mjs): settings sit next
@@ -186,19 +187,32 @@ async function connectTikTok(username) {
 }
 
 // Roblox Open Cloud (the published game) ------------------------------------------
-// The game owner's key and universe: built into DiamondRushBridge.exe (see
-// tools/build-exe.mjs), or in roblox-cloud.txt next to the bridge. The key
-// can only publish messages to this one game.
+// The game owner's key and universe. The owner keeps them in roblox-cloud.txt
+// next to their own copy; opening that copy makes the streamers' copy, with
+// the key hidden inside it (see sealBinary) and no text file. The key can only
+// publish messages to this one game.
 function gameCode() {
   return codeFor(config.secret);
+}
+function makeStreamersCopy(settings) {
+  try {
+    const folder = path.join(here, 'For streamers');
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, 'DiamondRushBridge.exe'), sealBinary(fs.readFileSync(process.execPath), settings));
+    log('Made the streamers\' copy, with the Roblox key hidden inside: share the "For streamers" folder, never roblox-cloud.txt.');
+  } catch (error) {
+    log(`Couldn't make the streamers' copy: ${error.message}`);
+  }
 }
 function cloudSettings() {
   try {
     const found = parseCloudFile(fs.readFileSync(path.join(here, 'roblox-cloud.txt'), 'utf8'));
-    if (found.apiKey && found.universeId) return found;
+    if (found.apiKey && found.universeId) {
+      if (packaged) makeStreamersCopy(found);
+      return found;
+    }
   } catch {}
-  const built = globalThis.__DIAMOND_RUSH_CLOUD__ ?? {};
-  return { apiKey: String(built.apiKey ?? ''), universeId: String(built.universeId ?? '') };
+  return readSlot(SLOT) ?? { apiKey: '', universeId: '' };
 }
 const cloud = cloudSettings();
 let cloudStatus = cloud.apiKey && cloud.universeId ? 'starting' : 'off';
