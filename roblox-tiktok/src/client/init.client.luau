@@ -903,6 +903,8 @@ panelButtons({
 
 -- A published game that many streamers play: the code from the bridge's
 -- control page tells the relay which stream's gifts belong to this game.
+panelLabel("TIKTOK CONNECTOR")
+panelLabel(Config.ConnectorMessage)
 panelLabel("GAME CODE (published game: from localhost:8787)")
 local gameCodeBox = panelBox("", function(text)
 	send("setGameCode", text)

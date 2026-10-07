@@ -263,6 +263,8 @@ TikTok LIVE  ->  bridge (the streamer's PC)  ->  relay (hosted once)  ->  that s
 
 **As the game's owner, once:** host `relay/relay.mjs` somewhere with a public HTTPS address (`node relay.mjs`, no dependencies, nothing stored on disk), turn on **Allow HTTP Requests** in Game Settings → Security, and put the address in `RelayUrl` in `src/shared/Config.luau`. See [relay/README.md](relay/README.md) for the details and limits.
 
+**Where streamers get the connector:** Roblox does not allow links that lead off Roblox inside a game, so the game tells streamers to join your Discord to download it (the wording is `ConnectorMessage` in `src/shared/Config.luau`; it shows in the How to Play guide and the Y panel). Put your Discord invite under **Social Links** on the game's page, and the download in that Discord.
+
 **As a streamer, each time:** run the bridge, connect your TikTok username, then on the control page under **Playing the published game** paste the relay address (if the game doesn't already know it) and press **Save**. The page shows your game code, such as `ABCD EFGH`. In the game, press **Y**, scroll to **GAME CODE** and type it in. Your server then receives only your gifts.
 
 The code comes from a secret in your bridge's `config.json`, so only your bridge can send gifts under it. Keep the code to yourself: anyone with it and the relay's address could watch your gifts go by. Deleting `config.json` gives you a new code.
