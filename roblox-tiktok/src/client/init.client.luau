@@ -134,10 +134,14 @@ local roughHud = make("Frame", {
 -- Diamond Climb: its display, sliders, landings and gift rides.
 local ClimbView = require(script:WaitForChild("ClimbView"))
 local climb = ClimbView.start(Request, State)
+-- Chalkboard Count: the classroom camera, chalk numbers and its display.
+local ChalkView = require(script:WaitForChild("ChalkView"))
+local chalk = ChalkView.start(Request, State)
 
 -- The games menu: the game's display, first-person view and hands only show
 -- while playing Diamond in the Rough, not in the lobby; Diamond Climb has a
--- third-person camera and its own display.
+-- third-person camera and its own display, and Chalkboard Count films the
+-- writer from a fixed classroom camera.
 local LobbyView = require(script:WaitForChild("LobbyView"))
 -- How to play: from the lobby board, the games menu or H.
 local HowToPlay = require(script:WaitForChild("HowToPlay"))
@@ -147,6 +151,7 @@ LobbyView.start(Request, State, function(place: string)
 	roughHud.Visible = place == "rough"
 	FirstPerson.setEnabled(place == "rough")
 	climb.setActive(place == "climb")
+	chalk.setActive(place == "chalk")
 end, function()
 	HowToPlay.setOpen(true)
 end)
@@ -833,6 +838,53 @@ end
 State:GetAttributeChangedSignal("ClimbStrength"):Connect(refreshStrength)
 refreshStrength()
 
+panelLabel("CHALKBOARD COUNT")
+panelLabel("While writing, gifts add numbers and adding gifts rub them out.")
+panelLabel("Goal number")
+local chalkGoalBox = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[,%s]", "")))
+	if number then send("setChalkGoal", number) end
+end)
+panelLabel("Reset gift (starts the countdown)")
+local chalkResetGiftBox = panelBox("", function(text)
+	if text ~= "" then send("setChalkResetGift", text) end
+end)
+panelLabel("Reset countdown (seconds)")
+local chalkResetSecondsBox = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[^%d]", "")))
+	if number then send("setChalkResetSeconds", number) end
+end)
+panelLabel("Coins that save the board (any other gift)")
+local chalkSaveCoinsBox = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[^%d]", "")))
+	if number then send("setChalkSaveCoins", number) end
+end)
+panelLabel("Chalk gift strength (numbers per gift)")
+local chalkStrengthButtons = panelButtons({
+	{ "Half", function() send("setChalkStrength", 0.5) end },
+	{ "Normal", function() send("setChalkStrength", 1) end },
+	{ "Double", function() send("setChalkStrength", 2) end },
+})
+panelButtons({
+	{ "Restart at 0", function() send("chalkRestart") end },
+	{ "Test reset", function() send("chalkTestReset") end },
+	{ "Test save", function() send("chalkTestSave") end },
+})
+local function refreshChalkFields()
+	chalkGoalBox.Text = Format.commas(attr("ChalkGoal", 1000))
+	chalkResetGiftBox.Text = attr("ChalkResetGift", "Galaxy")
+	chalkResetSecondsBox.Text = tostring(attr("ChalkResetSeconds", 60))
+	chalkSaveCoinsBox.Text = Format.commas(attr("ChalkSaveCoins", 1000))
+	local strength = attr("ChalkStrength", 1)
+	for i, entry in CLIMB_STRENGTHS do
+		chalkStrengthButtons[i].BackgroundColor3 = if strength == entry[2] then SELECTED else BUTTON
+	end
+end
+for _, name in { "ChalkGoal", "ChalkResetGift", "ChalkResetSeconds", "ChalkSaveCoins", "ChalkStrength" } do
+	State:GetAttributeChangedSignal(name):Connect(refreshChalkFields)
+end
+refreshChalkFields()
+
 panelLabel("DIAMOND BIRD (every 5 to 7.5 minutes)")
 panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
@@ -1320,6 +1372,14 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 		climb.onWin(data)
 	elseif kind == "climbRestart" then
 		climb.onRestart()
+	elseif kind == "chalkGift" then
+		chalk.onGift(data)
+	elseif kind == "chalkReset" then
+		chalk.onReset(data)
+	elseif kind == "chalkWipe" then
+		chalk.onWipe(data)
+	elseif kind == "chalkWin" then
+		chalk.onWin(data)
 	elseif kind == "notice" and type(data) == "string" then
 		addFeed(data, 0, "notice")
 	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then

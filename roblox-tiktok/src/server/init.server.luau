@@ -21,6 +21,7 @@ local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
 local ClimbGame = require(script.ClimbGame)
+local ChalkGame = require(script.ChalkGame)
 
 -- Shared state lives in attributes, so every client sees it without extra code.
 local State = Instance.new("Configuration")
@@ -68,6 +69,8 @@ local settings = {
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 	-- Diamond Climb's progress, chosen speed and jump, and gift strength (see ClimbGame).
 	climb = ClimbGame.defaults() :: any,
+	-- Chalkboard Count's count, goal, wins, writing speed, theme and reset gift (see ChalkGame).
+	chalk = ChalkGame.defaults() :: any,
 }
 -- Single player: every player has their own save (statues, wins, theme,
 -- keybinds and the rest), so the server waits for its player and loads theirs.
@@ -168,6 +171,16 @@ local climbGame = ClimbGame.start({
 	state = State,
 	notify = Notify,
 	parent = workspace,
+})
+-- Chalkboard Count: the classroom and its chalkboard, also far off in the sky.
+local filterText: (Player, string) -> string? = function() return nil end
+local chalkGame = ChalkGame.start({
+	settings = settings,
+	save = function() Store.save(settings) end,
+	state = State,
+	notify = Notify,
+	parent = workspace,
+	filter = function(player: Player, text: string): string? return filterText(player, text) end,
 })
 
 -- Leaderboards stand behind the mountain; the scenery keeps their ground clear.
@@ -954,6 +967,15 @@ local function processTikTok(event: TikTokFeed.Event)
 		amount = settings.perShare
 		text = who .. " shared the live"
 	end
+	if chalkGame.writer() ~= nil then
+		-- In Chalkboard Count gifts move the count up or down, the reset gift
+		-- starts the countdown and a big enough gift saves it.
+		if event.type == "like" then return end
+		local ending = chalkGame.gift(who, event, amount, doubledGifts[event] == true)
+		if doubledGifts[event] then text = "2X " .. text end
+		Notify:FireAllClients("feed", { text = text .. ending, stone = 0, kind = event.type })
+		return
+	end
 	if climbGame.climber() ~= nil then
 		-- In Diamond Climb gifts send the climber up the tower (gifts that would
 		-- break the mountain) or down it (gifts that add stone); follows and
@@ -1121,6 +1143,7 @@ local function filtered(player: Player, text: string): string?
 	end)
 	return if ok then result else nil
 end
+filterText = filtered
 
 -- Rebuild test presets: blocks added -> the coins that pick its effect tier.
 local REBUILD_TEST_COINS: { [number]: number } = { [100] = 1, [1000] = 10, [10000] = 100, [50000] = 500, [100000] = 1000, [1500000] = 10000 }
@@ -1226,12 +1249,14 @@ end
 -- their checkpoint.
 local lastMove: { [Player]: number } = {}
 local function placeOf(player: Player): string
+	if player:GetAttribute("InChalk") == true then return "chalk" end
 	if player:GetAttribute("InClimb") == true then return "climb" end
 	return if player:GetAttribute("InGame") == true then "rough" else "lobby"
 end
 local function placeFor(player: Player): (CFrame, SpawnLocation)
 	local place = placeOf(player)
 	if place == "climb" then return climbGame.standFrame(), climbGame.built.spawn end
+	if place == "chalk" then return chalkGame.standFrame(), chalkGame.built.spawn end
 	local target = if place == "rough" then spawn else lobby.spawn
 	return target.CFrame + Vector3.new(0, 4, 0), target
 end
@@ -1246,11 +1271,14 @@ local function setPlace(player: Player, place: string)
 	if now - (lastMove[player] or -math.huge) < 1 then return end
 	lastMove[player] = now
 	-- The attribute turning on goes first, so the player is never seen in neither game on the way.
+	if place == "chalk" then player:SetAttribute("InChalk", true) end
 	if place == "climb" then player:SetAttribute("InClimb", true) end
 	if place == "rough" then player:SetAttribute("InGame", true) end
+	if place ~= "chalk" then player:SetAttribute("InChalk", false) end
 	if place ~= "climb" then player:SetAttribute("InClimb", false) end
 	if place ~= "rough" then player:SetAttribute("InGame", false) end
 	if from == "climb" or place == "climb" then climbGame.entered(player, place == "climb") end
+	if from == "chalk" or place == "chalk" then chalkGame.entered(player, place == "chalk") end
 	local frame, target = placeFor(player)
 	player.RespawnLocation = target
 	local character = player.Character
@@ -1270,6 +1298,7 @@ local function placeCharacter(player: Player, character: Model)
 		character:PivotTo(frame)
 	end
 	climbGame.characterAdded(player, character)
+	chalkGame.characterAdded(player, character)
 end
 
 local function applySetting(player: Player, action: string, value: any)
@@ -1458,7 +1487,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		return
 	end
 	if action == "joinGame" then
-		setPlace(player, if value == "DiamondClimb" then "climb" else "rough")
+		setPlace(player, if value == "DiamondClimb" then "climb" elseif value == "Chalkboard" then "chalk" else "rough")
 		return
 	elseif action == "leaveGame" then
 		setPlace(player, "lobby")
@@ -1471,6 +1500,10 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 	elseif action == "setClimbMove" then
 		-- The climb's speed and jump sliders.
 		climbGame.setMove(player, value)
+		return
+	elseif action == "chalkHold" then
+		-- The writer pressed or let go of the write button.
+		chalkGame.hold(player, value)
 		return
 	end
 	if action == "setHideButtons" then
@@ -1500,6 +1533,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		return
 	end
 	if admins[player] then
+		if chalkGame.setting(player, action, value) then return end
 		applySetting(player, action, value)
 	end
 end)
@@ -1562,6 +1596,7 @@ end
 local function onPlayer(player: Player)
 	player:SetAttribute("InGame", false)
 	player:SetAttribute("InClimb", false)
+	player:SetAttribute("InChalk", false)
 	player.RespawnLocation = lobby.spawn
 	player.CharacterAdded:Connect(function(character)
 		placeCharacter(player, character)
@@ -1592,6 +1627,7 @@ Players.PlayerRemoving:Connect(function(player)
 	catchAt[player] = nil
 	hideAt[player] = nil
 	climbGame.removing(player)
+	chalkGame.removing(player)
 end)
 
 publishSettings()

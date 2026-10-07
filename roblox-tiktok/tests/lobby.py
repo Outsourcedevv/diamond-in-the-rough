@@ -184,6 +184,13 @@ someone:SetAttribute("InClimb", true)
 check(LobbyView.place(someone) == "climb", "InClimb is Diamond Climb, even mid-move")
 someone:SetAttribute("InGame", false)
 check(LobbyView.place(someone) == "climb", "climbing")
+someone:SetAttribute("InChalk", true)
+check(LobbyView.place(someone) == "chalk", "InChalk is Chalkboard Count, even mid-move")
+someone:SetAttribute("InClimb", false)
+check(LobbyView.place(someone) == "chalk", "writing on the board")
+check(LobbyView.chalkStatus(0, 1000, 0) == "Count 0 of 1,000", "chalk status at the start")
+check(LobbyView.chalkStatus(250, 1000, 1) == "Count 250 of 1,000 · 1 win", "chalk status with a win")
+check(LobbyView.chalkStatus(12345, 100000, 4) == "Count 12,345 of 100,000 · 4 wins", "chalk status with wins")
 
 -- The How to Play guide: connecting TikTok, testing without it, the controls
 -- and how to win, in plain rich text with no emojis.
@@ -194,10 +201,10 @@ for _, page in HowToPlay.PAGES do
 	check(not string.find(plain, "[<>&]"), page.title .. ": rich text has no stray < > or &")
 	check(not string.find(page.text, "[\240-\244]"), page.title .. ": no emojis")
 end
-check(table.concat(titles, "|") == "Connect TikTok|Testing|Controls|How to win|Diamond Climb", "five guide pages")
+check(table.concat(titles, "|") == "Connect TikTok|Testing|Controls|How to win|Diamond Climb|Chalkboard", "six guide pages")
 local all = ""
 for _, page in HowToPlay.PAGES do all ..= page.text .. "\n" end
-for _, needed in { "1,000 platforms", "checkpoint", "Jump height", "DIAMOND CLIMB", "Start Bridge.bat", "localhost:8787", "Allow HTTP Requests", "JOIN", "TEST GIFTS", "REBUILD TEST GIFTS", "GIFT KEYBINDS", "<b>Y</b>", "<b>G</b>", "<b>P</b>", "<b>H</b>", "Diamond bird" } do
+for _, needed in { "1,000 platforms", "checkpoint", "Jump height", "DIAMOND CLIMB", "Start Bridge.bat", "localhost:8787", "Allow HTTP Requests", "JOIN", "TEST GIFTS", "REBUILD TEST GIFTS", "GIFT KEYBINDS", "<b>Y</b>", "<b>G</b>", "<b>P</b>", "<b>H</b>", "Diamond bird", "CHALKBOARD COUNT", "Hold to write", "60 second", "1,000 coins", "Test save" } do
 	check(string.find(all, needed, 1, true) ~= nil, "the guide covers " .. needed)
 end
 check(HowToPlay.BOARD == "HowToPlay" and HowToPlay.KEY == Enum.KeyCode.H, "the board's prompt and H open the guide")

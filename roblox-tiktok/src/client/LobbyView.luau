@@ -1,8 +1,8 @@
 --!strict
 -- The games menu on the left of the screen, in the lobby's royal white and
 -- gold: Diamond in the Rough with its live status and a Join button, Diamond
--- Climb with the climber's platform and a Join button, more slots marked
--- Coming soon, How to play, and Back to lobby while playing. The
+-- Climb with the climber's platform and a Join button, Chalkboard Count with
+-- the count on the board and a Join button, a slot marked Coming soon, How to play, and Back to lobby while playing. The
 -- Hide button hides it to a small tab; the tab (or G) shows it again. The tab
 -- itself can be hidden from the settings (G still works). Also turns the
 -- lobby's giant diamond on this computer.
@@ -110,16 +110,25 @@ function LobbyView.climbStatus(checkpoint: number, wins: number): string
 	return text
 end
 
--- Where the player is: "climb" (Diamond Climb), "rough" (Diamond in the
--- Rough) or "lobby", from their InClimb and InGame attributes.
+-- What the Chalkboard Count card says about the board.
+function LobbyView.chalkStatus(count: number, goal: number, wins: number): string
+	local text = "Count " .. Format.commas(count) .. " of " .. Format.commas(goal)
+	if wins > 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " win" else " wins") end
+	return text
+end
+
+-- Where the player is: "chalk" (Chalkboard Count), "climb" (Diamond Climb),
+-- "rough" (Diamond in the Rough) or "lobby", from their InChalk, InClimb and
+-- InGame attributes.
 function LobbyView.place(player: Player): string
+	if player:GetAttribute("InChalk") == true then return "chalk" end
 	if player:GetAttribute("InClimb") == true then return "climb" end
 	return if player:GetAttribute("InGame") == true then "rough" else "lobby"
 end
 
 -- `request` sends joinGame (with the game's name) / leaveGame;
 -- `onChange(place)` runs whenever the player moves between the lobby and the
--- games ("lobby", "rough" or "climb"; once at the start too); `onHelp`
+-- games ("lobby", "rough", "climb" or "chalk"; once at the start too); `onHelp`
 -- opens the How to Play guide.
 function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (string) -> (), onHelp: (() -> ())?)
 	local player = Players.LocalPlayer
@@ -148,7 +157,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	local panel = make("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, -WIDTH - 40, 0.5, 0),
-		Size = UDim2.fromOffset(WIDTH, 608),
+		Size = UDim2.fromOffset(WIDTH, 620),
 		BackgroundColor3 = IVORY,
 		Visible = false,
 	}, gui)
@@ -288,8 +297,49 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	}, climbCard)
 	rounded(climbJoin, 10)
 
+	-- Chalkboard Count.
+	local chalkCard = make("Frame", {
+		LayoutOrder = 3,
+		Size = UDim2.new(1, 0, 0, 96),
+		BackgroundTransparency = 1,
+	}, list)
+	rounded(chalkCard, 14)
+	stroke(chalkCard, GOLD, 2)
+	local chalkFill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 1 }, chalkCard)
+	rounded(chalkFill, 14)
+	make("UIGradient", { Color = ColorSequence.new(Color3.fromRGB(46, 112, 74), Color3.fromRGB(20, 58, 38)), Rotation = 35 }, chalkFill)
+	gemMark(chalkCard, Color3.fromRGB(240, 244, 230), 0)
+	text(chalkCard, {
+		Position = UDim2.fromOffset(72, 10),
+		Size = UDim2.new(1, -80, 0, 26),
+		Font = TITLE_FONT,
+		TextSize = 20,
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = "Chalkboard Count",
+	})
+	local chalkLive = text(chalkCard, {
+		Position = UDim2.fromOffset(72, 38),
+		Size = UDim2.new(1, -80, 0, 18),
+		Font = Enum.Font.GothamMedium,
+		TextSize = 13,
+		TextColor3 = Color3.fromRGB(214, 240, 220),
+		Text = "",
+	})
+	local chalkJoin = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -10, 1, -10),
+		Size = UDim2.fromOffset(120, 30),
+		BackgroundColor3 = GOLD,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 16,
+		TextColor3 = ROYAL_DEEP,
+		Text = "JOIN",
+		ZIndex = 2,
+	}, chalkCard)
+	rounded(chalkJoin, 10)
+
 	-- More games to come.
-	for index = 3, 4 do
+	for index = 4, 4 do
 		local soon = make("Frame", {
 			LayoutOrder = index,
 			Size = UDim2.new(1, 0, 0, 84),
@@ -410,6 +460,14 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	state:GetAttributeChangedSignal("ClimbCheckpoint"):Connect(refreshClimb)
 	state:GetAttributeChangedSignal("ClimbWins"):Connect(refreshClimb)
 	refreshClimb()
+	local function refreshChalk()
+		chalkLive.Text = LobbyView.chalkStatus(tonumber(state:GetAttribute("ChalkCount")) or 0,
+			tonumber(state:GetAttribute("ChalkGoal")) or 1000, tonumber(state:GetAttribute("ChalkWins")) or 0)
+	end
+	state:GetAttributeChangedSignal("ChalkCount"):Connect(refreshChalk)
+	state:GetAttributeChangedSignal("ChalkGoal"):Connect(refreshChalk)
+	state:GetAttributeChangedSignal("ChalkWins"):Connect(refreshChalk)
+	refreshChalk()
 
 	local place: string? = nil
 	local function playing(button: TextButton, on: boolean)
@@ -425,6 +483,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 		place = now
 		playing(join, now == "rough")
 		playing(climbJoin, now == "climb")
+		playing(chalkJoin, now == "chalk")
 		back.Visible = now ~= "lobby"
 		-- Arriving in the lobby opens the menu; joining a game tucks it away.
 		setOpen(now == "lobby")
@@ -438,6 +497,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	end
 	player:GetAttributeChangedSignal("InGame"):Connect(queueRefresh)
 	player:GetAttributeChangedSignal("InClimb"):Connect(queueRefresh)
+	player:GetAttributeChangedSignal("InChalk"):Connect(queueRefresh)
 	refreshPlace()
 
 	join.Activated:Connect(function()
@@ -452,6 +512,13 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 			setOpen(false)
 		else
 			request:FireServer("joinGame", "DiamondClimb")
+		end
+	end)
+	chalkJoin.Activated:Connect(function()
+		if place == "chalk" then
+			setOpen(false)
+		else
+			request:FireServer("joinGame", "Chalkboard")
 		end
 	end)
 	back.Activated:Connect(function()

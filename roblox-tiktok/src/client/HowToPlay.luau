@@ -1,7 +1,7 @@
 --!strict
--- The How to Play guide: a card in the lobby's white and gold with five
+-- The How to Play guide: a card in the lobby's white and gold with six
 -- pages (connecting TikTok, testing without TikTok, the controls, how to
--- win and Diamond Climb). It opens from the board beside the lobby spawn, the games menu's
+-- win, Diamond Climb and Chalkboard Count). It opens from the board beside the lobby spawn, the games menu's
 -- How to play button, or H anywhere, and frees the mouse while it is open.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -94,6 +94,22 @@ HowToPlay.PAGES = {
 			"Reach the top to win a climb. The next one starts from the bottom.",
 			"",
 			"In the streamer panel (<b>Y</b>), <b>DIAMOND CLIMB</b> restarts the climb and sets the gift strength. TEST GIFTS send you up and REBUILD TEST GIFTS send you down.",
+		}, "\n"),
+	},
+	{
+		title = "Chalkboard",
+		text = table.concat({
+			"Press <b>G</b> and <b>JOIN</b> Chalkboard Count. You stand at a big green board while the classroom camera films you.",
+			"",
+			"<b>Hold to write</b>: hold the left mouse button, Space or the screen and you chalk up the next number, one after another. Reach the <b>goal</b> (1,000 to start) to win, then the board is wiped for the next one.",
+			"",
+			"<b>WRITING</b> (bottom right): drag <b>Speed</b> to write faster or slower, and pick a <b>theme</b> for the classroom: Classic green, Blackboard, Neon night, Sakura or Royal diamond.",
+			"",
+			"<b>Gifts</b> write numbers for you, more for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Gifts set to add stone rub numbers <b>off</b> instead. Follows and shares add one.",
+			"",
+			"<b>The reset</b>: a <b>Galaxy</b> starts a 60 second countdown. When it runs out the board is wiped back to 0. Anyone who sends a different gift worth <b>1,000 coins or more</b> saves the board and stops the countdown.",
+			"",
+			"In the streamer panel (<b>Y</b>), <b>CHALKBOARD COUNT</b> sets the goal, which gift starts the reset, how long it lasts, how many coins save it and the gift strength. Test reset and Test save try it out without TikTok.",
 		}, "\n"),
 	},
 }
@@ -232,8 +248,9 @@ function HowToPlay.start()
 		local button = make("TextButton", {
 			Size = UDim2.new(1 / #HowToPlay.PAGES, -6, 1, 0),
 			Font = Enum.Font.GothamBold,
-			TextSize = 13,
+			TextSize = 12,
 			TextScaled = false,
+			TextWrapped = true,
 			Text = page.title,
 		}, tabs)
 		rounded(button, 10)

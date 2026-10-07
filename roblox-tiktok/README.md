@@ -108,9 +108,10 @@ The **GAMES** menu on the left of the screen lists the games:
 
 - **Diamond in the Rough** shows what is happening right now (stone left, or that the diamond was found). Press **JOIN** to go to the mining camp.
 - **Diamond Climb** shows the climber's platform and how many climbs they have won. Press **JOIN** to go to the tower (see [Diamond Climb](#diamond-climb)).
-- The other cards say **Coming soon**, ready for future games.
+- **Chalkboard Count** shows the count on the board, the goal and how many times it was reached. Press **JOIN** to go to the classroom (see [Chalkboard Count](#chalkboard-count)).
+- The last card says **Coming soon**, ready for a future game.
 
-Beside the carpet stands a **How to Play** board (drawn, with no lettering). Walk up and press **E**, or click it, and a guide opens on screen with five pages: **Connect TikTok** (the bridge, the control page, HTTP requests and joining), **Testing** (the Y panel's test gifts, rebuild tests, the bird button and gift keybinds), **Controls**, **How to win** and **Diamond Climb**. The games menu's **How to play** button and the **H** key open it too, anywhere.
+Beside the carpet stands a **How to Play** board (drawn, with no lettering). Walk up and press **E**, or click it, and a guide opens on screen with six pages: **Connect TikTok** (the bridge, the control page, HTTP requests and joining), **Testing** (the Y panel's test gifts, rebuild tests, the bird button and gift keybinds), **Controls**, **How to win**, **Diamond Climb** and **Chalkboard**. The games menu's **How to play** button and the **H** key open it too, anywhere.
 
 Press **Hide** to hide the menu. The **GAMES** tab on the left, or the **G** key, brings it back. The key matters in the game, where the mouse is locked to first person. While you play, the menu has **Back to lobby**. You can't go back while you are holding the diamond.
 
@@ -129,6 +130,18 @@ The second game: jump up **1,000 platforms** spiralling round a tall crystal pil
 - **Streamer panel (Y).** **DIAMOND CLIMB** has **Restart at platform 0** and the climb's gift strength (**Half**, **Normal** or **Double** platforms per gift). **TEST GIFTS** send you up and **REBUILD TEST GIFTS** send you down, so every ride can be tried without TikTok.
 
 While you climb, gifts move you instead of the mountain. Back in the lobby or the mine, they work on the mountain as before.
+
+## Chalkboard Count
+
+The third game: you stand at a big green chalkboard in a classroom while a fixed classroom camera films you (with a REC light and viewfinder corners on screen). **Hold** the left mouse button, Space or the screen and you write the next number, then the next, one after another. Reach the **goal** (1,000 to start) to win; after the celebration the board is wiped for the next count.
+
+- **The board.** The count is drawn in chalk strokes, not text, so it never glitches: each new number is written stroke by stroke and your arm scribbles with a stick of chalk while you hold. The goal sits small in the top right corner beside a chalk target, and a chalk line along the bottom shows how far you are. The display at the top has the count, a progress bar, your best and your wins.
+- **Writing speed and themes.** The **WRITING** card (bottom right) has a **Writing speed** slider (1 to 20 numbers a second, 3 normally) and five **themes** for the classroom: **Classic green**, **Blackboard**, **Neon night** (glowing chalk and neon strips), **Sakura** (pink blossom, a branch and paper lanterns) and **Royal diamond** (a gold-framed board, gold pillars, royal banners and a diamond above the board). Both are remembered.
+- **Gifts move the count.** Gifts that would break the mountain write numbers for you, and gifts set to add stone rub them **off**, by the same amounts as Diamond Climb: 2 for a Rose, 20 for 100 coins, 63 for a Galaxy and 200 for 10,000 coins (each gift of a combo counts). Follows and shares write one; likes leave the board alone. Bigger gifts burst more chalk and shake the camera, and the eraser sweeps across for gifts that rub numbers off. The diamond bird's bonus still doubles gifts.
+- **The reset.** A **Galaxy** starts a **60 second countdown**: a red banner on screen and a chalk clock on the board count down, and when it runs out the board is wiped back to 0. Anyone who sends a **different gift worth 1,000 coins or more** saves the board and stops the countdown. A second Galaxy while the countdown runs does nothing more, and the Galaxy that starts it writes nothing.
+- **Streamer panel (Y).** **CHALKBOARD COUNT** sets the goal (10 to 100,000), the reset gift's name, the countdown (10 to 300 seconds), the coins that save it and the gift strength (**Half**, **Normal** or **Double**). **Restart at 0** wipes the board, and **Test reset** and **Test save** try the countdown without TikTok.
+
+While you write, gifts move the count instead of the mountain. Back in the lobby or the mine, they work on the mountain as before.
 
 ## Customise the win counter
 
@@ -258,8 +271,8 @@ To show the Blender mountains and trees in the published game, also turn on **En
 The source is a [Rojo](https://rojo.space) project:
 
 - `src/shared`: config, the rock grid, rock shapes and looks, the network codec, the diamond shape, the hold countdown curve, formatting, and the Blender scenery meshes with their unpacker.
-- `src/server`: rounds, the authoritative mountain grid, the diamond, scenery, the royal lobby (`Lobby`), Diamond Climb's tower (`Climb`) and game (`ClimbGame`), the TikTok feed and saving.
-- `src/client`: the mountain renderer (`MountainView`), the scenery mesh builder (`SceneryView`), the games menu (`LobbyView`), Diamond Climb's display and landings (`ClimbView`) and gift rides (`ClimbEffects`), first-person hands, effects, the on-screen display and the settings panel. `src/shared/ClimbPath.luau` lays out the climb's platforms for both.
+- `src/server`: rounds, the authoritative mountain grid, the diamond, scenery, the royal lobby (`Lobby`), Diamond Climb's tower (`Climb`) and game (`ClimbGame`), Chalkboard Count's classroom (`Classroom`) and game (`ChalkGame`), the TikTok feed and saving.
+- `src/client`: the mountain renderer (`MountainView`), the scenery mesh builder (`SceneryView`), the games menu (`LobbyView`), Diamond Climb's display and landings (`ClimbView`) and gift rides (`ClimbEffects`), Chalkboard Count's camera, chalk and display (`ChalkView`), first-person hands, effects, the on-screen display and the settings panel. `src/shared/ClimbPath.luau` lays out the climb's platforms for both, and `src/shared/ChalkBoard.luau` the board, the chalk digits, the gift amounts and the themes.
 
 Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o DiamondRushTikTok.rbxlx`), or use `rojo serve` with the Studio plugin while editing. `python3 tools/build_place.py --check` fails if the committed place is out of date; `--sourcemap` writes a `sourcemap.json` for luau-lsp.
 
@@ -272,6 +285,7 @@ Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o Diamond
 - Every gift tier's effect on a simulated clock (budgets, cleanup, camera shake): `python3 tests/gift-effects.py [path/to/luau]`.
 - The lobby and the games menu's status line: `python3 tests/lobby.py [path/to/luau]`.
 - Diamond Climb (the path's gaps, steps and head room, the tower, and every gift ride on a simulated clock): `python3 tests/climb.py [path/to/luau]`.
+- Chalkboard Count (the board and chalk digits, the classroom and its themes, and the game on a simulated clock: writing, gifts, the reset and its save, the win, and the view): `python3 tests/chalk.py [path/to/luau]`.
 
 The Blender scenery pack is generated by `art/scenery_assets.py` (no hand-made files): every mesh is closed, vertex-coloured, under Roblox's 20,000-triangle limit, and modelled at real size. Rebuild it with `pip install bpy` (Python 3.11), then `python art/scenery_assets.py`, or with `blender --background --python art/scenery_assets.py`. This writes `src/shared/ScenePackData.luau`, the `.fbx`, `art/manifest.json` and the preview renders. `ScenePackData` holds each mesh as quantised, delta-coded geometry with a colour palette, compressed with DEFLATE and stored as base64: about 290 KB for 72,000 triangles. `python3 tests/scenery.py --dump` writes the game's layout so the build also renders `art/previews/game_view.png`.
 

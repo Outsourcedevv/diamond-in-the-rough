@@ -93,6 +93,216 @@ return BirdBonus
       </Item>
       <Item class="ModuleScript" referent="6">
         <Properties>
+          <string name="Name">ChalkBoard</string>
+          <string name="Source"><![CDATA[--!strict
+-- Chalkboard Count's classroom and board: where everything stands, how each
+-- number is written in chalk strokes (no text on the board, so nothing can
+-- glitch), the board's themes, and how far a gift moves the count. The server
+-- builds the classroom from this; each player's game draws the chalk.
+local GiftTier = require(script.Parent:WaitForChild("GiftTier"))
+
+local ChalkBoard = {}
+
+ChalkBoard.ORIGIN = Vector3.new(-2600, 200, 0) -- the middle of the classroom floor's top
+ChalkBoard.BOARD_WIDTH, ChalkBoard.BOARD_HEIGHT = 36, 13
+ChalkBoard.BOARD_BOTTOM = 2.4 -- above the floor
+ChalkBoard.BOARD_Z = -20 -- the board's middle, from the classroom's middle (it faces +Z)
+ChalkBoard.BOARD_THICKNESS = 0.6
+
+-- The settings: the number to reach, and how fast the hand writes.
+ChalkBoard.GOAL = { min = 10, max = 100000, default = 1000 }
+ChalkBoard.SPEED = { min = 1, max = 20, default = 3 } -- numbers a second
+ChalkBoard.RESET_SECONDS = { min = 10, max = 300, default = 60 }
+ChalkBoard.RESET_GIFT = "Galaxy" -- starts the reset countdown
+ChalkBoard.SAVE_COINS = 1000 -- a gift worth this much (not the reset gift) saves the count
+ChalkBoard.MAX_DIGITS = 6
+
+-- The board's front, where chalk goes.
+function ChalkBoard.face(): number
+	return ChalkBoard.ORIGIN.Z + ChalkBoard.BOARD_Z + ChalkBoard.BOARD_THICKNESS / 2
+end
+
+-- The middle of the board's front.
+function ChalkBoard.centre(): Vector3
+	return Vector3.new(ChalkBoard.ORIGIN.X, ChalkBoard.ORIGIN.Y + ChalkBoard.BOARD_BOTTOM + ChalkBoard.BOARD_HEIGHT / 2, ChalkBoard.face())
+end
+
+-- Where the writer stands: at the board, a little right of the middle,
+-- facing it (the big number is written above their head).
+function ChalkBoard.standFrame(): CFrame
+	local at = Vector3.new(ChalkBoard.ORIGIN.X + 3, ChalkBoard.ORIGIN.Y + 3, ChalkBoard.face() + 2.6)
+	return CFrame.lookAt(at, at - Vector3.new(0, 0, 1))
+end
+
+-- The classroom camera: in front of the board and off to one side, looking
+-- at the writer and the board.
+function ChalkBoard.cameraFrame(): CFrame
+	local O = ChalkBoard.ORIGIN
+	local at = Vector3.new(O.X + 7, O.Y + 7.5, ChalkBoard.face() + 27)
+	return CFrame.lookAt(at, ChalkBoard.centre() + Vector3.new(0, -0.8, 0))
+end
+
+-- Where the big number is written: its middle and height.
+ChalkBoard.NUMBER_HEIGHT = 5.4
+ChalkBoard.NUMBER_Y = 9.6 -- above the floor, the number's middle
+ChalkBoard.DIGIT_WIDTH = 3.1
+ChalkBoard.DIGIT_GAP = 0.9
+
+-- Board positions: `x` across from the board's middle, `y` above the floor.
+function ChalkBoard.onBoard(x: number, y: number): Vector3
+	return Vector3.new(ChalkBoard.ORIGIN.X + x, ChalkBoard.ORIGIN.Y + y, ChalkBoard.face() + 0.06)
+end
+
+-- The left edge of each digit of an `n`-digit number `height` tall, centred on `middle`.
+function ChalkBoard.digitLefts(n: number, height: number?, middle: number?): { number }
+	local scale = (height or ChalkBoard.NUMBER_HEIGHT) / ChalkBoard.NUMBER_HEIGHT
+	local width, gap = ChalkBoard.DIGIT_WIDTH * scale, ChalkBoard.DIGIT_GAP * scale
+	local total = n * width + (n - 1) * gap
+	local lefts = {}
+	for i = 1, n do
+		table.insert(lefts, (middle or 0) - total / 2 + (i - 1) * (width + gap))
+	end
+	return lefts
+end
+
+-- An ellipse as a polyline, from angle `a0` to `a1` (radians, 0 = right).
+local function arc(cx: number, cy: number, rx: number, ry: number, a0: number, a1: number, steps: number): { Vector2 }
+	local points = {}
+	for i = 0, steps do
+		local a = a0 + (a1 - a0) * i / steps
+		table.insert(points, Vector2.new(cx + math.cos(a) * rx, cy + math.sin(a) * ry))
+	end
+	return points
+end
+local function line(...: number): { Vector2 }
+	local values = { ... }
+	local points = {}
+	for i = 1, #values, 2 do
+		table.insert(points, Vector2.new(values[i], values[i + 1]))
+	end
+	return points
+end
+local function join(a: { Vector2 }, b: { Vector2 }): { Vector2 }
+	local out = table.clone(a)
+	for _, p in b do table.insert(out, p) end
+	return out
+end
+
+-- Each digit as hand-written chalk strokes: polylines in a box from (0, 0)
+-- at the bottom left to (1, 1) at the top right, in writing order.
+ChalkBoard.DIGITS = {
+	[0] = { arc(0.5, 0.5, 0.42, 0.5, math.pi / 2, math.pi / 2 + 2 * math.pi, 14) },
+	[1] = { line(0.22, 0.78, 0.55, 1, 0.55, 0), line(0.25, 0, 0.85, 0) },
+	[2] = { join(arc(0.5, 0.7, 0.4, 0.3, math.pi * 0.95, -math.pi * 0.25, 7), line(0.1, 0, 0.92, 0)) },
+	[3] = { join(arc(0.48, 0.76, 0.36, 0.24, math.pi * 0.85, -math.pi * 0.5, 7), arc(0.48, 0.27, 0.42, 0.27, math.pi * 0.5, -math.pi * 0.85, 8)) },
+	[4] = { line(0.68, 0, 0.68, 1, 0.05, 0.32, 0.95, 0.32) },
+	[5] = { join(line(0.86, 1, 0.22, 1, 0.16, 0.56), arc(0.5, 0.3, 0.4, 0.3, math.pi * 0.7, -math.pi * 0.85, 8)) },
+	[6] = { join(arc(0.6, 0.45, 0.45, 0.55, math.pi * 0.35, math.pi, 6), arc(0.5, 0.29, 0.35, 0.29, math.pi, math.pi * 3, 12)) },
+	[7] = { line(0.05, 1, 0.95, 1, 0.35, 0) },
+	[8] = { arc(0.5, 0.76, 0.3, 0.24, -math.pi / 2, math.pi * 1.5, 12), arc(0.5, 0.27, 0.4, 0.27, math.pi / 2, math.pi * 2.5, 12) },
+	[9] = { join(arc(0.5, 0.71, 0.38, 0.29, 0, math.pi * 2, 12), line(0.88, 0.71, 0.72, 0)) },
+} :: { [number]: { { Vector2 } } }
+
+-- The strokes of digit `d` written `height` tall with its bottom left at
+-- board position (`left`, `bottom`): a list of segments { from, to }.
+function ChalkBoard.segments(d: number, left: number, bottom: number, height: number): { { Vector3 } }
+	local width = height * ChalkBoard.DIGIT_WIDTH / ChalkBoard.NUMBER_HEIGHT
+	local out = {}
+	for _, stroke in ChalkBoard.DIGITS[d] do
+		for i = 1, #stroke - 1 do
+			local a, b = stroke[i], stroke[i + 1]
+			table.insert(out, {
+				ChalkBoard.onBoard(left + a.X * width, bottom + a.Y * height),
+				ChalkBoard.onBoard(left + b.X * width, bottom + b.Y * height),
+			})
+		end
+	end
+	return out
+end
+
+-- The digits of a count, most significant first.
+function ChalkBoard.digits(count: number): { number }
+	local text = tostring(math.max(0, math.floor(count)))
+	local out = {}
+	for i = 1, #text do table.insert(out, tonumber(string.sub(text, i, i)) :: number) end
+	return out
+end
+
+-- How far a gift moves the count: up for gifts that would break the
+-- mountain, down for gifts that add stone. A Rose is 2, 100 coins 20, a
+-- Galaxy 63, 10,000 coins 200 (times the strength and each gift of a combo).
+function ChalkBoard.giftAmount(rocks: number, coins: number, count: number, strength: number?): number
+	if rocks == 0 then return 0 end
+	local amount = math.max(1, math.floor(2 * math.sqrt(math.max(coins, 1)) * (strength or 1) + 0.5)) * math.max(1, math.floor(count))
+	return if rocks > 0 then amount else -amount
+end
+
+ChalkBoard.tier = GiftTier.forCoins
+
+-- True if a gift called `gift` starts the reset countdown.
+function ChalkBoard.isResetGift(gift: string?, resetGift: string): boolean
+	return gift ~= nil and resetGift ~= "" and string.lower(gift) == string.lower(resetGift)
+end
+
+-- True if a gift saves the count while the countdown runs: worth at least
+-- `saveCoins` and not the reset gift itself.
+function ChalkBoard.isSaveGift(gift: string?, coins: number, resetGift: string, saveCoins: number): boolean
+	return coins >= saveCoins and not ChalkBoard.isResetGift(gift, resetGift)
+end
+
+-- The themes: the board, its frame, the walls and floor, and the chalk.
+export type Theme = {
+	name: string,
+	board: Color3, boardMaterial: Enum.Material,
+	frame: Color3, frameMaterial: Enum.Material,
+	wall: Color3, trim: Color3, floor: Color3, floorMaterial: Enum.Material,
+	chalk: Color3, glow: boolean, -- glowing (neon) chalk
+	light: Color3,
+}
+ChalkBoard.THEMES = {
+	classic = {
+		name = "Classic", board = Color3.fromRGB(38, 84, 58), boardMaterial = Enum.Material.Slate,
+		frame = Color3.fromRGB(150, 104, 62), frameMaterial = Enum.Material.Wood,
+		wall = Color3.fromRGB(236, 226, 200), trim = Color3.fromRGB(150, 104, 62), floor = Color3.fromRGB(176, 128, 82), floorMaterial = Enum.Material.WoodPlanks,
+		chalk = Color3.fromRGB(246, 246, 238), glow = false, light = Color3.fromRGB(255, 244, 222),
+	},
+	blackboard = {
+		name = "Blackboard", board = Color3.fromRGB(32, 34, 36), boardMaterial = Enum.Material.Slate,
+		frame = Color3.fromRGB(92, 64, 44), frameMaterial = Enum.Material.Wood,
+		wall = Color3.fromRGB(176, 190, 204), trim = Color3.fromRGB(70, 82, 96), floor = Color3.fromRGB(110, 112, 118), floorMaterial = Enum.Material.Concrete,
+		chalk = Color3.fromRGB(250, 250, 250), glow = false, light = Color3.fromRGB(235, 242, 255),
+	},
+	neon = {
+		name = "Neon night", board = Color3.fromRGB(14, 12, 24), boardMaterial = Enum.Material.SmoothPlastic,
+		frame = Color3.fromRGB(255, 70, 200), frameMaterial = Enum.Material.Neon,
+		wall = Color3.fromRGB(34, 24, 58), trim = Color3.fromRGB(70, 230, 255), floor = Color3.fromRGB(20, 18, 34), floorMaterial = Enum.Material.SmoothPlastic,
+		chalk = Color3.fromRGB(110, 240, 255), glow = true, light = Color3.fromRGB(190, 120, 255),
+	},
+	sakura = {
+		name = "Sakura", board = Color3.fromRGB(44, 88, 66), boardMaterial = Enum.Material.Slate,
+		frame = Color3.fromRGB(120, 60, 52), frameMaterial = Enum.Material.Wood,
+		wall = Color3.fromRGB(252, 226, 232), trim = Color3.fromRGB(196, 108, 128), floor = Color3.fromRGB(196, 150, 120), floorMaterial = Enum.Material.WoodPlanks,
+		chalk = Color3.fromRGB(255, 196, 220), glow = false, light = Color3.fromRGB(255, 232, 240),
+	},
+	royal = {
+		name = "Royal diamond", board = Color3.fromRGB(26, 40, 110), boardMaterial = Enum.Material.Slate,
+		frame = Color3.fromRGB(224, 178, 72), frameMaterial = Enum.Material.Foil,
+		wall = Color3.fromRGB(242, 240, 235), trim = Color3.fromRGB(224, 178, 72), floor = Color3.fromRGB(230, 226, 218), floorMaterial = Enum.Material.Marble,
+		chalk = Color3.fromRGB(255, 220, 120), glow = false, light = Color3.fromRGB(255, 246, 228),
+	},
+} :: { [string]: Theme }
+ChalkBoard.THEME_ORDER = { "classic", "blackboard", "neon", "sakura", "royal" }
+
+function ChalkBoard.theme(name: string?): Theme
+	return ChalkBoard.THEMES[name or "classic"] or ChalkBoard.THEMES.classic
+end
+
+return ChalkBoard
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="7">
+        <Properties>
           <string name="Name">ClimbPath</string>
           <string name="Source"><![CDATA[--!strict
 -- Diamond Climb's path: 1000 gem platforms spiralling up round a crystal
@@ -221,7 +431,7 @@ return ClimbPath
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="7">
+      <Item class="ModuleScript" referent="8">
         <Properties>
           <string name="Name">Config</string>
           <string name="Source"><![CDATA[--!strict
@@ -280,7 +490,7 @@ return Config
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="8">
+      <Item class="ModuleScript" referent="9">
         <Properties>
           <string name="Name">DiamondShape</string>
           <string name="Source"><![CDATA[--!strict
@@ -503,7 +713,7 @@ return DiamondShape
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="9">
+      <Item class="ModuleScript" referent="10">
         <Properties>
           <string name="Name">Format</string>
           <string name="Source"><![CDATA[--!strict
@@ -555,7 +765,7 @@ return Format
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="10">
+      <Item class="ModuleScript" referent="11">
         <Properties>
           <string name="Name">GiftTier</string>
           <string name="Source"><![CDATA[--!strict
@@ -572,7 +782,7 @@ return GiftTier
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="11">
+      <Item class="ModuleScript" referent="12">
         <Properties>
           <string name="Name">Grid</string>
           <string name="Source"><![CDATA[--!strict
@@ -1248,7 +1458,7 @@ return Grid
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="12">
+      <Item class="ModuleScript" referent="13">
         <Properties>
           <string name="Name">HoldTimer</string>
           <string name="Source"><![CDATA[--!strict
@@ -1279,7 +1489,7 @@ return HoldTimer
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="13">
+      <Item class="ModuleScript" referent="14">
         <Properties>
           <string name="Name">Inflate</string>
           <string name="Source"><![CDATA[--!strict
@@ -1503,7 +1713,7 @@ return Inflate
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="14">
+      <Item class="ModuleScript" referent="15">
         <Properties>
           <string name="Name">Keybinds</string>
           <string name="Source"><![CDATA[--!strict
@@ -1554,7 +1764,7 @@ return Keybinds
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="15">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">MeshPack</string>
           <string name="Source"><![CDATA[--!strict
@@ -1762,7 +1972,7 @@ return MeshPack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="16">
+      <Item class="ModuleScript" referent="17">
         <Properties>
           <string name="Name">MountainCodec</string>
           <string name="Source"><![CDATA[--!strict
@@ -1885,7 +2095,7 @@ return MountainCodec
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">PartShapes</string>
           <string name="Source"><![CDATA[--!strict
@@ -1965,7 +2175,7 @@ return PartShapes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="18">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">RockStyle</string>
           <string name="Source"><![CDATA[--!strict
@@ -2142,7 +2352,7 @@ return RockStyle
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="19">
+      <Item class="ModuleScript" referent="20">
         <Properties>
           <string name="Name">ScenePackData</string>
           <string name="Source"><![CDATA[--!strict
@@ -4655,7 +4865,7 @@ H44kTFtpTKosYs80HUUjx6lJBM1IIhU0wjFDne44YDAzkYybTsIMTzUjZp3NIMZikzorJ1U5ftJ0mVVJ
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="20">
+      <Item class="ModuleScript" referent="21">
         <Properties>
           <string name="Name">SceneryThemes</string>
           <string name="Source"><![CDATA[--!strict
@@ -4699,7 +4909,7 @@ return SceneryThemes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="21">
+      <Item class="ModuleScript" referent="22">
         <Properties>
           <string name="Name">Skin</string>
           <string name="Source"><![CDATA[--!strict
@@ -4738,11 +4948,11 @@ return Skin
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="22">
+  <Item class="ServerScriptService" referent="23">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="23">
+    <Item class="Script" referent="24">
       <Properties>
         <string name="Name">DiamondRushServer</string>
         <token name="RunContext">0</token>
@@ -4769,6 +4979,7 @@ local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
 local Store = require(script.Store)
 local ClimbGame = require(script.ClimbGame)
+local ChalkGame = require(script.ChalkGame)
 
 -- Shared state lives in attributes, so every client sees it without extra code.
 local State = Instance.new("Configuration")
@@ -4816,6 +5027,8 @@ local settings = {
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 	-- Diamond Climb's progress, chosen speed and jump, and gift strength (see ClimbGame).
 	climb = ClimbGame.defaults() :: any,
+	-- Chalkboard Count's count, goal, wins, writing speed, theme and reset gift (see ChalkGame).
+	chalk = ChalkGame.defaults() :: any,
 }
 -- Single player: every player has their own save (statues, wins, theme,
 -- keybinds and the rest), so the server waits for its player and loads theirs.
@@ -4916,6 +5129,16 @@ local climbGame = ClimbGame.start({
 	state = State,
 	notify = Notify,
 	parent = workspace,
+})
+-- Chalkboard Count: the classroom and its chalkboard, also far off in the sky.
+local filterText: (Player, string) -> string? = function() return nil end
+local chalkGame = ChalkGame.start({
+	settings = settings,
+	save = function() Store.save(settings) end,
+	state = State,
+	notify = Notify,
+	parent = workspace,
+	filter = function(player: Player, text: string): string? return filterText(player, text) end,
 })
 
 -- Leaderboards stand behind the mountain; the scenery keeps their ground clear.
@@ -5702,6 +5925,15 @@ local function processTikTok(event: TikTokFeed.Event)
 		amount = settings.perShare
 		text = who .. " shared the live"
 	end
+	if chalkGame.writer() ~= nil then
+		-- In Chalkboard Count gifts move the count up or down, the reset gift
+		-- starts the countdown and a big enough gift saves it.
+		if event.type == "like" then return end
+		local ending = chalkGame.gift(who, event, amount, doubledGifts[event] == true)
+		if doubledGifts[event] then text = "2X " .. text end
+		Notify:FireAllClients("feed", { text = text .. ending, stone = 0, kind = event.type })
+		return
+	end
 	if climbGame.climber() ~= nil then
 		-- In Diamond Climb gifts send the climber up the tower (gifts that would
 		-- break the mountain) or down it (gifts that add stone); follows and
@@ -5869,6 +6101,7 @@ local function filtered(player: Player, text: string): string?
 	end)
 	return if ok then result else nil
 end
+filterText = filtered
 
 -- Rebuild test presets: blocks added -> the coins that pick its effect tier.
 local REBUILD_TEST_COINS: { [number]: number } = { [100] = 1, [1000] = 10, [10000] = 100, [50000] = 500, [100000] = 1000, [1500000] = 10000 }
@@ -5974,12 +6207,14 @@ end
 -- their checkpoint.
 local lastMove: { [Player]: number } = {}
 local function placeOf(player: Player): string
+	if player:GetAttribute("InChalk") == true then return "chalk" end
 	if player:GetAttribute("InClimb") == true then return "climb" end
 	return if player:GetAttribute("InGame") == true then "rough" else "lobby"
 end
 local function placeFor(player: Player): (CFrame, SpawnLocation)
 	local place = placeOf(player)
 	if place == "climb" then return climbGame.standFrame(), climbGame.built.spawn end
+	if place == "chalk" then return chalkGame.standFrame(), chalkGame.built.spawn end
 	local target = if place == "rough" then spawn else lobby.spawn
 	return target.CFrame + Vector3.new(0, 4, 0), target
 end
@@ -5994,11 +6229,14 @@ local function setPlace(player: Player, place: string)
 	if now - (lastMove[player] or -math.huge) < 1 then return end
 	lastMove[player] = now
 	-- The attribute turning on goes first, so the player is never seen in neither game on the way.
+	if place == "chalk" then player:SetAttribute("InChalk", true) end
 	if place == "climb" then player:SetAttribute("InClimb", true) end
 	if place == "rough" then player:SetAttribute("InGame", true) end
+	if place ~= "chalk" then player:SetAttribute("InChalk", false) end
 	if place ~= "climb" then player:SetAttribute("InClimb", false) end
 	if place ~= "rough" then player:SetAttribute("InGame", false) end
 	if from == "climb" or place == "climb" then climbGame.entered(player, place == "climb") end
+	if from == "chalk" or place == "chalk" then chalkGame.entered(player, place == "chalk") end
 	local frame, target = placeFor(player)
 	player.RespawnLocation = target
 	local character = player.Character
@@ -6018,6 +6256,7 @@ local function placeCharacter(player: Player, character: Model)
 		character:PivotTo(frame)
 	end
 	climbGame.characterAdded(player, character)
+	chalkGame.characterAdded(player, character)
 end
 
 local function applySetting(player: Player, action: string, value: any)
@@ -6206,7 +6445,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		return
 	end
 	if action == "joinGame" then
-		setPlace(player, if value == "DiamondClimb" then "climb" else "rough")
+		setPlace(player, if value == "DiamondClimb" then "climb" elseif value == "Chalkboard" then "chalk" else "rough")
 		return
 	elseif action == "leaveGame" then
 		setPlace(player, "lobby")
@@ -6219,6 +6458,10 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 	elseif action == "setClimbMove" then
 		-- The climb's speed and jump sliders.
 		climbGame.setMove(player, value)
+		return
+	elseif action == "chalkHold" then
+		-- The writer pressed or let go of the write button.
+		chalkGame.hold(player, value)
 		return
 	end
 	if action == "setHideButtons" then
@@ -6248,6 +6491,7 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		return
 	end
 	if admins[player] then
+		if chalkGame.setting(player, action, value) then return end
 		applySetting(player, action, value)
 	end
 end)
@@ -6310,6 +6554,7 @@ end
 local function onPlayer(player: Player)
 	player:SetAttribute("InGame", false)
 	player:SetAttribute("InClimb", false)
+	player:SetAttribute("InChalk", false)
 	player.RespawnLocation = lobby.spawn
 	player.CharacterAdded:Connect(function(character)
 		placeCharacter(player, character)
@@ -6340,6 +6585,7 @@ Players.PlayerRemoving:Connect(function(player)
 	catchAt[player] = nil
 	hideAt[player] = nil
 	climbGame.removing(player)
+	chalkGame.removing(player)
 end)
 
 publishSettings()
@@ -6347,7 +6593,638 @@ State:SetAttribute("TikTok", "Starting…")
 newRound()
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="24">
+      <Item class="ModuleScript" referent="25">
+        <Properties>
+          <string name="Name">ChalkGame</string>
+          <string name="Source"><![CDATA[--!strict
+-- Chalkboard Count, the third game in the games menu: the writer stands at a
+-- big green chalkboard, filmed by the classroom camera, and holds down to
+-- write the next number, and the next, at their chosen writing speed, until
+-- they reach the goal. TikTok gifts move the count up (gifts that would break
+-- the mountain) or down (gifts that add stone). The reset gift (a Galaxy) starts
+-- a 60 second countdown that wipes the board back to 0, unless someone sends
+-- a gift worth 1,000 coins or more to save it. Reaching the goal wins.
+--
+-- Everything is saved in settings.chalk and shown to every player through the
+-- State attributes ChalkCount, ChalkGoal, ChalkWins, ChalkBest, ChalkSpeed,
+-- ChalkTheme, ChalkResetGift, ChalkSaveCoins, ChalkResetSeconds,
+-- ChalkStrength, ChalkResetEnds (server time the board is wiped, 0 when no
+-- countdown) and ChalkWriting. The game is single player, so there is one count.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local StarterPlayer = game:GetService("StarterPlayer")
+local ServerStorage = game:GetService("ServerStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
+local Classroom = require(script.Parent:WaitForChild("Classroom"))
+
+local ChalkGame = {}
+
+export type Progress = {
+	count: number, goal: number, wins: number, best: number, speed: number, theme: string,
+	resetGift: string, saveCoins: number, resetSeconds: number, strength: number,
+}
+
+ChalkGame.STRENGTHS = { 0.5, 1, 2 }
+ChalkGame.WIN_SECONDS = 6 -- the celebration before the board is wiped for the next count
+
+function ChalkGame.defaults(): Progress
+	return {
+		count = 0, goal = ChalkBoard.GOAL.default, wins = 0, best = 0, speed = ChalkBoard.SPEED.default, theme = "classic",
+		resetGift = ChalkBoard.RESET_GIFT, saveCoins = ChalkBoard.SAVE_COINS, resetSeconds = ChalkBoard.RESET_SECONDS.default, strength = 1,
+	}
+end
+
+-- A saved count with anything missing or out of range put right.
+function ChalkGame.clean(saved: any): Progress
+	local progress = ChalkGame.defaults()
+	if type(saved) ~= "table" then return progress end
+	local function number(key: string, low: number, high: number, whole: boolean)
+		local value = saved[key]
+		if type(value) == "number" and value == value then
+			value = math.clamp(value, low, high)
+			progress[key] = if whole then math.floor(value) else value
+		end
+	end
+	number("goal", ChalkBoard.GOAL.min, ChalkBoard.GOAL.max, true)
+	number("count", 0, progress.goal, true)
+	number("wins", 0, 999999, true)
+	number("best", 0, ChalkBoard.GOAL.max, true)
+	number("speed", ChalkBoard.SPEED.min, ChalkBoard.SPEED.max, false)
+	number("saveCoins", 1, 1000000, true)
+	number("resetSeconds", ChalkBoard.RESET_SECONDS.min, ChalkBoard.RESET_SECONDS.max, true)
+	if type(saved.theme) == "string" and ChalkBoard.THEMES[saved.theme] then progress.theme = saved.theme end
+	if type(saved.resetGift) == "string" then progress.resetGift = string.sub(saved.resetGift, 1, 40) end
+	if table.find(ChalkGame.STRENGTHS, saved.strength) then progress.strength = saved.strength end
+	-- A count saved at the goal (the server stopped during the win) starts again.
+	if progress.count >= progress.goal then progress.count = 0 end
+	progress.best = math.max(progress.best, progress.count)
+	return progress
+end
+
+export type Options = {
+	settings: any, -- the saved settings; the count lives in settings.chalk
+	save: () -> (),
+	state: Instance,
+	notify: RemoteEvent,
+	parent: Instance,
+	filter: ((Player, string) -> string?)?, -- the chat filter, for the reset gift's name
+}
+
+export type Game = {
+	built: Classroom.Built,
+	progress: Progress,
+	writer: () -> Player?,
+	standFrame: () -> CFrame,
+	entered: (player: Player, writing: boolean) -> (),
+	characterAdded: (player: Player, character: Model) -> (),
+	hold: (player: Player, value: any) -> (),
+	setting: (player: Player, action: string, value: any) -> boolean,
+	gift: (who: string, event: { [string]: any }, rocks: number, doubled: boolean) -> string,
+	removing: (player: Player) -> (),
+}
+
+function ChalkGame.start(options: Options): Game
+	local settings = options.settings
+	local progress = ChalkGame.clean(settings.chalk)
+	settings.chalk = progress
+	local state = options.state
+	local notify = options.notify
+	local built = Classroom.build(options.parent, ServerStorage, progress.theme)
+	local holding: { [Player]: boolean } = {}
+	local holdAt: { [Player]: number } = {}
+	local resetEnds = 0
+	local resetSerial = 0
+	local winning = false
+	local dirty = false
+
+	local function publish()
+		state:SetAttribute("ChalkCount", progress.count)
+		state:SetAttribute("ChalkGoal", progress.goal)
+		state:SetAttribute("ChalkWins", progress.wins)
+		state:SetAttribute("ChalkBest", progress.best)
+		state:SetAttribute("ChalkSpeed", progress.speed)
+		state:SetAttribute("ChalkTheme", progress.theme)
+		state:SetAttribute("ChalkResetGift", progress.resetGift)
+		state:SetAttribute("ChalkSaveCoins", progress.saveCoins)
+		state:SetAttribute("ChalkResetSeconds", progress.resetSeconds)
+		state:SetAttribute("ChalkStrength", progress.strength)
+		state:SetAttribute("ChalkResetEnds", resetEnds)
+	end
+	publish()
+	state:SetAttribute("ChalkWriting", false)
+
+	local function writing(player: Player): boolean
+		return player:GetAttribute("InChalk") == true
+	end
+	local function writer(): Player?
+		for _, player in game:GetService("Players"):GetPlayers() do
+			if writing(player) then return player end
+		end
+		return nil
+	end
+
+	-- The writer stands still at the board; elsewhere Roblox's usual movement.
+	local function applyMove(player: Player)
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid == nil then return end
+		if writing(player) then
+			humanoid.WalkSpeed = 0
+			humanoid.UseJumpPower = false
+			humanoid.JumpHeight = 0
+		else
+			humanoid.UseJumpPower = StarterPlayer.CharacterUseJumpPower
+			humanoid.WalkSpeed = StarterPlayer.CharacterWalkSpeed
+			humanoid.JumpHeight = StarterPlayer.CharacterJumpHeight
+			humanoid.JumpPower = StarterPlayer.CharacterJumpPower
+		end
+	end
+
+	-- The count changed: shown at once, saved a moment later (writing is fast).
+	local function setCount(value: number)
+		progress.count = math.clamp(math.floor(value), 0, progress.goal)
+		progress.best = math.max(progress.best, progress.count)
+		state:SetAttribute("ChalkCount", progress.count)
+		state:SetAttribute("ChalkBest", progress.best)
+		dirty = true
+	end
+
+	local function cancelReset()
+		resetSerial += 1
+		resetEnds = 0
+		state:SetAttribute("ChalkResetEnds", 0)
+	end
+
+	-- The goal: a win, then the board is wiped for the next count.
+	local function reachGoal()
+		if winning then return end
+		winning = true
+		cancelReset()
+		progress.wins += 1
+		state:SetAttribute("ChalkWins", progress.wins)
+		dirty = true
+		local who = writer()
+		notify:FireAllClients("chalkWin", { wins = progress.wins, goal = progress.goal, name = if who then who.DisplayName else "" })
+		task.delay(ChalkGame.WIN_SECONDS, function()
+			winning = false
+			setCount(0)
+			notify:FireAllClients("chalkWipe", { reason = "win" })
+		end)
+	end
+
+	local function add(amount: number)
+		if winning then return end
+		setCount(progress.count + amount)
+		if progress.count >= progress.goal then reachGoal() end
+	end
+
+	-- Writing: while the writer holds, one number every 1/speed seconds.
+	local carry = 0
+	RunService.Heartbeat:Connect(function(dt: number)
+		local anyone = false
+		for player, on in holding do
+			if on and writing(player) and player.Parent ~= nil then anyone = true end
+		end
+		if state:GetAttribute("ChalkWriting") ~= anyone then state:SetAttribute("ChalkWriting", anyone) end
+		if not anyone or winning then
+			carry = 0
+			return
+		end
+		carry += dt * progress.speed
+		local whole = math.floor(carry)
+		if whole > 0 then
+			carry -= whole
+			add(math.min(whole, 5))
+		end
+	end)
+	-- Saves the count every few seconds while it changes.
+	task.spawn(function()
+		while true do
+			task.wait(4)
+			if dirty then
+				dirty = false
+				options.save()
+			end
+		end
+	end)
+
+	local self = {} :: Game
+	self.built = built
+	self.progress = progress
+	self.writer = writer
+
+	function self.standFrame(): CFrame
+		return ChalkBoard.standFrame()
+	end
+
+	function self.entered(player: Player, isWriting: boolean)
+		if not isWriting then holding[player] = nil end
+		applyMove(player)
+	end
+
+	function self.characterAdded(player: Player, character: Model)
+		holding[player] = nil
+		local humanoid = character:WaitForChild("Humanoid", 10)
+		if humanoid and character.Parent ~= nil then applyMove(player) end
+	end
+
+	-- The writer's game says they pressed (true) or let go (false).
+	function self.hold(player: Player, value: any)
+		if type(value) ~= "boolean" then return end
+		local now = os.clock()
+		if value and now - (holdAt[player] or -math.huge) < 0.05 then return end
+		holdAt[player] = now
+		holding[player] = value and writing(player) or nil
+	end
+
+	-- Settings from the writer's card and the streamer panel. True if handled.
+	function self.setting(player: Player, action: string, value: any): boolean
+		if action == "setChalkSpeed" and type(value) == "number" and value == value then
+			progress.speed = math.clamp(math.floor(value * 2 + 0.5) / 2, ChalkBoard.SPEED.min, ChalkBoard.SPEED.max)
+		elseif action == "setChalkTheme" and type(value) == "string" and ChalkBoard.THEMES[value] then
+			progress.theme = value
+			Classroom.setTheme(built, value)
+		elseif action == "setChalkGoal" and type(value) == "number" and value == value then
+			progress.goal = math.clamp(math.floor(value), ChalkBoard.GOAL.min, ChalkBoard.GOAL.max)
+			if progress.count >= progress.goal then setCount(progress.goal - 1) end
+		elseif action == "setChalkResetGift" and type(value) == "string" then
+			local name = string.gsub(string.sub(value, 1, 40), "^%s*(.-)%s*$", "%1")
+			local clean = if name == "" then "" elseif options.filter then options.filter(player, name) else name
+			if clean == nil then return true end
+			progress.resetGift = clean
+		elseif action == "setChalkSaveCoins" and type(value) == "number" and value == value then
+			progress.saveCoins = math.clamp(math.floor(value), 1, 1000000)
+		elseif action == "setChalkResetSeconds" and type(value) == "number" and value == value then
+			progress.resetSeconds = math.clamp(math.floor(value), ChalkBoard.RESET_SECONDS.min, ChalkBoard.RESET_SECONDS.max)
+		elseif action == "setChalkStrength" and table.find(ChalkGame.STRENGTHS, value) then
+			progress.strength = value
+		elseif action == "chalkRestart" then
+			if winning then return true end
+			cancelReset()
+			setCount(0)
+			notify:FireAllClients("chalkWipe", { reason = "restart" })
+		elseif action == "chalkTestReset" then
+			self.gift("Test", { type = "gift", gift = progress.resetGift ~= "" and progress.resetGift or ChalkBoard.RESET_GIFT, coins = 1000, id = "test-reset" }, 1, false)
+			return true
+		elseif action == "chalkTestSave" then
+			self.gift("Test", { type = "gift", gift = "Save test", coins = progress.saveCoins, id = "test-save" }, 1, false)
+			return true
+		else
+			return false
+		end
+		publish()
+		options.save()
+		return true
+	end
+
+	-- A gift (or a follow or share) for the count. `rocks` is what it would do
+	-- to the mountain: its sign decides up or down. Returns the feed's ending.
+	function self.gift(who: string, event: { [string]: any }, rocks: number, doubled: boolean): string
+		if winning then return "" end
+		local coins = math.max(1, event.coins or 1)
+		local count = math.max(1, math.floor(event.count or 1))
+		if event.type == "gift" and ChalkBoard.isResetGift(event.gift, progress.resetGift) then
+			-- The reset gift: a countdown to wipe the board (it does not stack).
+			if resetEnds == 0 then
+				resetSerial += 1
+				local serial = resetSerial
+				resetEnds = workspace:GetServerTimeNow() + progress.resetSeconds
+				state:SetAttribute("ChalkResetEnds", resetEnds)
+				notify:FireAllClients("chalkReset", { state = "started", name = who, seconds = progress.resetSeconds, saveCoins = progress.saveCoins })
+				task.delay(progress.resetSeconds, function()
+					if serial ~= resetSerial or winning then return end
+					resetEnds = 0
+					state:SetAttribute("ChalkResetEnds", 0)
+					local lost = progress.count
+					setCount(0)
+					notify:FireAllClients("chalkReset", { state = "wiped", lost = lost })
+					notify:FireAllClients("chalkWipe", { reason = "reset" })
+				end)
+				return string.format("  RESET IN %d", progress.resetSeconds)
+			end
+			return "  (reset already counting down)"
+		end
+		local ending = ""
+		if event.type == "gift" and resetEnds > 0 and ChalkBoard.isSaveGift(event.gift, coins * count, progress.resetGift, progress.saveCoins) then
+			cancelReset()
+			notify:FireAllClients("chalkReset", { state = "saved", name = who })
+			ending = "  SAVED THE BOARD"
+		end
+		local amount = if event.type == "gift" then ChalkBoard.giftAmount(rocks, coins, count, progress.strength)
+			elseif rocks > 0 then 1 else 0
+		if amount ~= 0 then
+			local from = progress.count
+			add(amount)
+			local moved = progress.count - from
+			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = progress.count, amount = moved, coins = coins, name = who,
+				gift = event.gift or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"), doubled = doubled })
+			if moved ~= 0 then
+				ending = (if moved > 0 then string.format("  +%d", moved) else string.format("  %d", moved)) .. ending
+			end
+		end
+		return ending
+	end
+
+	function self.removing(player: Player)
+		holding[player] = nil
+		holdAt[player] = nil
+	end
+
+	return self
+end
+
+return ChalkGame
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="26">
+        <Properties>
+          <string name="Name">Classroom</string>
+          <string name="Source"><![CDATA[--!strict
+-- Chalkboard Count's classroom, built once on startup far off in the sky:
+-- a wooden floor, three walls with windows and a clock, the big chalkboard
+-- with its frame and chalk tray, a teacher's desk, rows of school desks,
+-- a bookshelf, a plant and ceiling lamps. Everything a theme recolours is
+-- tagged with a "Role" attribute, and each theme's extra decorations (gold
+-- trim and a diamond, blossom branches, neon strips) are kept in ServerStorage
+-- until that theme is chosen. No lettering anywhere: the chalk is drawn by
+-- each player's game (see ChalkView).
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
+local DiamondShape = require(Shared:WaitForChild("DiamondShape"))
+
+local Classroom = {}
+
+local WOOD = Color3.fromRGB(150, 104, 62)
+local DARK_WOOD = Color3.fromRGB(96, 66, 42)
+local METAL = Color3.fromRGB(120, 124, 132)
+local WHITE = Color3.fromRGB(246, 246, 240)
+local GOLD = Color3.fromRGB(224, 178, 72)
+local PINK = Color3.fromRGB(255, 176, 204)
+Classroom.WIDTH, Classroom.DEPTH, Classroom.WALL_HEIGHT = 64, 56, 22
+
+export type Built = {
+	model: Model,
+	spawn: SpawnLocation,
+	decor: { [string]: Folder },
+	store: Instance,
+	theme: string,
+}
+
+local function piece(parent: Instance, name: string, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material, solid: boolean?, role: string?): Part
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Size = size
+	p.CFrame = frame
+	p.Color = colour
+	p.Material = material
+	p.Anchored = true
+	p.CanCollide = solid == true
+	p.CanQuery = solid == true
+	p.CanTouch = false
+	p.CastShadow = solid == true
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	if role then p:SetAttribute("Role", role) end
+	p.Parent = parent
+	return p
+end
+
+-- A box from its bottom middle, in classroom coordinates (from the floor's middle).
+local function box(parent: Instance, name: string, size: Vector3, at: Vector3, colour: Color3, material: Enum.Material, solid: boolean?, role: string?): Part
+	local O = ChalkBoard.ORIGIN
+	return piece(parent, name, size, CFrame.new(O + at + Vector3.new(0, size.Y / 2, 0)), colour, material, solid, role)
+end
+
+local function lamp(parent: Instance, at: Vector3)
+	local O = ChalkBoard.ORIGIN
+	piece(parent, "LampCord", Vector3.new(0.15, 4, 0.15), CFrame.new(O + at + Vector3.new(0, 2.6, 0)), METAL, Enum.Material.Metal)
+	local shade = piece(parent, "LampShade", Vector3.new(1.4, 3.2, 3.2), CFrame.new(O + at) * CFrame.Angles(0, 0, math.pi / 2), METAL, Enum.Material.Metal)
+	shade.Shape = Enum.PartType.Cylinder
+	local bulb = piece(parent, "LampBulb", Vector3.new(1.4, 1.4, 1.4), CFrame.new(O + at - Vector3.new(0, 0.8, 0)), Color3.fromRGB(255, 244, 222), Enum.Material.Neon, nil, "Bulb")
+	bulb.Shape = Enum.PartType.Ball
+	local glow = Instance.new("PointLight")
+	glow.Name = "LampLight"
+	glow.Range = 34
+	glow.Brightness = 1.3
+	glow.Shadows = false
+	glow.Color = Color3.fromRGB(255, 244, 222)
+	glow.Parent = bulb
+end
+
+-- A school desk and chair, seen from behind by the camera.
+local function desk(parent: Instance, at: Vector3)
+	box(parent, "DeskTop", Vector3.new(4, 0.3, 2.6), at + Vector3.new(0, 2.5, 0), WOOD, Enum.Material.Wood, true)
+	for _, x in { -1.8, 1.8 } do
+		for _, z in { -1.1, 1.1 } do
+			box(parent, "DeskLeg", Vector3.new(0.2, 2.5, 0.2), at + Vector3.new(x, 0, z), METAL, Enum.Material.Metal)
+		end
+	end
+	box(parent, "ChairSeat", Vector3.new(2.4, 0.25, 2.2), at + Vector3.new(0, 1.6, 2.6), DARK_WOOD, Enum.Material.Wood)
+	box(parent, "ChairBack", Vector3.new(2.4, 2, 0.25), at + Vector3.new(0, 1.85, 3.6), DARK_WOOD, Enum.Material.Wood)
+	for _, x in { -1, 1 } do
+		box(parent, "ChairLeg", Vector3.new(0.18, 1.6, 0.18), at + Vector3.new(x, 0, 2.6), METAL, Enum.Material.Metal)
+	end
+end
+
+function Classroom.build(parent: Instance, store: Instance, theme: string?): Built
+	local O = ChalkBoard.ORIGIN
+	local model = Instance.new("Model")
+	model.Name = "Classroom"
+	model.Parent = parent
+	local W, D, H = Classroom.WIDTH, Classroom.DEPTH, Classroom.WALL_HEIGHT
+	local boardZ = ChalkBoard.BOARD_Z
+
+	-- Floor and walls (the side behind the camera stays open).
+	box(model, "Floor", Vector3.new(W, 1, D), Vector3.new(0, -1, 0), WOOD, Enum.Material.WoodPlanks, true, "Floor")
+	box(model, "BackWall", Vector3.new(W, H, 1), Vector3.new(0, 0, boardZ - 1.5), WHITE, Enum.Material.SmoothPlastic, true, "Wall")
+	for _, side in { -1, 1 } do
+		local x = side * (W / 2 - 0.5)
+		-- Each side wall in pieces round two windows.
+		box(model, "SideWall", Vector3.new(1, 5, D), Vector3.new(x, 0, 0), WHITE, Enum.Material.SmoothPlastic, true, "Wall")
+		box(model, "SideWall", Vector3.new(1, H - 15, D), Vector3.new(x, 15, 0), WHITE, Enum.Material.SmoothPlastic, true, "Wall")
+		-- Between and beside the windows (at z -15..-7 and -1..7).
+		for _, span in { { -D / 2, -15 }, { -7, -1 }, { 7, D / 2 } } do
+			box(model, "SideWall", Vector3.new(1, 10, span[2] - span[1]), Vector3.new(x, 5, (span[1] + span[2]) / 2), WHITE, Enum.Material.SmoothPlastic, true, "Wall")
+		end
+		for _, z in { -11, 3 } do
+			local pane = box(model, "Window", Vector3.new(0.3, 10, 8), Vector3.new(x, 5, z), Color3.fromRGB(190, 220, 240), Enum.Material.Glass, true)
+			pane.Transparency = 0.55
+			box(model, "WindowBar", Vector3.new(0.5, 0.3, 8), Vector3.new(x, 9.85, z), WOOD, Enum.Material.Wood, nil, "Trim")
+			box(model, "WindowBar", Vector3.new(0.5, 10, 0.3), Vector3.new(x, 5, z), WOOD, Enum.Material.Wood, nil, "Trim")
+		end
+		-- A skirting board along the bottom.
+		box(model, "Skirting", Vector3.new(1.2, 1, D), Vector3.new(x - side * 0.1, 0, 0), WOOD, Enum.Material.Wood, nil, "Trim")
+	end
+	box(model, "Skirting", Vector3.new(W, 1, 1.2), Vector3.new(0, 0, boardZ - 1.1), WOOD, Enum.Material.Wood, nil, "Trim")
+
+	-- The chalkboard, its frame and the chalk tray.
+	local bw, bh, bt = ChalkBoard.BOARD_WIDTH, ChalkBoard.BOARD_HEIGHT, ChalkBoard.BOARD_THICKNESS
+	local bottom = ChalkBoard.BOARD_BOTTOM
+	box(model, "Board", Vector3.new(bw, bh, bt), Vector3.new(0, bottom, boardZ), ChalkBoard.THEMES.classic.board, Enum.Material.Slate, true, "Board")
+	local frame = 0.9
+	box(model, "BoardFrame", Vector3.new(bw + frame * 2, frame, bt + 0.4), Vector3.new(0, bottom + bh, boardZ), WOOD, Enum.Material.Wood, true, "Frame")
+	box(model, "BoardFrame", Vector3.new(bw + frame * 2, frame, bt + 0.4), Vector3.new(0, bottom - frame, boardZ), WOOD, Enum.Material.Wood, true, "Frame")
+	for _, side in { -1, 1 } do
+		box(model, "BoardFrame", Vector3.new(frame, bh, bt + 0.4), Vector3.new(side * (bw / 2 + frame / 2), bottom, boardZ), WOOD, Enum.Material.Wood, true, "Frame")
+	end
+	box(model, "ChalkTray", Vector3.new(bw, 0.3, 1.2), Vector3.new(0, bottom - frame - 0.05, boardZ + 0.8), WOOD, Enum.Material.Wood, true, "Frame")
+	for k, x in { -12, -11.2, -10.5, 9 } do
+		local stick = piece(model, "TrayChalk", Vector3.new(1.1, 0.22, 0.22),
+			CFrame.new(O + Vector3.new(x, bottom - frame + 0.36, boardZ + 0.8)) * CFrame.Angles(0, k * 0.4, 0), WHITE, Enum.Material.SmoothPlastic, nil, "Chalk")
+		stick.Shape = Enum.PartType.Cylinder
+	end
+	box(model, "Eraser", Vector3.new(2.2, 0.5, 0.8), Vector3.new(12, bottom - frame + 0.25, boardZ + 0.8), DARK_WOOD, Enum.Material.Wood)
+	box(model, "EraserFelt", Vector3.new(2.2, 0.2, 0.8), Vector3.new(12, bottom - frame + 0.05, boardZ + 0.8), Color3.fromRGB(60, 62, 70), Enum.Material.Fabric)
+
+	-- A clock on the wall over the board (a face and two hands, no numbers).
+	local clockAt = O + Vector3.new(0, bottom + bh + 3.4, boardZ - 0.9)
+	local face = piece(model, "ClockFace", Vector3.new(0.3, 3.4, 3.4), CFrame.new(clockAt) * CFrame.Angles(0, math.pi / 2, 0), WHITE, Enum.Material.SmoothPlastic)
+	face.Shape = Enum.PartType.Cylinder
+	local rim = piece(model, "ClockRim", Vector3.new(0.25, 3.8, 3.8), CFrame.new(clockAt - Vector3.new(0, 0, 0.05)) * CFrame.Angles(0, math.pi / 2, 0), DARK_WOOD, Enum.Material.Wood, nil, "Trim")
+	rim.Shape = Enum.PartType.Cylinder
+	piece(model, "ClockHand", Vector3.new(0.15, 1.2, 0.08), CFrame.new(clockAt + Vector3.new(0.2, 0.45, 0.2)) * CFrame.Angles(0, 0, -0.5), Color3.fromRGB(30, 30, 30), Enum.Material.SmoothPlastic)
+	piece(model, "ClockHand", Vector3.new(0.12, 1.5, 0.08), CFrame.new(clockAt + Vector3.new(-0.35, -0.3, 0.2)) * CFrame.Angles(0, 0, 1.1), Color3.fromRGB(30, 30, 30), Enum.Material.SmoothPlastic)
+
+	-- The teacher's desk on the left, school desks facing the board, a bookshelf and a plant.
+	box(model, "TeacherDesk", Vector3.new(8, 3, 3.6), Vector3.new(-17, 0, boardZ + 7), DARK_WOOD, Enum.Material.Wood, true)
+	box(model, "TeacherDeskTop", Vector3.new(8.6, 0.3, 4.2), Vector3.new(-17, 3, boardZ + 7), WOOD, Enum.Material.Wood, true)
+	box(model, "Apple", Vector3.new(0.7, 0.7, 0.7), Vector3.new(-14.5, 3.3, boardZ + 7), Color3.fromRGB(210, 40, 40), Enum.Material.SmoothPlastic).Shape = Enum.PartType.Ball
+	for k = 0, 2 do
+		box(model, "Book", Vector3.new(1.6, 0.35, 1.1), Vector3.new(-19, 3.3 + k * 0.35, boardZ + 7), ({ Color3.fromRGB(180, 50, 50), Color3.fromRGB(50, 90, 170), Color3.fromRGB(60, 140, 80) })[k + 1], Enum.Material.SmoothPlastic)
+	end
+	for row = 0, 1 do
+		for col = -1, 1 do
+			if not (row == 0 and col == 0) then
+				desk(model, Vector3.new(col * 10 - 4, 0, boardZ + 15 + row * 9))
+			end
+		end
+	end
+	box(model, "Bookshelf", Vector3.new(2.4, 9, 7), Vector3.new(W / 2 - 2.4, 0, boardZ + 6), DARK_WOOD, Enum.Material.Wood, true)
+	for shelf = 0, 3 do
+		for k = 0, 5 do
+			box(model, "ShelfBook", Vector3.new(1.6, 1.6, 0.7), Vector3.new(W / 2 - 3.2, 0.6 + shelf * 2.1, boardZ + 3.6 + k * 1),
+				({ Color3.fromRGB(180, 60, 60), Color3.fromRGB(60, 100, 180), Color3.fromRGB(230, 180, 70), Color3.fromRGB(70, 150, 90) })[(shelf + k) % 4 + 1], Enum.Material.SmoothPlastic)
+		end
+	end
+	box(model, "PlantPot", Vector3.new(2, 2, 2), Vector3.new(-W / 2 + 3, 0, boardZ + 2), Color3.fromRGB(186, 98, 60), Enum.Material.SmoothPlastic)
+	for k = 0, 4 do
+		local leaf = box(model, "PlantLeaf", Vector3.new(2.2, 2.2, 2.2), Vector3.new(-W / 2 + 3 + math.cos(k * 1.3) * 0.8, 2 + k * 0.7, boardZ + 2 + math.sin(k * 1.3) * 0.8),
+			Color3.fromRGB(70, 150, 70), Enum.Material.Grass)
+		leaf.Shape = Enum.PartType.Ball
+	end
+	for _, at in { Vector3.new(-12, H - 4, boardZ + 10), Vector3.new(12, H - 4, boardZ + 10), Vector3.new(0, H - 4, boardZ + 24) } do
+		lamp(model, at)
+	end
+
+	-- Where the writer stands, and respawns.
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Name = "ChalkStart"
+	spawn.Anchored = true
+	spawn.Neutral = true
+	spawn.Duration = 0
+	spawn.Enabled = false
+	spawn.Size = Vector3.new(4, 0.4, 4)
+	spawn.CFrame = ChalkBoard.standFrame() - Vector3.new(0, 2.8, 0)
+	spawn.Transparency = 1
+	spawn.CanCollide = false
+	spawn.CanQuery = false
+	spawn.CanTouch = false
+	spawn.Parent = model
+
+	-- Each theme's own decorations, stored until chosen.
+	local decor: { [string]: Folder } = {}
+	local function folder(name: string): Folder
+		local f = Instance.new("Folder")
+		f.Name = "ChalkDecor_" .. name
+		f.Parent = store
+		decor[name] = f
+		return f
+	end
+	local royal = folder("royal")
+	local gem = DiamondShape.build(2.6, "BoardDiamond")
+	gem.model.Parent = royal
+	DiamondShape.place(gem, CFrame.new(O + Vector3.new(0, bottom + bh + 3.4, boardZ - 0.2)))
+	for _, facet in gem.parts do
+		facet.CanCollide = false
+		facet.CanQuery = false
+		facet.CanTouch = false
+	end
+	for _, side in { -1, 1 } do
+		box(royal, "GoldPillar", Vector3.new(1.4, H - 2, 1.4), Vector3.new(side * (bw / 2 + 4), 0, boardZ - 0.6), GOLD, Enum.Material.Foil)
+		box(royal, "Banner", Vector3.new(4, 9, 0.2), Vector3.new(side * (bw / 2 + 8), 6, boardZ - 0.8), Color3.fromRGB(34, 52, 140), Enum.Material.Fabric)
+	end
+	local sakura = folder("sakura")
+	for _, side in { -1, 1 } do
+		for k = 0, 6 do
+			local blossom = piece(sakura, "Blossom", Vector3.new(2.4, 2.4, 2.4),
+				CFrame.new(O + Vector3.new(side * (W / 2 - 1.6), 9 + math.sin(k * 1.7) * 1.4, -11 + k * 2.3 - 2)), PINK, Enum.Material.SmoothPlastic)
+			blossom.Shape = Enum.PartType.Ball
+		end
+		piece(sakura, "Branch", Vector3.new(0.5, 0.5, 15), CFrame.new(O + Vector3.new(side * (W / 2 - 1.4), 8.6, -5)) * CFrame.Angles(0.15, 0, 0), DARK_WOOD, Enum.Material.Wood)
+		for k = 0, 3 do
+			local lantern = piece(sakura, "PaperLantern", Vector3.new(1.4, 1.8, 1.8), CFrame.new(O + Vector3.new(side * 14, H - 6 - (k % 2), boardZ + 4 + k * 8)) * CFrame.Angles(0, 0, math.pi / 2),
+				Color3.fromRGB(240, 70, 80), Enum.Material.Neon)
+			lantern.Shape = Enum.PartType.Cylinder
+		end
+	end
+	local neon = folder("neon")
+	for _, side in { -1, 1 } do
+		piece(neon, "NeonStrip", Vector3.new(0.3, 0.3, D), CFrame.new(O + Vector3.new(side * (W / 2 - 1.1), 0.2, 0)), Color3.fromRGB(70, 230, 255), Enum.Material.Neon)
+		piece(neon, "NeonStrip", Vector3.new(0.3, 0.3, D), CFrame.new(O + Vector3.new(side * (W / 2 - 1.1), H - 1, 0)), Color3.fromRGB(255, 70, 200), Enum.Material.Neon)
+	end
+	piece(neon, "NeonStrip", Vector3.new(W, 0.3, 0.3), CFrame.new(O + Vector3.new(0, H - 1, boardZ - 0.9)), Color3.fromRGB(70, 230, 255), Enum.Material.Neon)
+	for k = -2, 2 do
+		piece(neon, "NeonStar", Vector3.new(0.6, 0.6, 0.6), CFrame.new(O + Vector3.new(k * 6, bottom + bh + 2.4 + (k % 2), boardZ - 0.8)) * CFrame.Angles(0, 0, math.pi / 4),
+			if k % 2 == 0 then Color3.fromRGB(255, 70, 200) else Color3.fromRGB(70, 230, 255), Enum.Material.Neon)
+	end
+
+	local built: Built = { model = model, spawn = spawn, decor = decor, store = store, theme = "" }
+	Classroom.setTheme(built, theme or "classic")
+	return built
+end
+
+-- Recolours the classroom for a theme and swaps in its decorations.
+function Classroom.setTheme(built: Built, name: string)
+	local theme = ChalkBoard.theme(name)
+	local key = if ChalkBoard.THEMES[name] then name else "classic"
+	built.theme = key
+	for _, item in built.model:GetDescendants() do
+		if item:IsA("BasePart") then
+			local role = item:GetAttribute("Role")
+			if role == "Board" then
+				item.Color, item.Material = theme.board, theme.boardMaterial
+			elseif role == "Frame" then
+				item.Color, item.Material = theme.frame, theme.frameMaterial
+			elseif role == "Wall" then
+				item.Color = theme.wall
+			elseif role == "Trim" then
+				item.Color = theme.trim
+			elseif role == "Floor" then
+				item.Color, item.Material = theme.floor, theme.floorMaterial
+			elseif role == "Chalk" then
+				item.Color = theme.chalk
+			elseif role == "Bulb" then
+				item.Color = theme.light
+			end
+		elseif item:IsA("PointLight") and item.Name == "LampLight" then
+			item.Color = theme.light
+		end
+	end
+	for themeName, folder in built.decor do
+		folder.Parent = if themeName == key then built.model else built.store
+	end
+end
+
+return Classroom
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="27">
         <Properties>
           <string name="Name">Climb</string>
           <string name="Source"><![CDATA[--!strict
@@ -6504,7 +7381,7 @@ return Climb
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="25">
+      <Item class="ModuleScript" referent="28">
         <Properties>
           <string name="Name">ClimbGame</string>
           <string name="Source"><![CDATA[--!strict
@@ -6796,7 +7673,7 @@ return ClimbGame
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="26">
+      <Item class="ModuleScript" referent="29">
         <Properties>
           <string name="Name">Desert</string>
           <string name="Source"><![CDATA[--!strict
@@ -7179,7 +8056,7 @@ return Desert
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="27">
+      <Item class="ModuleScript" referent="30">
         <Properties>
           <string name="Name">DiamondBird</string>
           <string name="Source"><![CDATA[--!strict
@@ -7436,7 +8313,7 @@ return DiamondBird
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="28">
+      <Item class="ModuleScript" referent="31">
         <Properties>
           <string name="Name">Farm</string>
           <string name="Source"><![CDATA[--!strict
@@ -7954,7 +8831,7 @@ return Farm
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="29">
+      <Item class="ModuleScript" referent="32">
         <Properties>
           <string name="Name">Haunted</string>
           <string name="Source"><![CDATA[--!strict
@@ -8397,7 +9274,7 @@ return Haunted
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="30">
+      <Item class="ModuleScript" referent="33">
         <Properties>
           <string name="Name">Leaderboards</string>
           <string name="Source"><![CDATA[--!strict
@@ -8730,7 +9607,7 @@ return Leaderboards
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="31">
+      <Item class="ModuleScript" referent="34">
         <Properties>
           <string name="Name">Lobby</string>
           <string name="Source"><![CDATA[--!strict
@@ -9039,7 +9916,7 @@ return Lobby
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="32">
+      <Item class="ModuleScript" referent="35">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
@@ -9358,7 +10235,7 @@ return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="33">
+      <Item class="ModuleScript" referent="36">
         <Properties>
           <string name="Name">Sakura</string>
           <string name="Source"><![CDATA[--!strict
@@ -9748,7 +10625,7 @@ return Sakura
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="34">
+      <Item class="ModuleScript" referent="37">
         <Properties>
           <string name="Name">ScenePack</string>
           <string name="Source"><![CDATA[--!strict
@@ -9902,7 +10779,7 @@ return ScenePack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="35">
+      <Item class="ModuleScript" referent="38">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -10836,7 +11713,7 @@ return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="36">
+      <Item class="ModuleScript" referent="39">
         <Properties>
           <string name="Name">Statue</string>
           <string name="Source"><![CDATA[--!strict
@@ -10969,7 +11846,7 @@ return Statue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="37">
+      <Item class="ModuleScript" referent="40">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -11055,7 +11932,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="38">
+      <Item class="ModuleScript" referent="41">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -11203,7 +12080,7 @@ return TikTokFeed
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="39">
+      <Item class="ModuleScript" referent="42">
         <Properties>
           <string name="Name">Watchtower</string>
           <string name="Source"><![CDATA[--!strict
@@ -11401,15 +12278,15 @@ return Watchtower
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="40">
+  <Item class="StarterPlayer" referent="43">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="41">
+    <Item class="StarterPlayerScripts" referent="44">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="42">
+      <Item class="LocalScript" referent="45">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -11548,10 +12425,14 @@ local roughHud = make("Frame", {
 -- Diamond Climb: its display, sliders, landings and gift rides.
 local ClimbView = require(script:WaitForChild("ClimbView"))
 local climb = ClimbView.start(Request, State)
+-- Chalkboard Count: the classroom camera, chalk numbers and its display.
+local ChalkView = require(script:WaitForChild("ChalkView"))
+local chalk = ChalkView.start(Request, State)
 
 -- The games menu: the game's display, first-person view and hands only show
 -- while playing Diamond in the Rough, not in the lobby; Diamond Climb has a
--- third-person camera and its own display.
+-- third-person camera and its own display, and Chalkboard Count films the
+-- writer from a fixed classroom camera.
 local LobbyView = require(script:WaitForChild("LobbyView"))
 -- How to play: from the lobby board, the games menu or H.
 local HowToPlay = require(script:WaitForChild("HowToPlay"))
@@ -11561,6 +12442,7 @@ LobbyView.start(Request, State, function(place: string)
 	roughHud.Visible = place == "rough"
 	FirstPerson.setEnabled(place == "rough")
 	climb.setActive(place == "climb")
+	chalk.setActive(place == "chalk")
 end, function()
 	HowToPlay.setOpen(true)
 end)
@@ -12247,6 +13129,53 @@ end
 State:GetAttributeChangedSignal("ClimbStrength"):Connect(refreshStrength)
 refreshStrength()
 
+panelLabel("CHALKBOARD COUNT")
+panelLabel("While writing, gifts add numbers and adding gifts rub them out.")
+panelLabel("Goal number")
+local chalkGoalBox = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[,%s]", "")))
+	if number then send("setChalkGoal", number) end
+end)
+panelLabel("Reset gift (starts the countdown)")
+local chalkResetGiftBox = panelBox("", function(text)
+	if text ~= "" then send("setChalkResetGift", text) end
+end)
+panelLabel("Reset countdown (seconds)")
+local chalkResetSecondsBox = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[^%d]", "")))
+	if number then send("setChalkResetSeconds", number) end
+end)
+panelLabel("Coins that save the board (any other gift)")
+local chalkSaveCoinsBox = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[^%d]", "")))
+	if number then send("setChalkSaveCoins", number) end
+end)
+panelLabel("Chalk gift strength (numbers per gift)")
+local chalkStrengthButtons = panelButtons({
+	{ "Half", function() send("setChalkStrength", 0.5) end },
+	{ "Normal", function() send("setChalkStrength", 1) end },
+	{ "Double", function() send("setChalkStrength", 2) end },
+})
+panelButtons({
+	{ "Restart at 0", function() send("chalkRestart") end },
+	{ "Test reset", function() send("chalkTestReset") end },
+	{ "Test save", function() send("chalkTestSave") end },
+})
+local function refreshChalkFields()
+	chalkGoalBox.Text = Format.commas(attr("ChalkGoal", 1000))
+	chalkResetGiftBox.Text = attr("ChalkResetGift", "Galaxy")
+	chalkResetSecondsBox.Text = tostring(attr("ChalkResetSeconds", 60))
+	chalkSaveCoinsBox.Text = Format.commas(attr("ChalkSaveCoins", 1000))
+	local strength = attr("ChalkStrength", 1)
+	for i, entry in CLIMB_STRENGTHS do
+		chalkStrengthButtons[i].BackgroundColor3 = if strength == entry[2] then SELECTED else BUTTON
+	end
+end
+for _, name in { "ChalkGoal", "ChalkResetGift", "ChalkResetSeconds", "ChalkSaveCoins", "ChalkStrength" } do
+	State:GetAttributeChangedSignal(name):Connect(refreshChalkFields)
+end
+refreshChalkFields()
+
 panelLabel("DIAMOND BIRD (every 5 to 7.5 minutes)")
 panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
@@ -12734,6 +13663,14 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 		climb.onWin(data)
 	elseif kind == "climbRestart" then
 		climb.onRestart()
+	elseif kind == "chalkGift" then
+		chalk.onGift(data)
+	elseif kind == "chalkReset" then
+		chalk.onReset(data)
+	elseif kind == "chalkWipe" then
+		chalk.onWipe(data)
+	elseif kind == "chalkWin" then
+		chalk.onWin(data)
 	elseif kind == "notice" and type(data) == "string" then
 		addFeed(data, 0, "notice")
 	elseif kind == "dropped" and type(data) == "table" and data.name ~= "" then
@@ -12899,7 +13836,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="43">
+        <Item class="ModuleScript" referent="46">
           <Properties>
             <string name="Name">BirdView</string>
             <string name="Source"><![CDATA[--!strict
@@ -13046,7 +13983,656 @@ return BirdView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="44">
+        <Item class="ModuleScript" referent="47">
+          <Properties>
+            <string name="Name">ChalkView</string>
+            <string name="Source"><![CDATA[--!strict
+-- Chalkboard Count on this computer: the classroom camera, holding to write,
+-- the chalk on the board (the count, written stroke by stroke as it goes up,
+-- the goal in the corner, a progress line and the reset countdown, all drawn
+-- with chalk strokes rather than text), the writer's arm and chalk, the
+-- display (count, best and wins, the camera's REC light, the reset banner),
+-- the writing speed and theme card, and the gift, reset, save and win shows.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Debris = game:GetService("Debris")
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
+local Format = require(Shared:WaitForChild("Format"))
+
+local ChalkView = {}
+
+local WHITE = Color3.new(1, 1, 1)
+local GOLD = Color3.fromRGB(246, 200, 92)
+local GREEN = Color3.fromRGB(118, 230, 160)
+local RED = Color3.fromRGB(255, 84, 84)
+local MUTED = Color3.fromRGB(168, 174, 190)
+local PANEL = Color3.fromRGB(16, 18, 26)
+local SELECTED = Color3.fromRGB(64, 128, 236)
+local BUTTON = Color3.fromRGB(46, 50, 68)
+local FONT = Enum.Font.GothamBold
+local FONT_MEDIUM = Enum.Font.GothamMedium
+local FONT_HEAVY = Enum.Font.GothamBlack
+local SMOKE = "rbxasset://textures/particles/smoke_main.dds"
+local SPARK = "rbxasset://textures/particles/sparkles_main.dds"
+ChalkView.TEXTURES = { smoke = SMOKE, spark = SPARK }
+ChalkView.STROKE = 0.34 -- the big number's chalk line width
+ChalkView.SMALL_STROKE = 0.16
+
+-- What the display says.
+function ChalkView.countText(count: number, goal: number): string
+	return string.format("%s / %s", Format.commas(count), Format.commas(goal))
+end
+
+function ChalkView.resetText(secondsLeft: number): string
+	local s = math.max(0, math.ceil(secondsLeft))
+	return string.format("RESET IN %d:%02d", s // 60, s % 60)
+end
+
+function ChalkView.saveText(saveCoins: number): string
+	return string.format("Send a gift of %s+ coins to save the board", Format.commas(saveCoins))
+end
+
+-- Seconds to write one number's strokes at `speed` numbers a second.
+function ChalkView.writeSeconds(speed: number): number
+	return math.clamp(0.8 / math.max(speed, 0.1), 0.04, 0.35)
+end
+
+local function make(className: string, properties: { [string]: any }, parent: Instance?): any
+	local instance = Instance.new(className)
+	for key, value in properties do
+		(instance :: any)[key] = value
+	end
+	if parent ~= nil then instance.Parent = parent end
+	return instance
+end
+
+local function rounded(parent: Instance, radius: number)
+	make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+end
+
+local function glass(instance: GuiObject, radius: number)
+	instance.BackgroundColor3 = PANEL
+	instance.BackgroundTransparency = 0.28
+	rounded(instance, radius)
+	make("UIStroke", { Thickness = 1, Color = WHITE, Transparency = 0.88, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, instance)
+end
+
+-- A chalk line on the board from `a` to `b`.
+local function stroke(parent: Instance, a: Vector3, b: Vector3, width: number, colour: Color3, glow: boolean): Part
+	local length = math.max(0.05, (b - a).Magnitude)
+	local p = Instance.new("Part")
+	p.Name = "Chalk"
+	p.Size = Vector3.new(width, width, length + width * 0.8)
+	p.CFrame = CFrame.lookAt((a + b) / 2, b)
+	p.Color = colour
+	p.Material = if glow then Enum.Material.Neon else Enum.Material.SmoothPlastic
+	p.Transparency = 0.04
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Parent = parent
+	return p
+end
+
+function ChalkView.start(request: RemoteEvent, state: Instance)
+	local player = Players.LocalPlayer
+	local active = false
+	local function attr(name: string, fallback: any): any
+		local value = state:GetAttribute(name)
+		return if value == nil then fallback else value
+	end
+	local function theme(): ChalkBoard.Theme
+		return ChalkBoard.theme(attr("ChalkTheme", "classic"))
+	end
+
+	-- The display -------------------------------------------------------------------------
+	local gui = make("ScreenGui", { Name = "ChalkboardHud", ResetOnSpawn = false, Enabled = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling },
+		player:WaitForChild("PlayerGui"))
+	local card = make("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 10), Size = UDim2.fromOffset(320, 92) }, gui)
+	glass(card, 14)
+	local cardScale = make("UIScale", { Scale = 1 }, card)
+	make("TextLabel", { Position = UDim2.fromOffset(0, 8), Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = FONT, TextSize = 12,
+		TextColor3 = MUTED, Text = "CHALKBOARD COUNT" }, card)
+	local countLabel = make("TextLabel", { Position = UDim2.fromOffset(0, 24), Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, Font = FONT_HEAVY,
+		TextSize = 26, TextColor3 = WHITE, Text = "" }, card)
+	local bar = make("Frame", { Position = UDim2.new(0, 16, 0, 58), Size = UDim2.new(1, -32, 0, 6), BackgroundColor3 = WHITE, BackgroundTransparency = 0.82, BorderSizePixel = 0 }, card)
+	rounded(bar, 3)
+	local barFill = make("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = GREEN, BorderSizePixel = 0 }, bar)
+	rounded(barFill, 3)
+	local statsLabel = make("TextLabel", { Position = UDim2.fromOffset(0, 68), Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Font = FONT_MEDIUM,
+		TextSize = 13, TextColor3 = MUTED, RichText = true, Text = "" }, card)
+
+	-- The reset countdown banner.
+	local resetBox = make("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 112), Size = UDim2.fromOffset(440, 70), Visible = false }, gui)
+	glass(resetBox, 14)
+	resetBox.BackgroundColor3 = Color3.fromRGB(90, 16, 24)
+	local resetScale = make("UIScale", { Scale = 1 }, resetBox)
+	local resetLabel = make("TextLabel", { Position = UDim2.fromOffset(0, 6), Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1, Font = FONT_HEAVY,
+		TextSize = 32, TextColor3 = RED, Text = "" }, resetBox)
+	local saveLabel = make("TextLabel", { Position = UDim2.fromOffset(0, 42), Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1, Font = FONT,
+		TextSize = 14, TextColor3 = WHITE, Text = "" }, resetBox)
+
+	-- A big line for gifts, saves and wins.
+	local shout = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 192), Size = UDim2.fromOffset(700, 46),
+		BackgroundTransparency = 1, Font = FONT_HEAVY, TextSize = 38, TextColor3 = GOLD, TextStrokeTransparency = 0.3, TextTransparency = 1, Text = "" }, gui)
+	local shoutScale = make("UIScale", { Scale = 1 }, shout)
+	local shoutSerial = 0
+	local function showShout(text: string, colour: Color3, seconds: number, size: number?)
+		shoutSerial += 1
+		local serial = shoutSerial
+		shout.Text = text
+		shout.TextColor3 = colour
+		shout.TextTransparency = 0
+		shoutScale.Scale = size or 1.8
+		TweenService:Create(shoutScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+		task.delay(seconds, function()
+			if serial == shoutSerial then TweenService:Create(shout, TweenInfo.new(0.6), { TextTransparency = 1 }):Play() end
+		end)
+	end
+	local function pop(scale: number)
+		cardScale.Scale = scale
+		TweenService:Create(cardScale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end
+
+	-- The classroom camera's viewfinder: corner marks and a blinking REC light.
+	local viewfinder = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, gui)
+	for _, corner in { Vector2.new(0, 0), Vector2.new(1, 0), Vector2.new(0, 1), Vector2.new(1, 1) } do
+		local holder = make("Frame", { AnchorPoint = corner, Position = UDim2.new(corner.X, if corner.X == 0 then 24 else -24, corner.Y, if corner.Y == 0 then 60 else -24),
+			Size = UDim2.fromOffset(46, 46), BackgroundTransparency = 1 }, viewfinder)
+		make("Frame", { AnchorPoint = corner, Position = UDim2.fromScale(corner.X, corner.Y), Size = UDim2.fromOffset(46, 3), BackgroundColor3 = WHITE,
+			BackgroundTransparency = 0.25, BorderSizePixel = 0 }, holder)
+		make("Frame", { AnchorPoint = corner, Position = UDim2.fromScale(corner.X, corner.Y), Size = UDim2.fromOffset(3, 46), BackgroundColor3 = WHITE,
+			BackgroundTransparency = 0.25, BorderSizePixel = 0 }, holder)
+	end
+	local rec = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -80, 0, 70), Size = UDim2.fromOffset(150, 26), BackgroundTransparency = 1 }, viewfinder)
+	local recDot = make("Frame", { Position = UDim2.fromOffset(0, 6), Size = UDim2.fromOffset(14, 14), BackgroundColor3 = RED, BorderSizePixel = 0 }, rec)
+	rounded(recDot, 7)
+	local recLabel = make("TextLabel", { Position = UDim2.fromOffset(22, 0), Size = UDim2.new(1, -22, 1, 0), BackgroundTransparency = 1, Font = FONT, TextSize = 16,
+		TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = WHITE, TextStrokeTransparency = 0.5, Text = "REC" }, rec)
+	local hint = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -40), Size = UDim2.fromOffset(520, 22), BackgroundTransparency = 1,
+		Font = FONT, TextSize = 16, TextColor3 = WHITE, TextStrokeTransparency = 0.4, Text = "Hold the left mouse button, Space or the screen to write" }, gui)
+
+	-- The writing card: speed and theme.
+	local settingsCard = make("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -14, 1, -36), Size = UDim2.fromOffset(290, 178) }, gui)
+	glass(settingsCard, 14)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), PaddingTop = UDim.new(0, 10) }, settingsCard)
+	make("TextLabel", { Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = FONT, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = MUTED, Text = "WRITING" }, settingsCard)
+	make("TextLabel", { Position = UDim2.fromOffset(0, 22), Size = UDim2.new(1, -80, 0, 18), BackgroundTransparency = 1, Font = FONT_MEDIUM, TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = WHITE, Text = "Writing speed" }, settingsCard)
+	local speedValue = make("TextLabel", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 22), Size = UDim2.fromOffset(80, 18), BackgroundTransparency = 1,
+		Font = FONT, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = WHITE, Text = "" }, settingsCard)
+	local speedHit = make("TextButton", { Position = UDim2.fromOffset(0, 42), Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, Text = "", AutoButtonColor = false }, settingsCard)
+	local track = make("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = WHITE,
+		BackgroundTransparency = 0.82, BorderSizePixel = 0 }, speedHit)
+	rounded(track, 3)
+	local fill = make("Frame", { Size = UDim2.fromScale(0.5, 1), BackgroundColor3 = SELECTED, BorderSizePixel = 0 }, track)
+	rounded(fill, 3)
+	local knob = make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(18, 18), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, track)
+	rounded(knob, 9)
+	make("TextLabel", { Position = UDim2.fromOffset(0, 74), Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Font = FONT, TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = MUTED, Text = "THEME" }, settingsCard)
+	local themeButtons: { [string]: TextButton } = {}
+	for i, key in ChalkBoard.THEME_ORDER do
+		local row, col = (i - 1) // 3, (i - 1) % 3
+		local button = make("TextButton", { Position = UDim2.new(col / 3, 2, 0, 94 + row * 36), Size = UDim2.new(1 / 3, -4, 0, 30), BackgroundColor3 = BUTTON,
+			Font = FONT, TextSize = 12, TextColor3 = WHITE, TextWrapped = true, Text = ChalkBoard.THEMES[key].name }, settingsCard)
+		rounded(button, 8)
+		button.Activated:Connect(function() request:FireServer("setChalkTheme", key) end)
+		themeButtons[key] = button
+	end
+
+	local speed = attr("ChalkSpeed", ChalkBoard.SPEED.default)
+	local draggingSpeed = false
+	local lastSent = 0
+	local function showSpeed()
+		local fraction = (speed - ChalkBoard.SPEED.min) / (ChalkBoard.SPEED.max - ChalkBoard.SPEED.min)
+		fill.Size = UDim2.fromScale(fraction, 1)
+		knob.Position = UDim2.fromScale(fraction, 0.5)
+		speedValue.Text = (if speed % 1 == 0 then tostring(speed) else string.format("%.1f", speed)) .. " a second"
+	end
+	local function speedFromScreen(x: number, done: boolean)
+		local fraction = math.clamp((x - track.AbsolutePosition.X) / math.max(1, track.AbsoluteSize.X), 0, 1)
+		speed = math.floor((ChalkBoard.SPEED.min + fraction * (ChalkBoard.SPEED.max - ChalkBoard.SPEED.min)) * 2 + 0.5) / 2
+		showSpeed()
+		local now = os.clock()
+		if done or now - lastSent > 0.25 then
+			lastSent = now
+			request:FireServer("setChalkSpeed", speed)
+		end
+	end
+	speedHit.InputBegan:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			draggingSpeed = true
+			speedFromScreen(input.Position.X, false)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input: InputObject)
+		if draggingSpeed and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			speedFromScreen(input.Position.X, false)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		if draggingSpeed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+			draggingSpeed = false
+			speedFromScreen(input.Position.X, true)
+		end
+	end)
+	local function refreshSettings()
+		if not draggingSpeed then speed = attr("ChalkSpeed", ChalkBoard.SPEED.default) end
+		showSpeed()
+		local current = attr("ChalkTheme", "classic")
+		for key, button in themeButtons do
+			button.BackgroundColor3 = if key == current then SELECTED else BUTTON
+		end
+	end
+	state:GetAttributeChangedSignal("ChalkSpeed"):Connect(refreshSettings)
+	refreshSettings()
+
+	-- The chalk on the board -----------------------------------------------------------------
+	local drawing = make("Folder", { Name = "ChalkDrawing" }, workspace)
+	local effects = make("Folder", { Name = "ChalkEffects" }, workspace)
+	type Slot = { digit: number, parts: { Part } }
+	local slots: { Slot } = {}
+	local shownCount = -1
+	local revealSerial = 0
+	local function clearSlots()
+		for _, slot in slots do
+			for _, p in slot.parts do p:Destroy() end
+		end
+		table.clear(slots)
+	end
+	local function dust(at: Vector3, colour: Color3, count: number, speedRange: { number })
+		local spot = make("Attachment", { Position = at }, workspace.Terrain)
+		Debris:AddItem(spot, 2.5)
+		local puff = make("ParticleEmitter", {
+			Texture = SMOKE, Color = ColorSequence.new(colour), LightEmission = 0.3,
+			Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.4), NumberSequenceKeypoint.new(1, 1.6) }),
+			Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 1) }),
+			Lifetime = NumberRange.new(0.6, 1.4), Speed = NumberRange.new(speedRange[1], speedRange[2]), SpreadAngle = Vector2.new(70, 70),
+			Acceleration = Vector3.new(0, -2, 0), Drag = 3, Enabled = false,
+		}, spot)
+		puff:Emit(count)
+	end
+	-- Writes digit `d` in slot `i` of `n`, its strokes appearing one by one over `seconds`.
+	local function writeSlot(i: number, n: number, d: number, seconds: number)
+		local look = theme()
+		local lefts = ChalkBoard.digitLefts(n)
+		local bottom = ChalkBoard.NUMBER_Y - ChalkBoard.NUMBER_HEIGHT / 2
+		local segments = ChalkBoard.segments(d, lefts[i], bottom, ChalkBoard.NUMBER_HEIGHT)
+		local parts: { Part } = {}
+		for _, seg in segments do
+			local p = stroke(drawing, seg[1], seg[2], ChalkView.STROKE, look.chalk, look.glow)
+			if seconds > 0 then p.Transparency = 1 end
+			table.insert(parts, p)
+		end
+		slots[i] = { digit = d, parts = parts }
+		if seconds > 0 then
+			revealSerial += 1
+			local serial = revealSerial
+			local step = seconds / math.max(1, #parts)
+			for k, p in parts do
+				task.delay(step * (k - 1), function()
+					if p.Parent then p.Transparency = 0.04 end
+					if k == #parts and serial == revealSerial then dust(segments[k][2], look.chalk, 3, { 0.5, 2 }) end
+				end)
+			end
+		end
+	end
+	-- Draws the count: only the digits that changed are written again, unless
+	-- the number of digits changed.
+	local function drawCount(count: number, seconds: number)
+		local digits = ChalkBoard.digits(math.min(count, 10 ^ ChalkBoard.MAX_DIGITS - 1))
+		if #digits ~= #slots then
+			clearSlots()
+			for i, d in digits do writeSlot(i, #digits, d, if i == #digits then seconds else 0) end
+		else
+			for i, d in digits do
+				if slots[i].digit ~= d then
+					for _, p in slots[i].parts do p:Destroy() end
+					writeSlot(i, #digits, d, seconds)
+				end
+			end
+		end
+		shownCount = count
+	end
+
+	-- The goal, top right, with a drawn target beside it; the progress line;
+	-- the countdown, top left, with a drawn clock beside it.
+	local cornerParts: { Part } = {}
+	local progressPart: Part? = nil
+	local countdownParts: { Part } = {}
+	local shownGoal, shownCountdown = -1, -1
+	local function ring(parts: { Part }, cx: number, cy: number, r: number, colour: Color3, glow: boolean, width: number)
+		local steps = 14
+		for k = 0, steps - 1 do
+			local a0, a1 = k / steps * math.pi * 2, (k + 1) / steps * math.pi * 2
+			table.insert(parts, stroke(drawing, ChalkBoard.onBoard(cx + math.cos(a0) * r, cy + math.sin(a0) * r),
+				ChalkBoard.onBoard(cx + math.cos(a1) * r, cy + math.sin(a1) * r), width, colour, glow))
+		end
+	end
+	local function smallNumber(parts: { Part }, value: number, right: number, middleY: number, height: number, colour: Color3, glow: boolean)
+		local digits = ChalkBoard.digits(value)
+		local width = height * ChalkBoard.DIGIT_WIDTH / ChalkBoard.NUMBER_HEIGHT
+		local gap = height * ChalkBoard.DIGIT_GAP / ChalkBoard.NUMBER_HEIGHT
+		local total = #digits * width + (#digits - 1) * gap
+		local lefts = ChalkBoard.digitLefts(#digits, height, right - total / 2)
+		for i, d in digits do
+			for _, seg in ChalkBoard.segments(d, lefts[i], middleY - height / 2, height) do
+				table.insert(parts, stroke(drawing, seg[1], seg[2], ChalkView.SMALL_STROKE, colour, glow))
+			end
+		end
+	end
+	local function drawGoal()
+		for _, p in cornerParts do p:Destroy() end
+		table.clear(cornerParts)
+		local look = theme()
+		local goal = attr("ChalkGoal", ChalkBoard.GOAL.default)
+		local top = ChalkBoard.BOARD_BOTTOM + ChalkBoard.BOARD_HEIGHT - 1.6
+		local right = ChalkBoard.BOARD_WIDTH / 2 - 1.2
+		smallNumber(cornerParts, goal, right, top, 1.8, look.chalk, look.glow)
+		local digits = #ChalkBoard.digits(goal)
+		local width = digits * 1.8 * (ChalkBoard.DIGIT_WIDTH + ChalkBoard.DIGIT_GAP) / ChalkBoard.NUMBER_HEIGHT
+		local cx = right - width - 1.3
+		ring(cornerParts, cx, top, 0.9, look.chalk, look.glow, ChalkView.SMALL_STROKE)
+		ring(cornerParts, cx, top, 0.4, look.chalk, look.glow, ChalkView.SMALL_STROKE)
+		shownGoal = goal
+	end
+	local function drawProgress(count: number)
+		local goal = math.max(1, attr("ChalkGoal", ChalkBoard.GOAL.default))
+		local look = theme()
+		local half = ChalkBoard.BOARD_WIDTH / 2 - 1.5
+		local y = ChalkBoard.BOARD_BOTTOM + 1.1
+		local fraction = math.clamp(count / goal, 0, 1)
+		if progressPart then progressPart:Destroy() end
+		progressPart = if fraction > 0 then stroke(drawing, ChalkBoard.onBoard(-half, y), ChalkBoard.onBoard(-half + 2 * half * fraction, y), 0.22, look.chalk, look.glow) else nil
+	end
+	local function drawCountdown(seconds: number)
+		if seconds == shownCountdown then return end
+		shownCountdown = seconds
+		for _, p in countdownParts do p:Destroy() end
+		table.clear(countdownParts)
+		if seconds < 0 then return end
+		local top = ChalkBoard.BOARD_BOTTOM + ChalkBoard.BOARD_HEIGHT - 1.7
+		local left = -ChalkBoard.BOARD_WIDTH / 2 + 2.2
+		local colour = Color3.fromRGB(255, 110, 110)
+		ring(countdownParts, left, top, 1, colour, true, ChalkView.SMALL_STROKE)
+		table.insert(countdownParts, stroke(drawing, ChalkBoard.onBoard(left, top), ChalkBoard.onBoard(left, top + 0.7), ChalkView.SMALL_STROKE, colour, true))
+		table.insert(countdownParts, stroke(drawing, ChalkBoard.onBoard(left, top), ChalkBoard.onBoard(left + 0.5, top), ChalkView.SMALL_STROKE, colour, true))
+		smallNumber(countdownParts, seconds, left + 3.4, top, 2, colour, true)
+	end
+	local function redrawAll()
+		clearSlots()
+		shownCount = -1
+		drawCount(attr("ChalkCount", 0), 0)
+		drawGoal()
+		drawProgress(attr("ChalkCount", 0))
+		shownCountdown = -2
+	end
+
+	-- The eraser sweeps across the board (a wipe), or over the number (a gift down).
+	local function sweep(full: boolean, seconds: number)
+		local look = theme()
+		local eraser = make("Part", { Name = "SweepEraser", Size = Vector3.new(2.6, 1.2, 0.8), Color = Color3.fromRGB(96, 66, 42), Material = Enum.Material.Wood,
+			Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false }, effects)
+		local passes = if full then 4 else 2
+		local half = if full then ChalkBoard.BOARD_WIDTH / 2 - 2 else 9
+		local lowY = if full then ChalkBoard.BOARD_BOTTOM + 1.5 else ChalkBoard.NUMBER_Y - 2.4
+		local highY = if full then ChalkBoard.BOARD_BOTTOM + ChalkBoard.BOARD_HEIGHT - 1.5 else ChalkBoard.NUMBER_Y + 2.4
+		local start = os.clock()
+		local connection: RBXScriptConnection? = nil
+		connection = RunService.RenderStepped:Connect(function()
+			local t = math.clamp((os.clock() - start) / seconds, 0, 1)
+			local pass = math.min(passes - 1, math.floor(t * passes))
+			local u = t * passes - pass
+			local x = if pass % 2 == 0 then -half + 2 * half * u else half - 2 * half * u
+			local y = highY + (lowY - highY) * ((pass + u) / passes)
+			local at = ChalkBoard.onBoard(x, y) + Vector3.new(0, 0, 0.4)
+			eraser.CFrame = CFrame.new(at) * CFrame.Angles(0, 0, math.sin(t * 40) * 0.15)
+			if math.random() < 0.35 then dust(at, look.chalk, 2, { 1, 3 }) end
+			if t >= 1 and connection then
+				connection:Disconnect()
+				connection = nil
+				eraser:Destroy()
+			end
+		end)
+	end
+
+	-- A gift: chalk bursts at the number (more for bigger gifts), or the eraser for gifts down.
+	local function camShake(degrees: number, seconds: number)
+		local start = os.clock()
+		local name = "ChalkShake" .. tostring(start)
+		RunService:BindToRenderStep(name, Enum.RenderPriority.Camera.Value + 2, function()
+			local t = os.clock() - start
+			local camera = workspace.CurrentCamera
+			if t > seconds or camera == nil then
+				RunService:UnbindFromRenderStep(name)
+				return
+			end
+			local a = math.rad(degrees) * (1 - t / seconds)
+			camera.CFrame *= CFrame.Angles(math.noise(t * 18, 1) * a, math.noise(t * 18, 5) * a, 0)
+		end)
+	end
+	local function burst(at: Vector3, colour: Color3, count: number)
+		local spot = make("Attachment", { Position = at }, workspace.Terrain)
+		Debris:AddItem(spot, 2.5)
+		local sparks = make("ParticleEmitter", {
+			Texture = SPARK, Color = ColorSequence.new(WHITE, colour), LightEmission = 1,
+			Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1.1), NumberSequenceKeypoint.new(1, 0) }),
+			Lifetime = NumberRange.new(0.6, 1.3), Speed = NumberRange.new(10, 24), SpreadAngle = Vector2.new(80, 80), Drag = 2.5,
+			Acceleration = Vector3.new(0, -8, 0), Enabled = false,
+		}, spot)
+		sparks:Emit(count)
+	end
+	local function onGift(data: any)
+		if not active or type(data) ~= "table" then return end
+		local coins = tonumber(data.coins) or 1
+		local tier = ChalkBoard.tier(coins)
+		local amount = tonumber(data.amount) or 0
+		local look = theme()
+		local middle = ChalkBoard.onBoard(0, ChalkBoard.NUMBER_Y) + Vector3.new(0, 0, 0.5)
+		if data.up then
+			for k = 1, tier do
+				task.delay((k - 1) * 0.12, function()
+					local offset = Vector3.new((math.random() - 0.5) * 16, (math.random() - 0.5) * 5, 0)
+					burst(middle + offset, if k % 2 == 0 then GOLD else look.chalk, 14 + tier * 6)
+					dust(middle + offset, look.chalk, 4 + tier, { 2, 6 })
+				end)
+			end
+			showShout(string.format("%s  +%s", tostring(data.name or "Someone"), Format.commas(amount)), GREEN, 2.2, 1 + tier * 0.25)
+		else
+			sweep(false, 0.5 + tier * 0.1)
+			dust(middle, look.chalk, 8 + tier * 4, { 2, 7 })
+			showShout(string.format("%s  %s", tostring(data.name or "Someone"), Format.commas(amount)), RED, 2.2, 1 + tier * 0.25)
+		end
+		if tier >= 3 then camShake(0.4 + tier * 0.25, 0.4 + tier * 0.15) end
+		pop(1.1 + tier * 0.05)
+	end
+	local function onReset(data: any)
+		if not active or type(data) ~= "table" then return end
+		if data.state == "started" then
+			showShout(string.format("%s sent the RESET!", tostring(data.name or "Someone")), RED, 3, 2.2)
+			camShake(1.4, 0.8)
+			resetScale.Scale = 1.6
+			TweenService:Create(resetScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+		elseif data.state == "saved" then
+			showShout(string.format("SAVED BY %s!", string.upper(tostring(data.name or "someone"))), GREEN, 3, 2.2)
+			local middle = ChalkBoard.onBoard(0, ChalkBoard.NUMBER_Y) + Vector3.new(0, 0, 0.5)
+			for k = 1, 5 do
+				task.delay(k * 0.1, function() burst(middle + Vector3.new((k - 3) * 4, 0, 0), GREEN, 30) end)
+			end
+		elseif data.state == "wiped" then
+			showShout("THE BOARD WAS WIPED!", RED, 3, 2)
+			camShake(1.2, 0.6)
+		end
+	end
+	local function onWipe(_data: any)
+		if not active then return end
+		sweep(true, 1.4)
+	end
+	local function onWin(data: any)
+		if not active or type(data) ~= "table" then return end
+		showShout(string.format("YOU REACHED %s!", Format.commas(tonumber(data.goal) or 0)), GOLD, 5, 2.4)
+		pop(1.4)
+		for k = 1, 8 do
+			task.delay(k * 0.25, function()
+				local at = ChalkBoard.onBoard((math.random() - 0.5) * 30, ChalkBoard.BOARD_BOTTOM + 2 + math.random() * 10) + Vector3.new(0, 0, 1)
+				burst(at, ({ GOLD, GREEN, Color3.fromRGB(255, 120, 200), Color3.fromRGB(110, 200, 255) })[k % 4 + 1], 50)
+			end)
+		end
+	end
+
+	-- Holding to write -----------------------------------------------------------------------
+	local held = false
+	local function setHeld(on: boolean)
+		if on == held then return end
+		held = on
+		request:FireServer("chalkHold", on)
+	end
+	local function isWriteInput(input: InputObject): boolean
+		return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch or input.KeyCode == Enum.KeyCode.Space
+	end
+	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+		if active and not processed and isWriteInput(input) and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
+	end)
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		if isWriteInput(input) then setHeld(false) end
+	end)
+	UserInputService.WindowFocusReleased:Connect(function() setHeld(false) end)
+
+	-- The writer's arm and chalk: the arm reaches up to the board and scribbles.
+	local arm: { motor: Motor6D, base: CFrame, r15: boolean }? = nil
+	local chalkStick: Part? = nil
+	local function releaseArm()
+		if arm then
+			if arm.motor.Parent then arm.motor.C0 = arm.base end
+			arm = nil
+		end
+		if chalkStick then
+			chalkStick:Destroy()
+			chalkStick = nil
+		end
+	end
+	local function grabArm(): boolean
+		local character = player.Character
+		if character == nil then return false end
+		local upper = character:FindFirstChild("RightUpperArm")
+		local torso = character:FindFirstChild("Torso")
+		local motor = if upper then upper:FindFirstChild("RightShoulder") elseif torso then torso:FindFirstChild("Right Shoulder") else nil
+		if motor == nil or not motor:IsA("Motor6D") then return false end
+		arm = { motor = motor, base = motor.C0, r15 = upper ~= nil }
+		local hand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
+		if hand and hand:IsA("BasePart") then
+			local stick = make("Part", { Name = "HeldChalk", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.9, 0.22, 0.22), Color = theme().chalk,
+				Material = Enum.Material.SmoothPlastic, CanCollide = false, CanQuery = false, CanTouch = false, Massless = true, CastShadow = false }, character)
+			local weld = make("Weld", { Part0 = hand, Part1 = stick, C0 = CFrame.new(0, -hand.Size.Y / 2 - 0.1, -0.2) * CFrame.Angles(0, math.pi / 2, 0.6) }, stick)
+			local _ = weld
+			chalkStick = stick
+		end
+		return true
+	end
+	local recBlink = 0
+	RunService.RenderStepped:Connect(function(dt: number)
+		if not active then return end
+		-- The classroom camera, with a gentle hand-held drift.
+		local camera = workspace.CurrentCamera
+		if camera then
+			if camera.CameraType ~= Enum.CameraType.Scriptable then camera.CameraType = Enum.CameraType.Scriptable end
+			local t = os.clock()
+			camera.CFrame = ChalkBoard.cameraFrame() * CFrame.Angles(math.sin(t * 0.7) * 0.004, math.sin(t * 0.5) * 0.006, 0)
+		end
+		-- The REC light blinks and the camera's clock runs.
+		recBlink += dt
+		recDot.BackgroundTransparency = if recBlink % 1.2 < 0.7 then 0 else 1
+		local now = os.date("*t")
+		recLabel.Text = string.format("REC  %02d:%02d:%02d", now.hour, now.min, now.sec)
+		-- The arm writes while the server is writing.
+		local writingNow = state:GetAttribute("ChalkWriting") == true
+		if writingNow then
+			if arm == nil then grabArm() end
+			local a = arm
+			if a then
+				local t = os.clock() * math.min(30, 6 + speed * 2)
+				local wiggle = CFrame.Angles(math.sin(t) * 0.12, math.cos(t * 1.3) * 0.1, 0)
+				a.motor.C0 = a.base * (if a.r15 then CFrame.Angles(2.3, 0, 0) else CFrame.Angles(0, 0, 2.3)) * wiggle
+			end
+		elseif arm then
+			releaseArm()
+		end
+		hint.Visible = not writingNow and attr("ChalkCount", 0) < 3
+		-- The count, goal, progress and countdown on the board.
+		local count = attr("ChalkCount", 0)
+		if count ~= shownCount then
+			local stepUp = count == shownCount + 1
+			drawCount(count, if stepUp then ChalkView.writeSeconds(speed) else 0)
+			drawProgress(count)
+			if not stepUp and shownCount >= 0 then dust(ChalkBoard.onBoard(0, ChalkBoard.NUMBER_Y), theme().chalk, 6, { 1, 4 }) end
+		end
+		if attr("ChalkGoal", 0) ~= shownGoal then
+			drawGoal()
+			drawProgress(count)
+		end
+		local ends = attr("ChalkResetEnds", 0)
+		local left = if ends > 0 then ends - workspace:GetServerTimeNow() else -1
+		drawCountdown(if left >= 0 then math.ceil(left) else -1)
+		resetBox.Visible = left >= 0
+		if left >= 0 then
+			resetLabel.Text = ChalkView.resetText(left)
+			saveLabel.Text = ChalkView.saveText(attr("ChalkSaveCoins", ChalkBoard.SAVE_COINS))
+			resetLabel.TextTransparency = if left < 10 and (left % 0.5) < 0.25 then 0.4 else 0
+		end
+		-- The display.
+		local goal = attr("ChalkGoal", ChalkBoard.GOAL.default)
+		countLabel.Text = ChalkView.countText(count, goal)
+		barFill.Size = UDim2.fromScale(math.clamp(count / math.max(1, goal), 0, 1), 1)
+		statsLabel.Text = string.format('BEST <font color="#FFFFFF">%s</font>    WINS <font color="#F6C85C">%s</font>',
+			Format.commas(attr("ChalkBest", 0)), Format.commas(attr("ChalkWins", 0)))
+	end)
+	state:GetAttributeChangedSignal("ChalkTheme"):Connect(function()
+		refreshSettings()
+		if active then redrawAll() end
+		if chalkStick then chalkStick.Color = theme().chalk end
+	end)
+
+	local function setActive(on: boolean)
+		if on == active then return end
+		active = on
+		gui.Enabled = on
+		if on then
+			redrawAll()
+		else
+			setHeld(false)
+			releaseArm()
+			clearSlots()
+			for _, p in cornerParts do p:Destroy() end
+			table.clear(cornerParts)
+			if progressPart then progressPart:Destroy() end
+			progressPart = nil
+			drawCountdown(-1)
+			local camera = workspace.CurrentCamera
+			if camera then camera.CameraType = Enum.CameraType.Custom end
+		end
+	end
+	player.CharacterAdded:Connect(function()
+		arm = nil
+		chalkStick = nil
+		setHeld(false)
+	end)
+
+	return { setActive = setActive, onGift = onGift, onReset = onReset, onWipe = onWipe, onWin = onWin }
+end
+
+return ChalkView
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="48">
           <Properties>
             <string name="Name">ClimbEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -14404,7 +15990,7 @@ return ClimbEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="45">
+        <Item class="ModuleScript" referent="49">
           <Properties>
             <string name="Name">ClimbView</string>
             <string name="Source"><![CDATA[--!strict
@@ -15058,7 +16644,7 @@ return ClimbView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="46">
+        <Item class="ModuleScript" referent="50">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -15543,7 +17129,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="47">
+        <Item class="ModuleScript" referent="51">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -16800,13 +18386,13 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="48">
+        <Item class="ModuleScript" referent="52">
           <Properties>
             <string name="Name">HowToPlay</string>
             <string name="Source"><![CDATA[--!strict
--- The How to Play guide: a card in the lobby's white and gold with five
+-- The How to Play guide: a card in the lobby's white and gold with six
 -- pages (connecting TikTok, testing without TikTok, the controls, how to
--- win and Diamond Climb). It opens from the board beside the lobby spawn, the games menu's
+-- win, Diamond Climb and Chalkboard Count). It opens from the board beside the lobby spawn, the games menu's
 -- How to play button, or H anywhere, and frees the mouse while it is open.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -16899,6 +18485,22 @@ HowToPlay.PAGES = {
 			"Reach the top to win a climb. The next one starts from the bottom.",
 			"",
 			"In the streamer panel (<b>Y</b>), <b>DIAMOND CLIMB</b> restarts the climb and sets the gift strength. TEST GIFTS send you up and REBUILD TEST GIFTS send you down.",
+		}, "\n"),
+	},
+	{
+		title = "Chalkboard",
+		text = table.concat({
+			"Press <b>G</b> and <b>JOIN</b> Chalkboard Count. You stand at a big green board while the classroom camera films you.",
+			"",
+			"<b>Hold to write</b>: hold the left mouse button, Space or the screen and you chalk up the next number, one after another. Reach the <b>goal</b> (1,000 to start) to win, then the board is wiped for the next one.",
+			"",
+			"<b>WRITING</b> (bottom right): drag <b>Speed</b> to write faster or slower, and pick a <b>theme</b> for the classroom: Classic green, Blackboard, Neon night, Sakura or Royal diamond.",
+			"",
+			"<b>Gifts</b> write numbers for you, more for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Gifts set to add stone rub numbers <b>off</b> instead. Follows and shares add one.",
+			"",
+			"<b>The reset</b>: a <b>Galaxy</b> starts a 60 second countdown. When it runs out the board is wiped back to 0. Anyone who sends a different gift worth <b>1,000 coins or more</b> saves the board and stops the countdown.",
+			"",
+			"In the streamer panel (<b>Y</b>), <b>CHALKBOARD COUNT</b> sets the goal, which gift starts the reset, how long it lasts, how many coins save it and the gift strength. Test reset and Test save try it out without TikTok.",
 		}, "\n"),
 	},
 }
@@ -17037,8 +18639,9 @@ function HowToPlay.start()
 		local button = make("TextButton", {
 			Size = UDim2.new(1 / #HowToPlay.PAGES, -6, 1, 0),
 			Font = Enum.Font.GothamBold,
-			TextSize = 13,
+			TextSize = 12,
 			TextScaled = false,
+			TextWrapped = true,
 			Text = page.title,
 		}, tabs)
 		rounded(button, 10)
@@ -17094,14 +18697,14 @@ return HowToPlay
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="49">
+        <Item class="ModuleScript" referent="53">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
 -- The games menu on the left of the screen, in the lobby's royal white and
 -- gold: Diamond in the Rough with its live status and a Join button, Diamond
--- Climb with the climber's platform and a Join button, more slots marked
--- Coming soon, How to play, and Back to lobby while playing. The
+-- Climb with the climber's platform and a Join button, Chalkboard Count with
+-- the count on the board and a Join button, a slot marked Coming soon, How to play, and Back to lobby while playing. The
 -- Hide button hides it to a small tab; the tab (or G) shows it again. The tab
 -- itself can be hidden from the settings (G still works). Also turns the
 -- lobby's giant diamond on this computer.
@@ -17209,16 +18812,25 @@ function LobbyView.climbStatus(checkpoint: number, wins: number): string
 	return text
 end
 
--- Where the player is: "climb" (Diamond Climb), "rough" (Diamond in the
--- Rough) or "lobby", from their InClimb and InGame attributes.
+-- What the Chalkboard Count card says about the board.
+function LobbyView.chalkStatus(count: number, goal: number, wins: number): string
+	local text = "Count " .. Format.commas(count) .. " of " .. Format.commas(goal)
+	if wins > 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " win" else " wins") end
+	return text
+end
+
+-- Where the player is: "chalk" (Chalkboard Count), "climb" (Diamond Climb),
+-- "rough" (Diamond in the Rough) or "lobby", from their InChalk, InClimb and
+-- InGame attributes.
 function LobbyView.place(player: Player): string
+	if player:GetAttribute("InChalk") == true then return "chalk" end
 	if player:GetAttribute("InClimb") == true then return "climb" end
 	return if player:GetAttribute("InGame") == true then "rough" else "lobby"
 end
 
 -- `request` sends joinGame (with the game's name) / leaveGame;
 -- `onChange(place)` runs whenever the player moves between the lobby and the
--- games ("lobby", "rough" or "climb"; once at the start too); `onHelp`
+-- games ("lobby", "rough", "climb" or "chalk"; once at the start too); `onHelp`
 -- opens the How to Play guide.
 function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (string) -> (), onHelp: (() -> ())?)
 	local player = Players.LocalPlayer
@@ -17247,7 +18859,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	local panel = make("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, -WIDTH - 40, 0.5, 0),
-		Size = UDim2.fromOffset(WIDTH, 608),
+		Size = UDim2.fromOffset(WIDTH, 620),
 		BackgroundColor3 = IVORY,
 		Visible = false,
 	}, gui)
@@ -17387,8 +18999,49 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	}, climbCard)
 	rounded(climbJoin, 10)
 
+	-- Chalkboard Count.
+	local chalkCard = make("Frame", {
+		LayoutOrder = 3,
+		Size = UDim2.new(1, 0, 0, 96),
+		BackgroundTransparency = 1,
+	}, list)
+	rounded(chalkCard, 14)
+	stroke(chalkCard, GOLD, 2)
+	local chalkFill = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 1 }, chalkCard)
+	rounded(chalkFill, 14)
+	make("UIGradient", { Color = ColorSequence.new(Color3.fromRGB(46, 112, 74), Color3.fromRGB(20, 58, 38)), Rotation = 35 }, chalkFill)
+	gemMark(chalkCard, Color3.fromRGB(240, 244, 230), 0)
+	text(chalkCard, {
+		Position = UDim2.fromOffset(72, 10),
+		Size = UDim2.new(1, -80, 0, 26),
+		Font = TITLE_FONT,
+		TextSize = 20,
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = "Chalkboard Count",
+	})
+	local chalkLive = text(chalkCard, {
+		Position = UDim2.fromOffset(72, 38),
+		Size = UDim2.new(1, -80, 0, 18),
+		Font = Enum.Font.GothamMedium,
+		TextSize = 13,
+		TextColor3 = Color3.fromRGB(214, 240, 220),
+		Text = "",
+	})
+	local chalkJoin = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -10, 1, -10),
+		Size = UDim2.fromOffset(120, 30),
+		BackgroundColor3 = GOLD,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 16,
+		TextColor3 = ROYAL_DEEP,
+		Text = "JOIN",
+		ZIndex = 2,
+	}, chalkCard)
+	rounded(chalkJoin, 10)
+
 	-- More games to come.
-	for index = 3, 4 do
+	for index = 4, 4 do
 		local soon = make("Frame", {
 			LayoutOrder = index,
 			Size = UDim2.new(1, 0, 0, 84),
@@ -17509,6 +19162,14 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	state:GetAttributeChangedSignal("ClimbCheckpoint"):Connect(refreshClimb)
 	state:GetAttributeChangedSignal("ClimbWins"):Connect(refreshClimb)
 	refreshClimb()
+	local function refreshChalk()
+		chalkLive.Text = LobbyView.chalkStatus(tonumber(state:GetAttribute("ChalkCount")) or 0,
+			tonumber(state:GetAttribute("ChalkGoal")) or 1000, tonumber(state:GetAttribute("ChalkWins")) or 0)
+	end
+	state:GetAttributeChangedSignal("ChalkCount"):Connect(refreshChalk)
+	state:GetAttributeChangedSignal("ChalkGoal"):Connect(refreshChalk)
+	state:GetAttributeChangedSignal("ChalkWins"):Connect(refreshChalk)
+	refreshChalk()
 
 	local place: string? = nil
 	local function playing(button: TextButton, on: boolean)
@@ -17524,6 +19185,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 		place = now
 		playing(join, now == "rough")
 		playing(climbJoin, now == "climb")
+		playing(chalkJoin, now == "chalk")
 		back.Visible = now ~= "lobby"
 		-- Arriving in the lobby opens the menu; joining a game tucks it away.
 		setOpen(now == "lobby")
@@ -17537,6 +19199,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	end
 	player:GetAttributeChangedSignal("InGame"):Connect(queueRefresh)
 	player:GetAttributeChangedSignal("InClimb"):Connect(queueRefresh)
+	player:GetAttributeChangedSignal("InChalk"):Connect(queueRefresh)
 	refreshPlace()
 
 	join.Activated:Connect(function()
@@ -17551,6 +19214,13 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 			setOpen(false)
 		else
 			request:FireServer("joinGame", "DiamondClimb")
+		end
+	end)
+	chalkJoin.Activated:Connect(function()
+		if place == "chalk" then
+			setOpen(false)
+		else
+			request:FireServer("joinGame", "Chalkboard")
 		end
 	end)
 	back.Activated:Connect(function()
@@ -17590,7 +19260,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="50">
+        <Item class="ModuleScript" referent="54">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -18091,7 +19761,7 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="51">
+        <Item class="ModuleScript" referent="55">
           <Properties>
             <string name="Name">PetalView</string>
             <string name="Source"><![CDATA[--!strict
@@ -18193,7 +19863,7 @@ return PetalView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="52">
+        <Item class="ModuleScript" referent="56">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -18321,7 +19991,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="53">
+        <Item class="ModuleScript" referent="57">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -18468,12 +20138,12 @@ return SceneryView
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="54">
+  <Item class="Workspace" referent="58">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="55">
+    <Item class="Terrain" referent="59">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>
