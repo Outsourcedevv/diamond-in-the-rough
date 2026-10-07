@@ -1630,8 +1630,10 @@ RunService.Heartbeat:Connect(function()
 	player:SetAttribute("DiggingRock", digTarget() ~= nil)
 end)
 -- Each landed strike cracks the rock with a crunch; every fourth a bigger
--- chunk breaks away.
+-- chunk breaks away. Hits in a row climb a little in pitch (eight steps, then
+-- round again), and a pause starts the climb over.
 local strikes = 0
+local lastStrikeAt = -math.huge
 FirstPerson.onStrike(function()
 	local key = digTarget()
 	local character = player.Character
@@ -1639,8 +1641,11 @@ FirstPerson.onStrike(function()
 		Request:FireServer("mine", key)
 		local rock = aimTarget
 		local at = if rock then rock.Position else nil
+		local now = os.clock()
+		if now - lastStrikeAt > 0.6 then strikes = 0 end
+		lastStrikeAt = now
 		strikes += 1
-		Sounds.play("dig", at)
+		Sounds.play("dig", at, 1, Sounds.digPitch(strikes))
 		if strikes % 4 == 0 then Sounds.play("crumble", at) end
 	end
 end)

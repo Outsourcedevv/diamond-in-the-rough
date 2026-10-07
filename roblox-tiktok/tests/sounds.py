@@ -37,8 +37,9 @@ local function run(seconds)
 end
 -- Files and how long each lasts at normal speed; "broken.wav" never ends.
 local LENGTHS = { ["rbxasset://sounds/collide.wav"] = 0.35, ["rbxasset://sounds/snap.wav"] = 0.2, ["rbxasset://sounds/clickfast.wav"] = 0.1,
-	["rbxasset://sounds/impact_explosion_03.mp3"] = 2.5 }
+	["rbxasset://sounds/impact_explosion_03.mp3"] = 2.5, ["rbxasset://sounds/action_jump_land.mp3"] = 0.5 }
 local started, live, destroyed = 0, 0, 0
+local speeds = {}
 local SoundService = { Name = "SoundService" }
 local workspace = { Terrain = {} }
 local Enum = { RollOffMode = { InverseTapered = "InverseTapered" } }
@@ -50,6 +51,7 @@ local Instance = { new = function(className)
 		object.Ended = { Connect = function(_, f) table.insert(listeners, f) end }
 		function object:Play()
 			started += 1
+			table.insert(speeds, self.PlaybackSpeed)
 			live += 1
 			local length = LENGTHS[self.SoundId]
 			if length then
@@ -72,11 +74,22 @@ local function check(condition, message)
 end
 local function layers(cue) return #Sounds.CUES[cue] end
 
+-- Hits in a row climb in pitch, eight steps, then round again.
+check(Sounds.digPitch(1) == 1 and Sounds.digPitch(8) > Sounds.digPitch(7) and Sounds.digPitch(9) == 1, "the dig pitch climbs and comes round")
+check(Sounds.digPitch(8) < 1.25, "the climb stays gentle")
+-- The pitch raises every layer.
+local low = Sounds.CUES.dig[1].pitch[1]
+speeds = {}
+Sounds.play("dig", Vector3, 1, 1.2)
+check(speeds[1] >= low * 1.2 - 1e-9, "a higher pitch plays faster")
+run(1)
+started = 0
+
 -- Hold dig for ten seconds: four strikes a second, a crumble every fourth.
 local strikes, expected, highest = 0, 0, 0
 for _ = 1, 40 do
 	strikes += 1
-	Sounds.play("dig", Vector3)
+	Sounds.play("dig", Vector3, 1, Sounds.digPitch(strikes))
 	expected += layers("dig")
 	if strikes % 4 == 0 then
 		Sounds.play("crumble", Vector3)
