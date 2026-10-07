@@ -75,10 +75,11 @@ for n = 1, ClimbPath.TOP do
 end
 check(widestGap <= 3.5, string.format("every gap is a short hop (widest %.2f studs)", widestGap))
 check(steepest <= ClimbPath.RISE_HIGH + 1e-6 and steepest <= ClimbPath.JUMP.default - 3, string.format("every step is easy with the default jump (highest %.2f)", steepest))
-check(ClimbPath.rise(1) < 1.3 and math.abs(ClimbPath.rise(ClimbPath.TOP) - ClimbPath.RISE_HIGH) < 1e-6, "the steps grow from about 1.2 to 3.5 studs")
-check(lowestHead >= 12, string.format("head room under the turn above (%.1f studs)", lowestHead))
+check(ClimbPath.rise(1) < 2.1 and math.abs(ClimbPath.rise(ClimbPath.TOP) - ClimbPath.RISE_HIGH) < 1e-6, "the steps grow from about 2 to 3.5 studs")
+-- Clear of a climber at the highest jump (15 studs plus a 5-stud body) and of the camera.
+check(lowestHead >= 30, string.format("head room under the turn above (%.1f studs)", lowestHead))
 check(math.abs(ClimbPath.height(ClimbPath.TOP) - (ClimbPath.top(ClimbPath.TOP).Y - ClimbPath.ORIGIN.Y)) < 1e-6, "height matches the top")
-check(ClimbPath.height(ClimbPath.TOP) > 2000 and ClimbPath.height(ClimbPath.TOP) < 2600, string.format("the tower is about %.0f studs tall", ClimbPath.height(ClimbPath.TOP)))
+check(ClimbPath.height(ClimbPath.TOP) > 2500 and ClimbPath.height(ClimbPath.TOP) < 3000, string.format("the tower is about %.0f studs tall", ClimbPath.height(ClimbPath.TOP)))
 check(ClimbPath.size(100) > ClimbPath.size(99) and ClimbPath.size(ClimbPath.TOP) > ClimbPath.size(100), "milestones and the top are bigger")
 check(ClimbPath.colour(1) == ClimbPath.GEMS[1] and ClimbPath.colour(100) == ClimbPath.GEMS[1] and ClimbPath.colour(101) == ClimbPath.GEMS[2] and ClimbPath.colour(1000) == ClimbPath.GEMS[10], "a new gem colour every hundred")
 -- The start island sits clear of the platforms.
@@ -118,6 +119,13 @@ check(ClimbGame.clean(nil).checkpoint == 0 and ClimbGame.clean("x").speed == Cli
 -- The display.
 check(ClimbView.platformText(0) == "PLATFORM 0 / 1,000" and ClimbView.platformText(1000) == "PLATFORM 1,000 / 1,000", "platform text")
 check(ClimbView.pitch(10) < ClimbView.pitch(19) and ClimbView.pitch(20) == ClimbView.pitch(10), "the chime climbs through each ten")
+local first, last = ClimbView.numberRange(0)
+check(first == 1 and last == ClimbView.NUMBERS_ABOVE, "numbers over the first platforms from the start island")
+first, last = ClimbView.numberRange(500)
+check(first == 500 - ClimbView.NUMBERS_BELOW and last == 500 + ClimbView.NUMBERS_ABOVE, "numbers round the climber")
+first, last = ClimbView.numberRange(ClimbPath.TOP)
+check(last == ClimbPath.TOP and last - first == ClimbView.NUMBERS_BELOW, "numbers stop at the top")
+check(ClimbView.NUMBER_HEIGHT > 5.5, "numbers float above a standing climber's head")
 check(ClimbView.pace(0) == 1 and ClimbView.pace(2) > 1 and ClimbView.pace(50) == 3, "queued rides play faster")
 
 -- The tower.

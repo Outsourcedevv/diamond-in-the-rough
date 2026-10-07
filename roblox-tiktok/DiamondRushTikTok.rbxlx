@@ -310,7 +310,9 @@ return ChalkBoard
 -- Diamond Climb's path: 1000 big gem platforms spiralling up round a crystal
 -- pillar in the sky, far from the valley and the lobby (and hidden from them,
 -- see ClimbView), with the diamond on the last one. Each platform is a little higher above the one before (from
--- 1.2 studs at the bottom to 3.5 at the top), always a short, easy hop away.
+-- 2 studs at the bottom to 3.5 at the top), always a short, easy hop away.
+-- The spiral is wide (18 platforms a turn), so the turn above is over 30
+-- studs overhead: clear of jumping heads and of the camera.
 -- The server builds the tower from this and checks where players stand; each
 -- player's game draws the climb's display and gift animations from it.
 local GiftTier = require(script.Parent:WaitForChild("GiftTier"))
@@ -319,9 +321,9 @@ local ClimbPath = {}
 
 ClimbPath.TOP = 1000 -- the platform with the diamond
 ClimbPath.ORIGIN = Vector3.new(2600, 200, 0) -- the pillar's foot; platform 0 is the start island
-ClimbPath.RADIUS = 32 -- studs from the pillar to the platforms' centres
-ClimbPath.SPACING = 16.75 -- studs between neighbouring platforms' centres, along the spiral (12 a turn)
-ClimbPath.RISE_LOW, ClimbPath.RISE_HIGH = 1.2, 3.5 -- studs each platform rises, at the bottom and the top
+ClimbPath.RADIUS = 48 -- studs from the pillar to the platforms' centres
+ClimbPath.SPACING = 16.75 -- studs between neighbouring platforms' centres, along the spiral (18 a turn)
+ClimbPath.RISE_LOW, ClimbPath.RISE_HIGH = 2, 3.5 -- studs each platform rises, at the bottom and the top
 ClimbPath.THICKNESS = 1.2
 ClimbPath.START_SIZE = 30 -- the start island's width
 ClimbPath.MILESTONE = 100 -- every 100th platform is a bigger gold-rimmed one
@@ -17383,6 +17385,17 @@ function ClimbView.platformText(index: number): string
 	return string.format("PLATFORM %s / %s", Format.commas(math.floor(index + 0.5)), Format.commas(ClimbPath.TOP))
 end
 
+-- Platform numbers float over the platforms near the climber: this many below
+-- and above the one they're on (only those, so 1000 signs never draw at once).
+ClimbView.NUMBERS_BELOW, ClimbView.NUMBERS_ABOVE = 6, 24
+ClimbView.NUMBER_HEIGHT = 6.5 -- studs over the platform's top, above a standing climber's head
+
+-- The platforms that show their number while the climber is on `index`.
+function ClimbView.numberRange(index: number): (number, number)
+	local here = math.clamp(math.floor(index + 0.5), 0, ClimbPath.TOP)
+	return math.max(1, here - ClimbView.NUMBERS_BELOW), math.min(ClimbPath.TOP, here + ClimbView.NUMBERS_ABOVE)
+end
+
 -- The gift rides play faster while more are waiting.
 function ClimbView.pace(waiting: number): number
 	return math.min(3, 1 + math.max(0, waiting) * 0.5)
@@ -17892,6 +17905,58 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		elseif pending ~= nil and pending <= checkpoint then
 			pending = nil
 		end
+	end)
+
+	-- Platform numbers over the nearby platforms, moved along as the climber
+	-- goes up or down. Only this computer draws them.
+	local numberFolder = make("Folder", { Name = "ClimbNumbers" }, player:WaitForChild("PlayerGui"))
+	local numberSigns: { [number]: BillboardGui } = {}
+	local numbersFrom, numbersTo = -1, -1
+	local function numberSign(index: number, platform: BasePart): BillboardGui
+		local milestone = index % ClimbPath.MILESTONE == 0
+		local sign = make("BillboardGui", {
+			Name = "Platform" .. index,
+			Adornee = platform,
+			-- The platform's middle is half its thickness under its top.
+			StudsOffsetWorldSpace = Vector3.new(0, ClimbPath.THICKNESS / 2 + ClimbView.NUMBER_HEIGHT, 0),
+			Size = UDim2.fromScale(if milestone then 9 else 6, if milestone then 3.6 else 2.6),
+			LightInfluence = 0,
+			MaxDistance = 220,
+			ResetOnSpawn = false,
+		}, numberFolder)
+		make("TextLabel", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Font = FONT_HEAVY,
+			TextScaled = true,
+			TextColor3 = if milestone or index == ClimbPath.TOP then GOLD else WHITE,
+			TextStrokeColor3 = Color3.new(0, 0, 0),
+			TextStrokeTransparency = 0.35,
+			Text = Format.commas(index),
+		}, sign)
+		return sign
+	end
+	RunService.Heartbeat:Connect(function()
+		local home = if active then player:FindFirstChildOfClass("PlayerGui") else nil
+		if numberFolder.Parent ~= home then numberFolder.Parent = home end
+		if not active then return end
+		local first, last = ClimbView.numberRange(if riding or #rides > 0 then shownPlatform else lastLanded)
+		if first == numbersFrom and last == numbersTo then return end
+		for index, sign in numberSigns do
+			if index < first or index > last then
+				sign:Destroy()
+				numberSigns[index] = nil
+			end
+		end
+		local missing = false
+		for index = first, last do
+			local platform = platforms[index]
+			if not numberSigns[index] then
+				if platform then numberSigns[index] = numberSign(index, platform) else missing = true end
+			end
+		end
+		-- The tower is still arriving: try again next frame.
+		if missing then numbersFrom, numbersTo = -1, -1 else numbersFrom, numbersTo = first, last end
 	end)
 
 	-- Gift rides, one after another.
