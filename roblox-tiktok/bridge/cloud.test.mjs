@@ -80,3 +80,12 @@ test('the key is hidden in the program and read back', async () => {
   assert.throws(() => sealBinary(Buffer.from('no slot here'), settings));
   assert.throws(() => sealBinary(program, { universeId: '1', apiKey: 'x'.repeat(5000) }));
 });
+
+test('place files are recognised and sent to the right address', async () => {
+  const { placeFileType, placeVersionUrl } = await import('./cloud.mjs');
+  assert.equal(placeFileType(Buffer.from('<roblox xmlns:xmime="x" version="4">')), 'application/xml');
+  assert.equal(placeFileType(Buffer.from('﻿<roblox version="4">')), 'application/xml');
+  assert.equal(placeFileType(Buffer.from('<roblox!\x89\xff\r\n')), 'application/octet-stream');
+  assert.equal(placeFileType(Buffer.from('PK zip file')), null);
+  assert.equal(placeVersionUrl('111', '222'), 'https://apis.roblox.com/universes/v1/111/places/222/versions?versionType=Published');
+});

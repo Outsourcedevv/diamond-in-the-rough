@@ -167,3 +167,21 @@ export function sealBinary(program, settings) {
   copy.write(slot, at, 'latin1');
   return copy;
 }
+
+// Updating the published game -------------------------------------------------
+// The owner's connector can upload a new place file straight to Roblox (Open
+// Cloud place publishing), for when Studio's own publish gets stuck. This uses
+// a second key that may publish the place; it stays on the owner's PC and is
+// never sealed into the streamers' copy.
+export function placeVersionUrl(universeId, placeId) {
+  return `https://apis.roblox.com/universes/v1/${encodeURIComponent(universeId)}/places/${encodeURIComponent(placeId)}/versions?versionType=Published`;
+}
+
+// The content type for a place file, or null if it isn't one: .rbxl files
+// start "<roblox!" (binary), .rbxlx files "<roblox " (XML).
+export function placeFileType(data) {
+  const head = Buffer.from(data.subarray(0, 64)).toString('latin1').replace(/^\uFEFF|^\xEF\xBB\xBF/, '').trimStart();
+  if (head.startsWith('<roblox!')) return 'application/octet-stream';
+  if (/^<roblox[\s>]/.test(head)) return 'application/xml';
+  return null;
+}

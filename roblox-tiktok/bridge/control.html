@@ -266,6 +266,19 @@
       </form>
       <p id="ownerState" style="margin-top:10px" role="status"></p>
     </details>
+    <details id="publishBox" style="margin-top:12px">
+      <summary>Game owner: update the published game</summary>
+      <p style="margin-top:12px">For when Roblox Studio's publish gets stuck. This uploads a game file straight to Roblox as your game's new version. It needs a <strong>second</strong> Open Cloud key with <strong>universe-places</strong> → <strong>write</strong> for this game. That key stays on this PC and is never put in the streamers' copy. The <strong>Place ID</strong> is the number in your game's Roblox link: roblox.com/games/<strong>NUMBER</strong>/…</p>
+      <form class="row" id="publisherForm">
+        <input id="placeId" placeholder="Place ID" autocomplete="off" inputmode="numeric" aria-label="Place ID">
+        <input id="publishKey" placeholder="Publishing key (saved once)" type="password" autocomplete="off" aria-label="Publishing key">
+      </form>
+      <form class="row" id="publishForm" style="margin-top:10px">
+        <input id="placeFile" type="file" accept=".rbxlx,.rbxl" aria-label="Game file">
+        <button>Upload to Roblox</button>
+      </form>
+      <p id="publishState" style="margin-top:10px" role="status"></p>
+    </details>
   </section>
 
   <section>
@@ -398,6 +411,34 @@ document.getElementById('ownerForm').onsubmit = async (event) => {
     state.textContent = data.made
       ? `Done. The key is saved on this PC, and the streamers' copy is in the "For streamers" folder next to DiamondRushBridge.exe (${data.made}). Share only that folder.`
       : `The key is saved on this PC. ${data.note || ''}`;
+    await refresh();
+  } catch (error) {
+    state.className = 'wait';
+    state.textContent = error.message;
+  }
+};
+
+document.getElementById('publishForm').onsubmit = async (event) => {
+  event.preventDefault();
+  const state = document.getElementById('publishState');
+  state.className = 'wait';
+  try {
+    const placeId = document.getElementById('placeId').value;
+    const apiKey = document.getElementById('publishKey').value;
+    if (placeId || apiKey) {
+      const saved = await post('/publisher', { placeId, apiKey });
+      const data = await saved.json();
+      if (!saved.ok) throw new Error(data.error);
+      document.getElementById('publishKey').value = '';
+    }
+    const file = document.getElementById('placeFile').files[0];
+    if (!file) throw new Error('Choose the game file (DiamondRushTikTok.rbxlx) first.');
+    state.textContent = 'Uploading to Roblox…';
+    const response = await fetch('/publish-place', { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    state.className = 'good';
+    state.textContent = `Done: your game is updated${data.version ? ` (version ${data.version})` : ''}. Restart its servers in the Creator Dashboard (⋯ → Restart Servers for Updates) so everyone gets it.`;
     await refresh();
   } catch (error) {
     state.className = 'wait';
@@ -538,6 +579,9 @@ async function refresh() {
     }
     // A streamers' copy already has the key: the owner's box isn't for them.
     document.getElementById('ownerSection').hidden = data.keySource === 'built in';
+    const placeBox = document.getElementById('placeId');
+    if (data.publisher && !placeBox.value && document.activeElement !== placeBox) placeBox.value = data.publisher.placeId;
+    document.getElementById('publishKey').placeholder = data.publisher?.ready ? 'Publishing key saved (paste to replace)' : 'Publishing key (saved once)';
     if (data.keySource === 'none' && !ownerOpened) { document.getElementById('ownerBox').open = true; ownerOpened = true; }
     document.getElementById('gameCode').textContent = `${data.gameCode.slice(0, 4)} ${data.gameCode.slice(4)}`;
     const list = document.getElementById('recent');
