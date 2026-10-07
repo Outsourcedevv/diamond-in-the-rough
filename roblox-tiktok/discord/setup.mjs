@@ -50,6 +50,7 @@ async function api(method, route, body) {
     if (!response.ok) {
       const error = new Error(`${method} ${route} failed (${response.status}): ${JSON.stringify(data)}`);
       error.status = response.status;
+      error.code = data.code;
       throw error;
     }
     return data;
@@ -69,6 +70,25 @@ async function main() {
     process.exit(1);
   }
 
+  // Check the token and that the bot is really in this server before changing anything.
+  if (!dryRun) {
+    const me = await api('GET', '/users/@me');
+    const servers = await api('GET', '/users/@me/guilds');
+    console.log(`Logged in as the bot "${me.username}".`);
+    if (!servers.some((server) => server.id === guildId)) {
+      console.log(`\nThe bot "${me.username}" is not in the server with ID ${guildId}.`);
+      if (servers.length > 0) {
+        console.log('It is in these servers:');
+        for (const server of servers) console.log(`  ${server.name}  (ID ${server.id})`);
+        console.log('If one of these is the right one, run the tool again with that ID.');
+      } else {
+        console.log('It is not in any server yet.');
+      }
+      console.log('To add it: Developer Portal > your bot > OAuth2 > URL Generator > tick "bot" and "Administrator" > open the link > pick your server > Authorize.');
+      console.log('Also check that the ID is the server\'s (right-click the server icon > Copy Server ID), and that the token is from this same bot.\n');
+      process.exit(1);
+    }
+  }
   const guild = await api('GET', `/guilds/${guildId}`);
   const everyoneId = dryRun ? 'everyone' : guildId; // @everyone's role ID is the server ID
   console.log(`Setting up ${guild.name ?? 'the server'}...`);
@@ -173,7 +193,9 @@ async function main() {
 main().catch((error) => {
   console.error(`\nSetup stopped: ${error.message}`);
   if (error.status === 401) console.error('The bot token is wrong. Copy it again from the Developer Portal (Bot > Reset Token).');
-  if (error.status === 403) console.error('The bot is missing permissions. Invite it again with the link in README.md (Administrator).');
+  if (error.code === 50001) console.error('The bot cannot see that server or channel: it is not in the server, or the server ID is wrong.');
+  else if (error.code === 60003) console.error('Your server requires 2FA for moderator actions. Turn on 2FA on the bot owner\'s account, or switch that setting off until setup is done.');
+  else if (error.status === 403) console.error('The bot is missing a permission. In Server Settings > Roles, give the bot\'s role Administrator and drag it to the top, then run again.');
   if (error.status === 404) console.error('The server ID is wrong, or the bot is not in that server yet.');
   process.exit(1);
 });
