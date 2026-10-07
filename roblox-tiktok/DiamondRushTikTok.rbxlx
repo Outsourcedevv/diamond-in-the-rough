@@ -21852,10 +21852,16 @@ Sounds.CUES = {
 Sounds.MAX_PLAYING = 24 -- sounds at once
 Sounds.REPEAT_SECONDS = 0.045 -- the same cue is not restarted sooner than this
 Sounds.HEARD_FROM = 260 -- studs: a cue in the world fades out by this far away
+Sounds.LONGEST_SECONDS = 4 -- the longest file, at normal speed
 
 local playing = 0
 local lastPlayed: { [string]: number } = {}
 local muted = false
+
+-- How many sounds are playing now.
+function Sounds.playingCount(): number
+	return playing
+end
 
 -- Turns every sound off (or back on).
 function Sounds.setMuted(value: boolean)
@@ -21885,14 +21891,21 @@ local function startLayer(layer: Layer, at: Vector3?, scale: number)
 		holder = SoundService
 	end
 	sound.Parent = holder
-	sound:Play()
 	playing += 1
-	-- Gone once it has had time to finish (the longest file is a few seconds).
-	local life = 4 / sound.PlaybackSpeed + 0.5
-	task.delay(life, function()
+	-- Its place is free again the moment it finishes, so holding dig (a dozen
+	-- short sounds a second) never fills every place and cuts sounds out. A
+	-- sound that never finishes (it failed to load) goes after the longest a
+	-- file could take.
+	local done = false
+	local function finish()
+		if done then return end
+		done = true
 		playing -= 1
 		if holder ~= SoundService then holder:Destroy() else sound:Destroy() end
-	end)
+	end
+	sound.Ended:Connect(finish)
+	sound:Play()
+	task.delay(Sounds.LONGEST_SECONDS / sound.PlaybackSpeed + 0.5, finish)
 end
 
 -- Plays cue `name`: at `at` in the world, or to the player when `at` is nil.

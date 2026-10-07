@@ -106,6 +106,7 @@ newInstance = function(className: string): any
 	end
 	-- Sounds record what plays.
 	if className == "Sound" then
+		object.Ended = { Connect = function() end }
 		object.Play = function(self)
 			soundsPlayed += 1
 			soundFiles[self.SoundId] = true
