@@ -12679,6 +12679,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 
 local player = Players.LocalPlayer
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
@@ -13120,22 +13121,43 @@ local panel = make("ScrollingFrame", {
 	Position = UDim2.new(1, -12, 0, 92),
 	-- As tall as the screen allows (Studio's play area can be short), up to 520.
 	Size = UDim2.new(0, 340, 1, -104),
+	-- The canvas is sized from the list below: Roblox's automatic canvas
+	-- leaves out the padding and can miss rows that grow, so the bottom of
+	-- the panel (the tests and resets) couldn't be scrolled to.
 	CanvasSize = UDim2.fromOffset(0, 0),
-	AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	ScrollBarThickness = 4,
+	ScrollingDirection = Enum.ScrollingDirection.Y,
+	ScrollBarThickness = 10,
 	ScrollBarImageColor3 = MUTED,
+	ScrollBarImageTransparency = 0.2,
+	VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
 	Visible = false,
 	ZIndex = 10,
 }, gui)
 glass(panel, 14, 0.06)
 make("UISizeConstraint", { MaxSize = Vector2.new(340, 520) }, panel)
+local PANEL_PAD_TOP, PANEL_PAD_BOTTOM = 10, 12
 make("UIPadding", {
 	PaddingLeft = UDim.new(0, 12),
-	PaddingRight = UDim.new(0, 14),
-	PaddingTop = UDim.new(0, 10),
-	PaddingBottom = UDim.new(0, 12),
+	PaddingRight = UDim.new(0, 8),
+	PaddingTop = UDim.new(0, PANEL_PAD_TOP),
+	PaddingBottom = UDim.new(0, PANEL_PAD_BOTTOM),
 }, panel)
-make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }, panel)
+local panelList = make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }, panel)
+local function fitPanelCanvas()
+	panel.CanvasSize = UDim2.fromOffset(0, panelList.AbsoluteContentSize.Y + PANEL_PAD_TOP + PANEL_PAD_BOTTOM)
+end
+panelList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(fitPanelCanvas)
+fitPanelCanvas()
+-- The mouse wheel scrolls the panel whenever the pointer is over it, even if
+-- something else on screen took the wheel first.
+UserInputService.InputChanged:Connect(function(input: InputObject, processed: boolean)
+	if processed or input.UserInputType ~= Enum.UserInputType.MouseWheel or not panel.Visible then return end
+	local mouse = UserInputService:GetMouseLocation() - GuiService:GetGuiInset()
+	local corner, size = panel.AbsolutePosition, panel.AbsoluteSize
+	if mouse.X < corner.X or mouse.X > corner.X + size.X or mouse.Y < corner.Y or mouse.Y > corner.Y + size.Y then return end
+	local most = math.max(0, panel.AbsoluteCanvasSize.Y - panel.AbsoluteWindowSize.Y)
+	panel.CanvasPosition = Vector2.new(0, math.clamp(panel.CanvasPosition.Y - input.Position.Z * 60, 0, most))
+end)
 local panelOrder = 0
 
 local function panelLabel(text: string)
