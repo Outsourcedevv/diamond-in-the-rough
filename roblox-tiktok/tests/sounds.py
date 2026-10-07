@@ -74,6 +74,14 @@ local function check(condition, message)
 end
 local function layers(cue) return #Sounds.CUES[cue] end
 
+-- Digging never uses the explosion, and stays quiet.
+for _, cue in { "dig", "crumble" } do
+	for _, layer in Sounds.CUES[cue] do
+		check(layer.file ~= "boom" and layer.file ~= "glass" and layer.file ~= "rocket", cue .. " has no blast in it")
+		check(layer.volume <= 0.25, cue .. " stays quiet")
+	end
+end
+
 -- Hits in a row climb in pitch, eight steps, then round again.
 check(Sounds.digPitch(1) == 1 and Sounds.digPitch(8) > Sounds.digPitch(7) and Sounds.digPitch(9) == 1, "the dig pitch climbs and comes round")
 check(Sounds.digPitch(8) < 1.25, "the climb stays gentle")
