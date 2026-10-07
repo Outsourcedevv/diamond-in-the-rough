@@ -117,7 +117,7 @@ The mountain keeps going while you are in the lobby: gifts still blast it, and t
 
 ## Diamond Climb
 
-The second game: jump up **1,000 platforms** spiralling round a tall crystal pillar in the sky to the diamond at the top. Each platform is a little higher than the one before (1.2 studs at the bottom, 3.5 at the top) and every jump is a short hop, so it is easy with the normal jump. Every hundredth platform is bigger, with a gold rim and a gold ring round the pillar, and the gem colour changes: sapphire, emerald, ruby and on up to diamond.
+The second game: jump up **1,000 platforms** spiralling round a tall crystal pillar in the sky to the diamond at the top. Each platform is a little higher than the one before (2 studs at the bottom, 3.5 at the top) and every jump is a short hop, so it is easy with the normal jump. The spiral is wide, so the loop above is over 30 studs overhead: you never bump your head and it doesn't get in the camera's way. Each platform near you shows its number floating above it (gold for every hundredth). Every hundredth platform is bigger, with a gold rim and a gold ring round the pillar, and the gem colour changes: sapphire, emerald, ruby and on up to diamond.
 
 - **Checkpoints.** Every platform you land on is your checkpoint. Fall off (or reset) and you are put straight back on it. Progress, best and climbs are saved with the rest of the game.
 - **Landing.** Each landing makes the platform's rim swell and flash, a ring of light races out, sparkles fly up and a chime plays, rising in pitch through each ten platforms. Every hundredth platform adds fireworks and a gold shout on screen.
