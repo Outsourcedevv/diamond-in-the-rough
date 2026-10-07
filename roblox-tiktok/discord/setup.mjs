@@ -3,6 +3,7 @@
 // Or:   node setup.mjs --dry-run   to see what it would do without touching Discord.
 // See README.md for creating the server and the bot first.
 import readline from 'node:readline';
+import { spawn } from 'node:child_process';
 import { CHANNELS, ROLES, AUTOMOD, GUILD, EVERYONE, P, posts } from './plan.mjs';
 
 const API = 'https://discord.com/api/v10';
@@ -26,6 +27,15 @@ function ask(question, hidden = false) {
 }
 
 let token = process.env.DISCORD_TOKEN || '';
+
+function openInBrowser(url) {
+  const command = process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  try {
+    spawn(command[0], command[1], { stdio: 'ignore', detached: true }).unref();
+  } catch {
+    // The link is printed as well, so it can be copied by hand.
+  }
+}
 let requests = 0;
 
 async function api(method, route, body) {
@@ -70,24 +80,30 @@ async function main() {
     process.exit(1);
   }
 
-  // Check the token and that the bot is really in this server before changing anything.
+  // Check the token and that the bot is really in this server before changing
+  // anything. If it isn't, open the invite link for this exact server and wait.
   if (!dryRun) {
     const me = await api('GET', '/users/@me');
-    const servers = await api('GET', '/users/@me/guilds');
     console.log(`Logged in as the bot "${me.username}".`);
-    if (!servers.some((server) => server.id === guildId)) {
-      console.log(`\nThe bot "${me.username}" is not in the server with ID ${guildId}.`);
-      if (servers.length > 0) {
-        console.log('It is in these servers:');
-        for (const server of servers) console.log(`  ${server.name}  (ID ${server.id})`);
-        console.log('If one of these is the right one, run the tool again with that ID.');
-      } else {
-        console.log('It is not in any server yet.');
+    const invite = `https://discord.com/oauth2/authorize?client_id=${me.id}&scope=bot&permissions=8&integration_type=0&guild_id=${guildId}&disable_guild_select=true`;
+    for (let tries = 0; ; tries += 1) {
+      const servers = await api('GET', '/users/@me/guilds');
+      if (servers.some((server) => server.id === guildId)) break;
+      if (tries >= 3) {
+        console.log('\nThe bot still is not in that server.');
+        if (servers.length > 0) {
+          console.log('It is in these servers instead:');
+          for (const server of servers) console.log(`  ${server.name}  (ID ${server.id})`);
+        }
+        console.log('Check the server ID (right-click the server icon > Copy Server ID) and run the tool again.\n');
+        process.exit(1);
       }
-      console.log('To add it: Developer Portal > your bot > OAuth2 > URL Generator > tick "bot" and "Administrator" > open the link > pick your server > Authorize.');
-      console.log('Also check that the ID is the server\'s (right-click the server icon > Copy Server ID), and that the token is from this same bot.\n');
-      process.exit(1);
+      console.log(`\nThe bot is not in your server yet. Opening its invite link in your browser:\n  ${invite}`);
+      console.log('On that page: make sure your server is shown, keep "Administrator" ticked, click Authorize and finish the check.');
+      openInBrowser(invite);
+      await ask('Press Enter here once you have clicked Authorize... ');
     }
+    console.log('The bot is in your server.');
   }
   const guild = await api('GET', `/guilds/${guildId}`);
   const everyoneId = dryRun ? 'everyone' : guildId; // @everyone's role ID is the server ID
