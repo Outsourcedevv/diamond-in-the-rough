@@ -41,6 +41,7 @@ local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
 local Format = require(Shared:WaitForChild("Format"))
+local CameraShake = require(script.Parent:WaitForChild("CameraShake"))
 
 local ClimbEffects = {}
 
@@ -86,6 +87,9 @@ local subLabel: TextLabel? = nil
 local bannerScale: UIScale? = nil
 local bannerSerial = 0
 local current: { folder: Folder, finish: () -> () }? = nil
+-- True while a show is stopped because the climber left the climb: the server
+-- is moving them elsewhere, so the ride lets go of them where they are.
+local leaving = false
 local shownIndex: number? = nil
 
 local function sequence(...: Color3): ColorSequence
@@ -144,7 +148,7 @@ local function addShake(degrees: number)
 		shakeTime += dt
 		local t = shakeTime * 19
 		local a = math.rad(shake) * 1.5
-		camera.CFrame *= CFrame.Angles(math.noise(t, 0.3) * a, math.noise(t, 7.1) * a, math.noise(t, 13.7) * a * 0.5)
+		CameraShake.apply(camera, CFrame.Angles(math.noise(t, 0.3) * a, math.noise(t, 7.1) * a, math.noise(t, 13.7) * a * 0.5))
 		shake *= math.exp(-dt * 3)
 	end)
 end
@@ -230,9 +234,15 @@ function ClimbEffects.playing(): boolean
 end
 
 -- Ends the show playing now at once (the climber is let go on their new platform).
-function ClimbEffects.stop()
+-- Ends the show now. `inPlace` (the climber left the climb) lets go of them
+-- where they are instead of putting them on the ride's platform.
+function ClimbEffects.stop(inPlace: boolean?)
 	local show = current
-	if show then show.finish() end
+	if show then
+		leaving = inPlace == true
+		show.finish()
+		leaving = false
+	end
 end
 
 export type Particles = {
@@ -310,8 +320,11 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 		p.Parent = folder
 		return p
 	end
+	local fovTween: Tween? = nil
 	local function animate(p: Instance, duration: number, goal: { [string]: any }, style: Enum.EasingStyle?, direction: Enum.EasingDirection?)
-		TweenService:Create(p, TweenInfo.new(S(duration), style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out), goal):Play()
+		local tween = TweenService:Create(p, TweenInfo.new(S(duration), style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out), goal)
+		if goal.FieldOfView ~= nil then fovTween = tween end
+		tween:Play()
 	end
 	local function fade(p: Instance, duration: number, goal: { [string]: any })
 		animate(p, duration, goal)
@@ -602,11 +615,13 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 		shownIndex = nil
 		if filming then RunService:UnbindFromRenderStep("DiamondClimbCamera") end
 		if camera and filming then
+			-- A zoom still tweening would undo the reset.
+			if fovTween then fovTween:Cancel() end
 			camera.CameraType = savedType or Enum.CameraType.Custom
 			camera.FieldOfView = savedFov
 		end
 		if riding and root and root.Parent then
-			root.CFrame = endFrame
+			if not leaving then root.CFrame = endFrame end
 			root.AssemblyLinearVelocity = Vector3.zero
 			root.Anchored = false
 		end

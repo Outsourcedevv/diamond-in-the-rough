@@ -189,6 +189,8 @@ function ClimbGame.start(options: Options): Game
 	end
 
 	function self.characterAdded(player: Player, character: Model)
+		-- A new character already moves the usual way; only climbers change.
+		if not climbing(player) then return end
 		local humanoid = character:WaitForChild("Humanoid", 10)
 		if humanoid and character.Parent ~= nil then applyMove(player) end
 	end
@@ -213,10 +215,25 @@ function ClimbGame.start(options: Options): Game
 	end
 
 	-- The climb's sliders: { speed = studs a second, jump = studs high }.
+	local laterMove: { [Player]: any } = {}
 	function self.setMove(player: Player, value: any)
 		if type(value) ~= "table" then return end
 		local now = os.clock()
-		if now - (moveAt[player] or -math.huge) < 0.1 then return end
+		local wait = 0.1 - (now - (moveAt[player] or -math.huge))
+		if wait > 0 then
+			-- Too soon after the last one: the newest value is applied once the
+			-- wait is over, so letting go of a slider is never lost.
+			local first = laterMove[player] == nil
+			laterMove[player] = value
+			if first then
+				task.delay(wait, function()
+					local latest = laterMove[player]
+					laterMove[player] = nil
+					if latest ~= nil and player.Parent ~= nil then self.setMove(player, latest) end
+				end)
+			end
+			return
+		end
 		moveAt[player] = now
 		if type(value.speed) == "number" and value.speed == value.speed then
 			progress.speed = math.clamp(math.floor(value.speed * 2 + 0.5) / 2, ClimbPath.SPEED.min, ClimbPath.SPEED.max)
@@ -256,6 +273,8 @@ function ClimbGame.start(options: Options): Game
 		local from = progress.checkpoint
 		if winning or move == 0 then return from, from end
 		local to = math.clamp(from + move, 0, ClimbPath.TOP)
+		-- Already at the bottom (or top): no ride that goes nowhere.
+		if to == from then return from, from end
 		setCheckpoint(to)
 		local data = table.clone(info)
 		data.up = move > 0
@@ -278,6 +297,7 @@ function ClimbGame.start(options: Options): Game
 	function self.removing(player: Player)
 		landAt[player] = nil
 		moveAt[player] = nil
+		laterMove[player] = nil
 	end
 
 	return self
