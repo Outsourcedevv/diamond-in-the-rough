@@ -46,9 +46,7 @@ minutes), then run the tool once.
 2. Open **Bot** on the left:
    - Press **Reset Token**, then **Copy**.
    - Keep the token secret: it controls the bot. Don't paste it into chats or share screenshots of it.
-3. Open **OAuth2 → URL Generator**:
-   - Tick **bot**, then under Bot Permissions tick **Administrator**.
-   - Open the link at the bottom and add the bot to your new server.
+3. That's all: you don't need to tick anything else on that site. The tool adds the bot to your server for you in step 3: it opens the bot's invite link for your server, and you click **Authorize**.
 
 ## 3. Run the tool
 
