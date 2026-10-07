@@ -1,0 +1,13 @@
+{
+  "name": "diamond-rush-discord-setup",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sets up the Diamond Rush Discord server: channels, slowmodes, roles, AutoMod and safety settings.",
+  "type": "module",
+  "scripts": {
+    "setup": "node setup.mjs",
+    "dry-run": "node setup.mjs --dry-run",
+    "test": "node --test plan.test.mjs"
+  },
+  "engines": { "node": ">=20" }
+}
