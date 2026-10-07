@@ -424,7 +424,9 @@ end
 -- The nearest-first queue is a binary heap kept in two flat arrays (distance
 -- and key) and the queued marks are bits in buffers, so a big gift allocates
 -- almost nothing per rock.
-function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?, onRemoved: ((number) -> ())?): ({ number }, number?)
+-- `contained` (digging by hand) stops when the crater runs out of connected
+-- rock instead of carrying on somewhere else on the mountain.
+function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?, onRemoved: ((number) -> ())?, contained: boolean?): ({ number }, number?)
 	local removed: { number } = {}
 	local start = if centre ~= nil and self.solid[centre] and self.exposedIndex[centre] then centre else self:randomExposed()
 	if start == nil then
@@ -473,6 +475,9 @@ function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() 
 	enqueue(start)
 	while #removed < count do
 		if size == 0 then
+			if contained then
+				break
+			end
 			-- The crater ran out of reachable rock: carry on from a new spot.
 			local nextStart = self:randomExposed()
 			if nextStart == nil then

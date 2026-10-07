@@ -9,6 +9,26 @@ local Config = {
 	-- (live) Gift rules: gift name -> rocks removed per gift. Change them in the
 	-- settings panel (press Y) while playing.
 	GiftRules = {} :: { [string]: number },
+	-- (live) Diamond Climb and Chalkboard Count's own gift rules: gift name ->
+	-- platforms (or numbers) per gift, up if positive and down if negative.
+	-- Gifts without a rule go up by their coins (a Rose 2, 100 coins 20, a
+	-- Galaxy 63). Change them on the bridge's control page.
+	ClimbGiftRules = {
+		["ice cream cone"] = -2,
+		["finger heart"] = -4,
+		["perfume"] = -9,
+		["confetti"] = -20,
+		["money gun"] = -45,
+		["tiktok universe"] = -374,
+	} :: { [string]: number },
+	ChalkGiftRules = {
+		["ice cream cone"] = -2,
+		["finger heart"] = -4,
+		["perfume"] = -9,
+		["confetti"] = -20,
+		["money gun"] = -45,
+		["tiktok universe"] = -374,
+	} :: { [string]: number },
 	StonePerLike = 2, -- (live)
 	StonePerFollow = 500, -- (live)
 	StonePerShare = 300, -- (live)
@@ -40,6 +60,12 @@ local Config = {
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
 	MessagingTopic = "DiamondRushTikTok", -- Open Cloud topic (published games)
+	-- The relay: lets any number of streamers play one published game, each
+	-- with their own gifts. Put the relay's address here (see relay/README.md)
+	-- and each streamer types their game code in the Y panel. Roblox must be
+	-- allowed to reach it: Game Settings > Security > Allow HTTP Requests.
+	RelayUrl = "", -- (live) e.g. "https://my-relay.example.com"
+	RelayMaxCodeLength = 12,
 
 	-- Single player: whoever plays is the streamer, so every player gets the Y
 	-- panel, test gifts and gift keybinds. Set to false for a game where others

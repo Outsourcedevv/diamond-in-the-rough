@@ -42,6 +42,7 @@ local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
 local Format = require(Shared:WaitForChild("Format"))
 local CameraShake = require(script.Parent:WaitForChild("CameraShake"))
+local Sounds = require(script.Parent:WaitForChild("Sounds"))
 
 local ClimbEffects = {}
 
@@ -60,6 +61,23 @@ ClimbEffects.DOWN_TITLES = ClimbPath.DOWN_TITLES
 ClimbEffects.PART_LIMITS = { 40, 60, 130, 170, 210, 260 }
 ClimbEffects.LIGHT_LIMITS = { 2, 3, 4, 5, 6, 7 }
 ClimbEffects.PARTICLE_BUDGETS = { 300, 450, 1400, 1800, 2200, 2800 }
+-- Each show's own sounds: { seconds in, cue } (see Sounds).
+ClimbEffects.UP_SOUNDS = {
+	{ { 0.22, "boing" } },
+	{ { 0.3, "boing" }, { 0.45, "whoosh" } },
+	{ { 0, "launch" }, { 0.6, "whoosh" } },
+	{ { 0, "rumble" }, { 0.8, "launch" } },
+	{ { 0, "chime" }, { 0.5, "deepWhoosh" } },
+	{ { 0, "rumble" }, { 0.6, "deepWhoosh" }, { 1.2, "launch" } },
+}
+ClimbEffects.DOWN_SOUNDS = {
+	{ { 0.3, "slip" } },
+	{ { 0.15, "zap" }, { 0.35, "falling" } },
+	{ { 0.1, "falling" }, { 0.75, "clang" } },
+	{ { 0, "deepWhoosh" }, { 0.8, "falling" } },
+	{ { 0, "rumble" }, { 0.9, "falling" } },
+	{ { 0, "deepWhoosh" }, { 0.7, "deepWhoosh" }, { 1.4, "falling" } },
+}
 -- From this tier up the show takes over the camera.
 ClimbEffects.CINEMATIC_TIER = 3
 
@@ -301,6 +319,15 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 			if alive() then callback() end
 		end)
 	end
+	-- The climber hears their own ride, wherever the camera is.
+	local loudness = 1 + (tier - 1) * 0.15
+	local function noise(name: string)
+		if alive() then Sounds.play(name, nil, loudness) end
+	end
+	-- Each show's own sounds, on top of its bangs and sparkles.
+	for _, cue in (if up then ClimbEffects.UP_SOUNDS else ClimbEffects.DOWN_SOUNDS)[tier] do
+		after(cue[1], function() noise(cue[2]) end)
+	end
 	local function part(shape: Enum.PartType, size: Vector3, frame: CFrame, tint: Color3, material: Enum.Material?): Part?
 		if not alive() or made >= ClimbEffects.PART_LIMITS[tier] then return nil end
 		made += 1
@@ -413,26 +440,31 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 
 	-- Effects ---------------------------------------------------------------------------
 	local function sparkles(at: Vector3, tint: Color3, count: number, speedRange: { number }, size: number?)
+		noise("sparkle")
 		burst(at, { texture = TEXTURES.spark, count = count, colour = sequence(WHITE, tint), size = curve(size or 1.2, (size or 1.2) * 0.4, 0),
 			lifetime = { 0.5, 1.2 }, speed = speedRange, drag = 3, spin = 200 })
 	end
 	local function shockwave(at: Vector3, radius: number, tint: Color3, duration: number)
+		noise(if radius >= 18 then "bigBoom" elseif radius >= 7 then "boom" else "thud")
 		burst(at, { texture = TEXTURES.ring, count = 1, colour = sequence(WHITE, tint),
 			size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.35, radius * 1.5), NumberSequenceKeypoint.new(1, radius * 2) }),
 			transparency = curve(0, 0.2, 1), lifetime = { duration, duration }, speed = { 0.01, 0.01 }, spread = 0, flat = true })
 	end
 	local function fireball(at: Vector3, size: number, count: number)
+		noise("boom")
 		burst(at, { texture = TEXTURES.fire, count = count, colour = sequence(YELLOW, ORANGE, RED), size = curve(size * 0.6, size, size * 0.3),
 			lifetime = { 0.4, 0.9 }, speed = { size * 1.5, size * 4 }, drag = 4, spin = 90 })
 		burst(at, { texture = TEXTURES.smoke, count = math.ceil(count / 2), colour = sequence(SMOKE, Color3.fromRGB(60, 56, 54)), size = curve(size * 0.8, size * 1.8),
 			transparency = curve(0.3, 1), lifetime = { 1, 2 }, speed = { size, size * 2.5 }, drag = 2, glow = 0, acceleration = Vector3.new(0, 4, 0) })
 	end
 	local function firework(at: Vector3, tint: Color3, count: number)
+		noise("pop")
 		burst(at, { texture = TEXTURES.spark, count = count, colour = sequence(WHITE, tint, tint), size = curve(1.6, 1, 0),
 			lifetime = { 0.8, 1.6 }, speed = { 18, 34 }, drag = 2.5, acceleration = Vector3.new(0, -10, 0), spin = 300 })
 		burst(at, { texture = TEXTURES.glow, count = 2, colour = sequence(tint), size = curve(6, 14, 0), lifetime = { 0.4, 0.5 }, speed = { 0, 0.1 } })
 	end
 	local function nova(at: Vector3, tint: Color3, radius: number, duration: number)
+		noise("bigBoom")
 		local ball = part(Enum.PartType.Ball, Vector3.one * 2, CFrame.new(at), WHITE)
 		if ball then
 			ball.Transparency = 0.05
@@ -460,6 +492,7 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 	end
 	-- A jagged bolt of lightning from `a` to `b`.
 	local function bolt(a: Vector3, b: Vector3, tint: Color3, width: number)
+		noise("zap")
 		local steps = 6
 		local last = a
 		for i = 1, steps do

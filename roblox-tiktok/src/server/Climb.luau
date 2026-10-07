@@ -138,7 +138,8 @@ function Climb.build(parent: Instance): Built
 	-- Gold posts round the top platform, each with a glowing orb.
 	for k = 0, 5 do
 		local angle = k * math.pi / 3
-		local at = finish + Vector3.new(math.cos(angle) * 6.4, 0, math.sin(angle) * 6.4)
+		local ring = ClimbPath.size(ClimbPath.TOP) / 2 - 1.2
+		local at = finish + Vector3.new(math.cos(angle) * ring, 0, math.sin(angle) * ring)
 		-- Not solid, so they never block the last jump.
 		piece(model, "FinishPost", Vector3.new(0.6, 3, 0.6), CFrame.new(at + Vector3.new(0, 1.5, 0)), GOLD, Enum.Material.Foil)
 		local orb = piece(model, "FinishOrb", Vector3.new(1, 1, 1), CFrame.new(at + Vector3.new(0, 3.4, 0)), CRYSTAL, Enum.Material.Neon)

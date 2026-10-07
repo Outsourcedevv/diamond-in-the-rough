@@ -35,6 +35,12 @@ function LobbyView.isOpen(): boolean
 	return open
 end
 
+-- Closes the menu (the settings card opens where it would cover it).
+local closeHandler: () -> () = function() end
+function LobbyView.close()
+	closeHandler()
+end
+
 -- Hides the GAMES tab (the settings' "Hide buttons"); G still opens the menu.
 function LobbyView.setTabHidden(hidden: boolean)
 	tabHidden = hidden
@@ -163,6 +169,15 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	}, gui)
 	rounded(panel, 18)
 	stroke(panel, GOLD, 3)
+	-- Shrinks to fit short screens (Studio's play area, phones).
+	local fit = make("UIScale", { Scale = 1 }, panel)
+	local function refit()
+		local camera = workspace.CurrentCamera
+		local height = if camera then camera.ViewportSize.Y else 768
+		fit.Scale = math.clamp((height - 60) / 620, 0.5, 1)
+	end
+	refit()
+	if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit) end
 	make("UIGradient", {
 		Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(240, 235, 222)),
 		Rotation = 90,
@@ -424,6 +439,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 		end)
 		tween:Play()
 	end
+	closeHandler = function() setOpen(false) end
 	refreshTab = function()
 		tab.Visible = not open and not tabHidden
 	end

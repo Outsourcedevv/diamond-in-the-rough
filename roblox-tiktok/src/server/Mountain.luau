@@ -231,7 +231,8 @@ function Mountain.dig(self: Mountain, key: number, count: number): number
 	if count <= 0 or not self:isExposed(key) then
 		return 0
 	end
-	local keys = self.grid:blast(count, key, nil, function(cell) table.insert(self.removedKeys, cell) end)
+	-- Only rock joined to the one dug: a loose rock never takes rock elsewhere with it.
+	local keys = self.grid:blast(count, key, nil, function(cell) table.insert(self.removedKeys, cell) end, true)
 	self.grid:takeFresh()
 	self:_syncDiamond()
 	return #keys

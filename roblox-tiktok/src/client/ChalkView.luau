@@ -1,19 +1,25 @@
 --!strict
--- Chalkboard Count on this computer: the classroom camera, holding to write,
--- the chalk on the board (the count, written stroke by stroke as it goes up,
--- the goal in the corner, a progress line and the reset countdown, all drawn
--- with chalk strokes rather than text), the writer's arm and chalk, the
--- display (count, best and wins, the camera's REC light, the reset banner),
--- the writing speed and theme card, and the gift, reset, save and win shows.
+-- Chalkboard Count on this computer: the fixed view of the board, holding to
+-- write, the chalk on the board (the count, drawn line by line as it goes up
+-- with a stick of chalk at the tip, the goal in the corner, a progress line
+-- and the reset countdown, all chalk strokes rather than text), the writer's
+-- arm and chalk, the display (count, best and wins, the reset banner and the
+-- hold countdown at the goal), the writing speed and theme card (Settings can
+-- hide it), and the gift (see ChalkEffects), reset, save and win shows. The
+-- classroom is kept out of sight from the other games.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local Debris = game:GetService("Debris")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
 local Format = require(Shared:WaitForChild("Format"))
+local Sounds = require(script.Parent:WaitForChild("Sounds"))
+local HoldCountdown = require(script.Parent:WaitForChild("HoldCountdown"))
+local ChalkEffects = require(script.Parent:WaitForChild("ChalkEffects"))
 
 local ChalkView = {}
 
@@ -134,17 +140,25 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	local shout = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 192), Size = UDim2.fromOffset(700, 46),
 		BackgroundTransparency = 1, Font = FONT_HEAVY, TextSize = 38, TextColor3 = GOLD, TextStrokeTransparency = 0.3, TextTransparency = 1, Text = "" }, gui)
 	local shoutScale = make("UIScale", { Scale = 1 }, shout)
+	-- Who sent what, under a gift show's name.
+	local subLine = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 240), Size = UDim2.fromOffset(700, 24),
+		BackgroundTransparency = 1, Font = FONT, TextSize = 18, TextColor3 = WHITE, TextStrokeTransparency = 0.3, TextTransparency = 1, Text = "" }, gui)
 	local shoutSerial = 0
-	local function showShout(text: string, colour: Color3, seconds: number, size: number?)
+	local function showShout(text: string, colour: Color3, seconds: number, size: number?, sub: string?)
 		shoutSerial += 1
 		local serial = shoutSerial
 		shout.Text = text
 		shout.TextColor3 = colour
 		shout.TextTransparency = 0
+		subLine.Text = sub or ""
+		subLine.TextTransparency = if sub then 0 else 1
 		shoutScale.Scale = size or 1.8
 		TweenService:Create(shoutScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 		task.delay(seconds, function()
-			if serial == shoutSerial then TweenService:Create(shout, TweenInfo.new(0.6), { TextTransparency = 1 }):Play() end
+			if serial == shoutSerial then
+				TweenService:Create(shout, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
+				TweenService:Create(subLine, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
+			end
 		end)
 	end
 	local function pop(scale: number)
@@ -152,26 +166,15 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		TweenService:Create(cardScale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 	end
 
-	-- The classroom camera's viewfinder: corner marks and a blinking REC light.
-	local viewfinder = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, gui)
-	for _, corner in { Vector2.new(0, 0), Vector2.new(1, 0), Vector2.new(0, 1), Vector2.new(1, 1) } do
-		local holder = make("Frame", { AnchorPoint = corner, Position = UDim2.new(corner.X, if corner.X == 0 then 24 else -24, corner.Y, if corner.Y == 0 then 60 else -24),
-			Size = UDim2.fromOffset(46, 46), BackgroundTransparency = 1 }, viewfinder)
-		make("Frame", { AnchorPoint = corner, Position = UDim2.fromScale(corner.X, corner.Y), Size = UDim2.fromOffset(46, 3), BackgroundColor3 = WHITE,
-			BackgroundTransparency = 0.25, BorderSizePixel = 0 }, holder)
-		make("Frame", { AnchorPoint = corner, Position = UDim2.fromScale(corner.X, corner.Y), Size = UDim2.fromOffset(3, 46), BackgroundColor3 = WHITE,
-			BackgroundTransparency = 0.25, BorderSizePixel = 0 }, holder)
-	end
-	local rec = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -80, 0, 70), Size = UDim2.fromOffset(150, 26), BackgroundTransparency = 1 }, viewfinder)
-	local recDot = make("Frame", { Position = UDim2.fromOffset(0, 6), Size = UDim2.fromOffset(14, 14), BackgroundColor3 = RED, BorderSizePixel = 0 }, rec)
-	rounded(recDot, 7)
-	local recLabel = make("TextLabel", { Position = UDim2.fromOffset(22, 0), Size = UDim2.new(1, -22, 1, 0), BackgroundTransparency = 1, Font = FONT, TextSize = 16,
-		TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = WHITE, TextStrokeTransparency = 0.5, Text = "REC" }, rec)
+	-- The hold at the goal, under the reset banner's place.
+	local hold = HoldCountdown.new(gui, 270, "HOLD THE GOAL")
 	local hint = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -40), Size = UDim2.fromOffset(520, 22), BackgroundTransparency = 1,
 		Font = FONT, TextSize = 16, TextColor3 = WHITE, TextStrokeTransparency = 0.4, Text = "Hold the left mouse button, Space or the screen to write" }, gui)
 
-	-- The writing card: speed and theme.
-	local settingsCard = make("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -14, 1, -36), Size = UDim2.fromOffset(290, 178) }, gui)
+	-- The writing card: speed and theme (Settings can hide it).
+	-- Higher on touch screens, clear of Roblox's jump button.
+	local settingsCard = make("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -14, 1, if UserInputService.TouchEnabled then -190 else -36),
+		Size = UDim2.fromOffset(290, 178) }, gui)
 	glass(settingsCard, 14)
 	make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), PaddingTop = UDim.new(0, 10) }, settingsCard)
 	make("TextLabel", { Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = FONT, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
@@ -246,6 +249,11 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	end
 	state:GetAttributeChangedSignal("ChalkSpeed"):Connect(refreshSettings)
 	refreshSettings()
+	local function refreshCard()
+		settingsCard.Visible = player:GetAttribute("HideChalkCard") ~= true
+	end
+	player:GetAttributeChangedSignal("HideChalkCard"):Connect(refreshCard)
+	refreshCard()
 
 	-- The chalk on the board -----------------------------------------------------------------
 	local drawing = make("Folder", { Name = "ChalkDrawing" }, workspace)
@@ -272,43 +280,100 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		}, spot)
 		puff:Emit(count)
 	end
-	-- Writes digit `d` in slot `i` of `n`, its strokes appearing one by one over `seconds`.
-	local function writeSlot(i: number, n: number, d: number, seconds: number)
+	-- Drawing: each chalk line grows from its start to its end, one after
+	-- another, with a stick of chalk at the tip and a scratch as it goes.
+	type Growing = { part: Part, a: Vector3, b: Vector3, width: number, start: number, finish: number, begun: boolean }
+	local growing: { Growing } = {}
+	local tip = make("Part", { Name = "ChalkTip", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.1, 0.26, 0.26), Material = Enum.Material.SmoothPlastic,
+		Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false, Transparency = 1 }, effects)
+	-- A line from `a` to `b` drawn between `start` and `finish` seconds from now.
+	local function drawStroke(a: Vector3, b: Vector3, width: number, colour: Color3, glow: boolean, start: number, finish: number): Part
+		local p = stroke(drawing, a, b, width, colour, glow)
+		if finish > 0 then
+			p.Transparency = 1
+			local now = os.clock()
+			table.insert(growing, { part = p, a = a, b = b, width = width, start = now + start, finish = now + math.max(finish, start + 0.01), begun = false })
+		end
+		return p
+	end
+	local function growStrokes()
+		local now = os.clock()
+		local at: Vector3? = nil
+		for k = #growing, 1, -1 do
+			local g = growing[k]
+			if g.part.Parent == nil then
+				table.remove(growing, k)
+				continue
+			end
+			local u = math.clamp((now - g.start) / (g.finish - g.start), 0, 1)
+			if u <= 0 then continue end
+			if not g.begun then
+				g.begun = true
+				Sounds.play("chalk", g.a)
+			end
+			local reach = g.a + (g.b - g.a) * u
+			local length = (reach - g.a).Magnitude
+			g.part.Size = Vector3.new(g.width, g.width, math.max(0.05, length) + g.width * 0.8)
+			g.part.CFrame = CFrame.lookAt((g.a + reach) / 2, g.b)
+			g.part.Transparency = 0.04
+			if u >= 1 then
+				table.remove(growing, k)
+			else
+				at = reach
+			end
+		end
+		if at then
+			tip.Color = theme().chalk
+			tip.Transparency = 0
+			-- Held at an angle, its end on the board.
+			tip.CFrame = CFrame.new(at + Vector3.new(0.3, -0.25, 0.55)) * CFrame.Angles(0, math.rad(60), math.rad(35))
+			if math.random() < 0.15 then dust(at, theme().chalk, 1, { 0.3, 1 }) end
+		elseif tip.Transparency < 1 then
+			tip.Transparency = 1
+		end
+	end
+	-- Writes digit `d` in slot `i` of `n`: its lines drawn one after another
+	-- over `seconds`, starting `delay` seconds from now (all at once if 0).
+	local function writeSlot(i: number, n: number, d: number, seconds: number, delay: number?)
 		local look = theme()
 		local lefts = ChalkBoard.digitLefts(n)
 		local bottom = ChalkBoard.NUMBER_Y - ChalkBoard.NUMBER_HEIGHT / 2
 		local segments = ChalkBoard.segments(d, lefts[i], bottom, ChalkBoard.NUMBER_HEIGHT)
+		local total = 0
+		for _, seg in segments do total += (seg[2] - seg[1]).Magnitude end
 		local parts: { Part } = {}
+		local done = delay or 0
 		for _, seg in segments do
-			local p = stroke(drawing, seg[1], seg[2], ChalkView.STROKE, look.chalk, look.glow)
-			if seconds > 0 then p.Transparency = 1 end
-			table.insert(parts, p)
+			local share = if seconds > 0 then seconds * (seg[2] - seg[1]).Magnitude / math.max(total, 1e-3) else 0
+			table.insert(parts, drawStroke(seg[1], seg[2], ChalkView.STROKE, look.chalk, look.glow, done, if seconds > 0 then done + share else 0))
+			done += share
 		end
 		slots[i] = { digit = d, parts = parts }
 		if seconds > 0 then
 			revealSerial += 1
 			local serial = revealSerial
-			local step = seconds / math.max(1, #parts)
-			for k, p in parts do
-				task.delay(step * (k - 1), function()
-					if p.Parent then p.Transparency = 0.04 end
-					if k == #parts and serial == revealSerial then dust(segments[k][2], look.chalk, 3, { 0.5, 2 }) end
-				end)
-			end
+			task.delay(done, function()
+				if serial == revealSerial and #segments > 0 then dust(segments[#segments][2], look.chalk, 3, { 0.5, 2 }) end
+			end)
 		end
 	end
 	-- Draws the count: only the digits that changed are written again, unless
-	-- the number of digits changed.
+	-- the number of digits changed. Each takes `seconds`, one after another.
 	local function drawCount(count: number, seconds: number)
 		local digits = ChalkBoard.digits(math.min(count, 10 ^ ChalkBoard.MAX_DIGITS - 1))
+		local delay = 0
 		if #digits ~= #slots then
 			clearSlots()
-			for i, d in digits do writeSlot(i, #digits, d, if i == #digits then seconds else 0) end
+			for i, d in digits do
+				writeSlot(i, #digits, d, seconds, delay)
+				delay += seconds
+			end
 		else
 			for i, d in digits do
 				if slots[i].digit ~= d then
 					for _, p in slots[i].parts do p:Destroy() end
-					writeSlot(i, #digits, d, seconds)
+					writeSlot(i, #digits, d, seconds, delay)
+					delay += seconds
 				end
 			end
 		end
@@ -442,54 +507,71 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		}, spot)
 		sparks:Emit(count)
 	end
+	-- A gift: its show (see ChalkEffects) plays on the board, and the number
+	-- changes when the show hits it.
+	local effectContext: ChalkEffects.Context = {
+		chalk = theme().chalk,
+		glow = theme().glow,
+		digits = function(): { BasePart }
+			local list = {}
+			for _, slot in slots do
+				for _, p in slot.parts do table.insert(list, p) end
+			end
+			return list
+		end,
+		drawStroke = drawStroke,
+		shake = function(degrees: number, seconds: number) camShake(degrees, seconds) end,
+	}
 	local function onGift(data: any)
 		if not active or type(data) ~= "table" then return end
 		local coins = tonumber(data.coins) or 1
 		local tier = ChalkBoard.tier(coins)
 		local amount = tonumber(data.amount) or 0
+		local up = data.up == true
 		local look = theme()
-		local middle = ChalkBoard.onBoard(0, ChalkBoard.NUMBER_Y) + Vector3.new(0, 0, 0.5)
-		if data.up then
-			for k = 1, tier do
-				task.delay((k - 1) * 0.12, function()
-					local offset = Vector3.new((math.random() - 0.5) * 16, (math.random() - 0.5) * 5, 0)
-					burst(middle + offset, if k % 2 == 0 then GOLD else look.chalk, 14 + tier * 6)
-					dust(middle + offset, look.chalk, 4 + tier, { 2, 6 })
-				end)
-			end
-			showShout(string.format("%s  +%s", tostring(data.name or "Someone"), Format.commas(amount)), GREEN, 2.2, 1 + tier * 0.25)
-		else
-			sweep(false, 0.5 + tier * 0.1)
-			dust(middle, look.chalk, 8 + tier * 4, { 2, 7 })
-			showShout(string.format("%s  %s", tostring(data.name or "Someone"), Format.commas(amount)), RED, 2.2, 1 + tier * 0.25)
-		end
-		if tier >= 3 then camShake(0.4 + tier * 0.25, 0.4 + tier * 0.15) end
-		pop(1.1 + tier * 0.05)
+		effectContext.chalk = look.chalk
+		effectContext.glow = look.glow
+		local impact = ChalkEffects.play(tier, up, effectContext)
+		-- The board keeps the old number until the show hits it.
+		holdDrawUntil = math.max(holdDrawUntil, os.clock() + impact)
+		local title = (if up then ChalkEffects.UP_TITLES else ChalkEffects.DOWN_TITLES)[tier]
+		local sub = string.format("%s sent %s  ·  %s%s", tostring(data.name or "Someone"), tostring(data.gift or "a gift"),
+			if amount > 0 then "+" else "", Format.commas(amount))
+		showShout(title, if up then GREEN else RED, 2 + tier * 0.4, 1 + tier * 0.2, sub)
+		task.delay(impact, function()
+			if active then pop(1.1 + tier * 0.05) end
+		end)
 	end
 	local function onReset(data: any)
 		if not active or type(data) ~= "table" then return end
 		if data.state == "started" then
+			Sounds.play("rumble")
 			showShout(string.format("%s sent the RESET!", tostring(data.name or "Someone")), RED, 3, 2.2)
 			camShake(1.4, 0.8)
 			resetScale.Scale = 1.6
 			TweenService:Create(resetScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 		elseif data.state == "saved" then
+			Sounds.play("chime")
 			showShout(string.format("SAVED BY %s!", string.upper(tostring(data.name or "someone"))), GREEN, 3, 2.2)
 			local middle = ChalkBoard.onBoard(0, ChalkBoard.NUMBER_Y) + Vector3.new(0, 0, 0.5)
 			for k = 1, 5 do
 				task.delay(k * 0.1, function() burst(middle + Vector3.new((k - 3) * 4, 0, 0), GREEN, 30) end)
 			end
 		elseif data.state == "wiped" then
+			Sounds.play("boom")
 			showShout("THE BOARD WAS WIPED!", RED, 3, 2)
 			camShake(1.2, 0.6)
 		end
 	end
 	local function onWipe(_data: any)
 		if not active then return end
+		Sounds.play("erase")
+		task.delay(0.6, function() if active then Sounds.play("erase") end end)
 		sweep(true, 1.4)
 	end
 	local function onWin(data: any)
 		if not active or type(data) ~= "table" then return end
+		Sounds.play("cheer")
 		showShout(string.format("YOU REACHED %s!", Format.commas(tonumber(data.goal) or 0)), GOLD, 5, 2.4)
 		pop(1.4)
 		for k = 1, 8 do
@@ -510,12 +592,22 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	local function isWriteInput(input: InputObject): boolean
 		return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch or input.KeyCode == Enum.KeyCode.Space
 	end
+	-- The mouse and the screen (clicks on buttons don't write).
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-		-- Space is the jump key, so Roblox's controls mark it as used: it still writes
-		-- (the writer can't jump), but never while typing. Clicks on buttons don't write.
-		local space = input.KeyCode == Enum.KeyCode.Space
-		if active and (space or not processed) and isWriteInput(input) and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
+		if active and not processed and isWriteInput(input) and input.KeyCode ~= Enum.KeyCode.Space and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
 	end)
+	-- Space is the jump key, which Roblox's controls take, so in the classroom
+	-- it is taken first (bound while writing); bound keys never fire while
+	-- typing in chat.
+	local WRITE_ACTION = "ChalkboardWrite"
+	local function onWriteKey(_name: string, inputState: Enum.UserInputState, _input: InputObject): Enum.ContextActionResult
+		if inputState == Enum.UserInputState.Begin then
+			setHeld(true)
+		elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
+			setHeld(false)
+		end
+		return Enum.ContextActionResult.Sink
+	end
 	UserInputService.InputEnded:Connect(function(input: InputObject)
 		if isWriteInput(input) then setHeld(false) end
 	end)
@@ -552,15 +644,15 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		end
 		return true
 	end
-	local recBlink = 0
+	local wasHolding = false
 	RunService.RenderStepped:Connect(function(dt: number)
 		if not active then return end
-		-- The classroom camera, with a gentle hand-held drift.
+		-- A steady view of the writer and the board (gifts may shake it).
 		local camera = workspace.CurrentCamera
 		if camera then
 			if camera.CameraType ~= Enum.CameraType.Scriptable then camera.CameraType = Enum.CameraType.Scriptable end
 			local t = os.clock()
-			local frame = ChalkBoard.cameraFrame() * CFrame.Angles(math.sin(t * 0.7) * 0.004, math.sin(t * 0.5) * 0.006, 0)
+			local frame = ChalkBoard.cameraFrame()
 			local shook = t - shakeStart
 			if shook < shakeSeconds then
 				local a = math.rad(shakeDegrees) * (1 - shook / shakeSeconds)
@@ -572,11 +664,14 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		end
 		-- The mouse stays free in the classroom.
 		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
-		-- The REC light blinks and the camera's clock runs.
-		recBlink += dt
-		recDot.BackgroundTransparency = if recBlink % 1.2 < 0.7 then 0 else 1
-		local now = os.date("*t")
-		recLabel.Text = string.format("REC  %02d:%02d:%02d", now.hour, now.min, now.sec)
+		growStrokes()
+		-- The hold at the goal: a gift that takes the count down ends it.
+		local holdStart = attr("ChalkHoldStart", 0)
+		hold.update(holdStart, workspace:GetServerTimeNow())
+		if wasHolding and holdStart == 0 and attr("ChalkCount", 0) < attr("ChalkGoal", ChalkBoard.GOAL.default) then
+			showShout("KNOCKED DOWN! THE HOLD IS LOST", RED, 3, 1.8)
+		end
+		wasHolding = holdStart > 0
 		-- The arm writes while the server is writing.
 		local writingNow = state:GetAttribute("ChalkWriting") == true
 		if writingNow then
@@ -595,7 +690,9 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		local count = attr("ChalkCount", 0)
 		if count ~= shownCount and os.clock() >= holdDrawUntil then
 			local stepUp = count == shownCount + 1
-			drawCount(count, if stepUp then ChalkView.writeSeconds(speed) else 0)
+			-- Writing draws the next number at the writing speed; a jump
+			-- (a gift) draws each changed digit quickly.
+			drawCount(count, if stepUp then ChalkView.writeSeconds(speed) elseif shownCount >= 0 then 0.22 else 0)
 			drawProgress(count)
 			if not stepUp and shownCount >= 0 then dust(ChalkBoard.onBoard(0, ChalkBoard.NUMBER_Y), theme().chalk, 6, { 1, 4 }) end
 		end
@@ -630,8 +727,10 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		active = on
 		gui.Enabled = on
 		if on then
+			ContextActionService:BindActionAtPriority(WRITE_ACTION, onWriteKey, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Space)
 			redrawAll()
 		else
+			ContextActionService:UnbindAction(WRITE_ACTION)
 			setHeld(false)
 			releaseArm()
 			clearSlots()

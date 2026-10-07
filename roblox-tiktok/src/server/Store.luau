@@ -6,6 +6,7 @@
 -- Access to API Services"). Without them everything still works; it just is
 -- not remembered between sessions.
 local DataStoreService = game:GetService("DataStoreService")
+local RunService = game:GetService("RunService")
 
 local Store = {}
 
@@ -41,7 +42,9 @@ function Store.load(key: string?): ({ [string]: any }?, boolean)
 		return nil, false
 	end
 	local ok, data = pcall(target.GetAsync, target, key or KEY)
-	for _ = 1, 2 do
+	-- A passing DataStore hiccup gets two more tries; Studio without API
+	-- access fails the same way every time, so it doesn't wait for nothing.
+	for _ = 1, if RunService:IsStudio() then 0 else 2 do
 		if ok then break end
 		task.wait(2)
 		ok, data = pcall(target.GetAsync, target, key or KEY)

@@ -56,10 +56,14 @@ export function skinEvent(skin) {
   return { type: 'skin', name: 'Control page', skin };
 }
 
+// The viewer. tiktok-live-connector 2.x sends TikTok's newer event layout
+// (the @handle is displayId, the number is id); older versions used uniqueId
+// and userId. Both are read.
 function who(user) {
+  const handle = user?.uniqueId || user?.displayId;
   return {
-    user: String(user?.uniqueId ?? user?.userId ?? 'someone').slice(0, 40),
-    name: String(user?.nickname || user?.uniqueId || 'Someone').slice(0, 40),
+    user: String(handle || user?.userId || user?.id || 'someone').slice(0, 40),
+    name: String(user?.nickname || handle || 'Someone').slice(0, 40),
   };
 }
 
@@ -69,23 +73,28 @@ function who(user) {
 export function createGiftTracker() {
   const streaks = new Map();
   return function handleGift(data) {
-    const details = data.giftDetails ?? {};
+    // The gift: `gift` { name, diamondCount, type } in TikTok's newer layout
+    // (tiktok-live-connector 2.x), `giftDetails` { giftName, giftType } in the old one.
+    const details = data.gift ?? data.giftDetails ?? {};
     const extended = data.extendedGiftInfo ?? {};
-    const coins = Number(details.diamondCount ?? extended.diamond_count ?? 1) || 1;
-    const gift = String(details.giftName || extended.name || `Gift ${data.giftId ?? ''}`).trim();
+    const coins = Number(details.diamondCount ?? extended.diamond_count ?? extended.diamondCount ?? 1) || 1;
+    const gift = String(details.name || details.giftName || extended.name || `Gift ${data.giftId ?? ''}`).trim();
     const repeat = Math.max(1, Number(data.repeatCount) || 1);
-    const streakable = Number(details.giftType ?? data.giftType) === 1;
+    const streakable = Number(details.type ?? details.giftType ?? data.giftType) === 1;
     const person = who(data.user);
     if (!streakable) {
       return { type: 'gift', ...person, gift, coins, count: repeat };
     }
     const key = `${person.user}:${data.giftId}:${data.groupId ?? ''}`;
-    const counted = streaks.get(key) ?? 0;
+    const now = Date.now();
+    // A streak whose end never arrived (a dropped connection) is forgotten.
+    for (const [old, streak] of streaks) if (now - streak.at > 120000) streaks.delete(old);
+    const counted = streaks.get(key)?.count ?? 0;
     const fresh = Math.max(0, repeat - counted);
     if (data.repeatEnd) {
       streaks.delete(key);
     } else {
-      streaks.set(key, Math.max(counted, repeat));
+      streaks.set(key, { count: Math.max(counted, repeat), at: now });
     }
     if (fresh === 0) return null;
     return { type: 'gift', ...person, gift, coins, count: fresh };
@@ -93,7 +102,7 @@ export function createGiftTracker() {
 }
 
 export function likeEvent(data) {
-  const likes = Math.max(1, Number(data.likeCount) || 1);
+  const likes = Math.max(1, Number(data.likeCount ?? data.count) || 1);
   return { type: 'like', ...who(data.user), likes };
 }
 

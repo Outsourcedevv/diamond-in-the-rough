@@ -24,7 +24,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
   - **Stone Cyclone** (1,000–9,999): 32 rocks from the valley spiral up into a towering cyclone round a pulsing green core, slam down into the peak, and a second ring and pillar blast out (about 4½ seconds).
   - **Mountain Rising** (10,000+): the sky turns, the ground rumbles and green light cracks outward, then a colossal boulder descends slowly, pulling 26 rocks up off the slopes, and lands with a blast of light. A ring of eight green pillars erupts round the mountain and the peak pulses once more (about 5½ seconds).
 
-  The rocks that come back still fly into place one by one, in stone or hay to match the skin. The six **REBUILD TEST GIFTS** buttons in the Y panel play these effects in order, smallest to biggest. A banner shows the effect, the sender, the gift and the coins. The effects are cosmetic: they never collide, block digging or cast shadows. At most two play at once (expensive gifts take priority), each is capped (70 parts and 3 lights for the small tiers, up to 160 parts and 4 lights for the biggest), and everything is cleaned up within 12 seconds. Gift blasts only remove mountain stones: they never target the diamond, and the gem settles above the actual visible stone or ground after each blast. To see each effect, use the Y panel's test presets (Rose, Doughnut, Hand Hearts, Money Gun, Galaxy and Lion cover all six tiers, and Galaxy x10 shows a combo as ten Galaxies); each button shows the coins for one gift, and the bridge control page has the same presets. Test gifts use these same effects.
+  The rocks that come back still fly into place one by one, in stone or hay to match the skin. The six **REBUILD TEST GIFTS** buttons in the Y panel play these effects in order, smallest to biggest. A banner shows the effect, the sender, the gift and the coins. The effects are cosmetic: they never collide, block digging or cast shadows. At most two play at once (expensive gifts take priority), each is capped (70 parts and 3 lights for the small tiers, up to 160 parts and 4 lights for the biggest), and everything is cleaned up within 12 seconds. Gift blasts only remove mountain stones: they never target the diamond, and the gem settles above the actual visible stone or ground after each blast. To see each effect, use the Y panel's test presets (Rose, Doughnut, Hand Hearts, Money Gun, Galaxy and Lion cover all six tiers, and Galaxy x10 shows a combo as ten Galaxies); each button shows the coins for one gift, Test gifts use these same effects.
 - **Find and click the diamond.** The uncovered message tells you when it can be found, but there is no floating location label, through-rock outline or light beacon. Aim directly at the gem and left-click (tap on mobile) within 12 studs. Walking into it and pressing E do not pick it up; rocks cannot be clicked through.
 - **Hold the diamond.** The gem flies from where it lay into your right hand, your hand lifts it high and your view eases upward, framing a large, sparkling diamond against the sky. The eight-sided gem has a pale crown, a bright table and a deeper blue pointed base, so it reads clearly as a diamond on stream. A visible palm, thumb and curled fingers grip it. **You cannot move while holding it:** you stay frozen in place until you win or a rebuild gift cancels the hold. The countdown occupies the top-centre HUD while holding, leaving the hand and gem clear below it. Other players see a big sparkling diamond in your avatar's raised hand.
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
@@ -46,9 +46,9 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 
 ## Gift catalogue and keybinds
 
-Open the updated bridge control page at **http://localhost:8787**. Enter your TikTok username, then use **Refresh from TikTok** in the catalogue to load every gift returned for that LIVE. This is the room's available list, which can vary; the offline starter list is explicitly labelled and is not the full catalogue. The last successful catalogue is cached for later use.
+Open the updated bridge control page at **http://localhost:8787** and enter your TikTok username to connect. Connecting is free. The catalogue starts with a starter list of common gifts, and every gift you receive on your LIVE is added to it automatically, with the coins TikTok reports, and saved for next time. After connecting, the bridge loads the room's full gift list straight from TikTok (free), and **Refresh from TikTok** loads it again. Only if TikTok doesn't send it does the bridge try the signed route through Euler Stream, which is a paid feature; then the page says so and keeps the list it has. The bridge never asks for the paid list while connecting.
 
-Search by gift name or coin price, click a gift, choose **Add blocks** or **Remove blocks**, enter the amount per gift, and pick an optional keybind. **Save & test** sends a simulated gift through the same path as live gifts. Settings are saved locally and synced to Roblox, including published games configured with Open Cloud. Keybinds work in the bridge window and in Roblox once synced; they do not fire while typing or using the settings panel. Duplicate keybinds are rejected. The keys on offer leave out I and O (Roblox's zoom keys) and P (the game's settings).
+Search by gift name or coin price, click a gift, choose **Add blocks** or **Remove blocks**, enter the amount per gift and press **Save gift**. Rules are saved locally and synced to Roblox, including published games configured with Open Cloud or the relay. The control page can't send pretend gifts: it has no test buttons or keybinds, and the bridge has no route for them, so only real gifts from your LIVE reach the game. To try things out, use the game's own **Y** panel (test gifts, rebuild tests and gift keybinds).
 
 **Keybinds without the bridge.** In the game's **Y** panel, **GIFT KEYBINDS** lists every keybind and lets the streamer add their own: type the gift name (a gift rule with that name applies, otherwise its coins times rocks per coin) and its coins, press **Key: choose** and then the key, and press **Save keybind**. **X** removes one. Pressing the key in the game then sends that gift, with or without the bridge, through the same path as the test gifts. The free keys are B, C, F, J, K, L, M, N, Q, R, T, U, V, X, Z, 1 to 0 and F6 to F8 (W A S D, E, G, H, I, O, P and Y are kept for the game and Roblox). Up to 24 keybinds are kept and saved with the game. A keybind set in the game stays when the bridge resends its catalogue; the bridge only replaces its own.
 
@@ -58,9 +58,7 @@ Add gifts refill previously dug spaces, with stones flying and snapping into pla
 
 Rebuilding any rocks during a diamond hold cancels that hold, clears the countdown and lets the holder move again. Dug spaces refill from the diamond outward. Players covered by restored rock are lifted onto the new surface. A rebuild that actually restores at least 10,000 rocks moves the former holder to the highest restored rock surface instead. Each player's computer draws the returning rock a moment after the server restores it, so a player could land back in the old hole and have the rock appear round them. To stop that, for 6 seconds after any rebuild the server checks every 0.4 seconds whether anyone is standing inside rock and lifts them onto it. A player standing in a shaft they dug themselves is left alone. The diamond is released beside the player, above the rock, ready to click again for a fresh countdown. An add gift at the growth limit that restores zero rocks does not interrupt the hold. During the countdown, the holder sees a larger bright outlined gem above their palm; other players see an outlined diamond in the raised hand.
 
-In the game's **Y settings panel**, scroll to **REBUILD TEST GIFTS**. Choose **+100**, **+1,000**, **+10,000**, **+50,000**, **+100,000**, or **Grow to limit**; each plays the next adding effect, from Pebble Drop to Mountain Rising. These tests work offline and always rebuild, regardless of existing gift rules. They refill previously dug spaces, then enlarge the mountain up to its growth limit, and preserve the round and wins. They also work on an undug mountain. The localhost bridge page has the same six buttons.
-
-The gift catalogue refresh now accepts the username typed on the page directly, without first connecting live events. It loads every gift TikTok returns for that account, with no display limit, and caches the result. TikTok must be reachable and may require the account to be LIVE; the eight offline starter gifts are not a complete worldwide list.
+In the game's **Y settings panel**, scroll to **REBUILD TEST GIFTS**. Choose **+100**, **+1,000**, **+10,000**, **+50,000**, **+100,000**, or **Grow to limit**; each plays the next adding effect, from Pebble Drop to Mountain Rising. These tests work offline and always rebuild, regardless of existing gift rules. They refill previously dug spaces, then enlarge the mountain up to its growth limit, and preserve the round and wins. They also work on an undug mountain.
 
 ## Gift performance and mountain growth
 
@@ -87,7 +85,7 @@ Run `luau tests/gift-performance.luau` for a CPU checkpoint timing report and `p
 4. Press **Play** (F5) in Studio. You arrive in the royal lobby: press **JOIN** on **Diamond in the Rough** in the games menu on the left.
    - The control page should now say **Roblox: connected**.
    - The bottom-right of the game says what the TikTok connection is doing.
-5. Try the **test gift buttons** on the control page. The mountain should blow up in the game.
+5. Press **Y** in the game and try the **TEST GIFTS** buttons. The mountain should blow up.
 
 If Studio says HTTP requests are off, use **Home → Game Settings → Security → Allow HTTP Requests**. It is already turned on in this file.
 
@@ -255,6 +253,22 @@ The game is **single player** (`SinglePlayer = true` in `src/shared/Config.luau`
 
 To show the Blender mountains and trees in the published game, also turn on **Enable Mesh / Image APIs** (see [Blender scenery](#blender-scenery)).
 
+## Many streamers on one published game (optional)
+
+Open Cloud works for your own game, but it has two problems once other streamers play it: every gift goes to every server, and each streamer would need your API key. The **relay** in `relay/` solves both. You host it once, and each streamer gets a **game code**.
+
+```
+TikTok LIVE  ->  bridge (the streamer's PC)  ->  relay (hosted once)  ->  that streamer's game server
+```
+
+**As the game's owner, once:** host `relay/relay.mjs` somewhere with a public HTTPS address (`node relay.mjs`, no dependencies, nothing stored on disk), turn on **Allow HTTP Requests** in Game Settings → Security, and put the address in `RelayUrl` in `src/shared/Config.luau`. See [relay/README.md](relay/README.md) for the details and limits.
+
+**As a streamer, each time:** run the bridge, connect your TikTok username, then on the control page under **Playing the published game** paste the relay address (if the game doesn't already know it) and press **Save**. The page shows your game code, such as `ABCD EFGH`. In the game, press **Y**, scroll to **GAME CODE** and type it in. Your server then receives only your gifts.
+
+The code comes from a secret in your bridge's `config.json`, so only your bridge can send gifts under it. Keep the code to yourself: anyone with it and the relay's address could watch your gifts go by. Deleting `config.json` gives you a new code.
+
+One relay serves any number of streamers: it keeps only a few hundred recent events each, in memory, and holds each game's request open until a gift arrives, so gifts land about as fast as in Studio.
+
 ## Troubleshooting
 
 - **"Bridge app not running"** in the game: start **Start Bridge.bat** and keep its window open.
@@ -262,6 +276,8 @@ To show the Blender mountains and trees in the published game, also turn on **En
 - **TikTok "could not connect"**: check the username (no @ needed). TikTok sometimes rate-limits; wait a minute.
 - **Nothing happens on gifts but test gifts work**: make sure the control page says *connected to @yourname*.
 - **The page says "waiting for Roblox Studio"**: press Play in Studio. HTTP requests must be allowed (see above).
+- **The game says "can't reach the relay (check the game code)"**: the code in the **Y** panel must match the one on the control page, the relay must be running, and Game Settings → Security → Allow HTTP Requests must be on.
+- **The game says "waiting for your bridge"**: the code is right but no bridge is sending under it. Check the control page says *sending to the relay*.
 - **No mountain in Studio's Server view**: that is expected. Each player's client draws the rock; switch back to the Client view. Use **Play** (F5), not **Run** (F8), which has no client.
 - **No Blender mountains or trees in the published game**: Roblox only lets a published game build meshes once Mesh / Image APIs are turned on. See [Blender scenery](#blender-scenery) for that, or for importing the pack instead.
 - **The world looks flat or old-fashioned**: open the place file from this folder. It sets Future lighting and the 2022 material pack, which scripts cannot change. In an older copy, set **Lighting → LightingStyle** to Realistic and **MaterialService → Use2022Materials** on.

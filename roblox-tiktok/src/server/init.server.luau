@@ -16,6 +16,8 @@ local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
+local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
+local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
 local Keybinds = require(Shared:WaitForChild("Keybinds"))
@@ -61,13 +63,26 @@ local settings = {
 	perFollow = Config.StonePerFollow,
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
+	-- Diamond Climb's and Chalkboard Count's own gift rules: platforms (or
+	-- numbers) per gift, negative to send them down (set on the control page).
+	climbRules = table.clone(Config.ClimbGiftRules) :: { [string]: number },
+	chalkRules = table.clone(Config.ChalkGiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
 	-- Players who hid the GAMES tab and SETTINGS button (by user id).
 	hiddenButtons = {} :: { [string]: boolean },
+	-- Players who hid Diamond Climb's movement card or Chalkboard Count's
+	-- writing card (in Settings), by user id.
+	hiddenClimbCard = {} :: { [string]: boolean },
+	hiddenChalkCard = {} :: { [string]: boolean },
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
 	statues = {} :: { any },
+	-- The streamer's game code on the relay (a published game many streamers
+	-- play). Empty means this game reads gifts from the bridge on this PC or
+	-- from its own Open Cloud key instead.
+	gameCode = "",
+	relayUrl = Config.RelayUrl,
 	theme = "default", -- the map's look: "default" (alpine), "sakura", "farm", "desert" or "haunted"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 	-- Diamond Climb's progress, chosen speed and jump, and gift strength (see ClimbGame).
@@ -96,13 +111,22 @@ if saved then
 			settings[key] = value
 		end
 	end
-	local rules: { [string]: number } = {}
-	for name, rocks in settings.giftRules do
-		if type(name) == "string" and type(rocks) == "number" then
-			rules[string.lower(name)] = rocks
+	local function cleanRules(saved: { [any]: any }, limit: number): { [string]: number }
+		local rules: { [string]: number } = {}
+		for name, value in saved do
+			if type(name) == "string" and type(value) == "number" and value == value then
+				rules[string.lower(name)] = math.clamp(math.floor(value), -limit, limit)
+			end
 		end
+		return rules
 	end
-	settings.giftRules = rules
+	-- An older save has no relay address; the game's own setting is used then.
+	if settings.relayUrl == "" then settings.relayUrl = Config.RelayUrl end
+	settings.gameCode = string.upper((string.gsub(settings.gameCode, "[^%w]", "")))
+	if #settings.gameCode > Config.RelayMaxCodeLength then settings.gameCode = "" end
+	settings.giftRules = cleanRules(settings.giftRules, 1500000)
+	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
+	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
 		settings.leaderboards = { helpers = {}, griefers = {} }
@@ -131,10 +155,14 @@ local function publishSettings()
 	State:SetAttribute("PerFollow", settings.perFollow)
 	State:SetAttribute("PerShare", settings.perShare)
 	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
+	State:SetAttribute("ClimbRules", game:GetService("HttpService"):JSONEncode(settings.climbRules))
+	State:SetAttribute("ChalkRules", game:GetService("HttpService"):JSONEncode(settings.chalkRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
+	State:SetAttribute("GameCode", settings.gameCode)
+	State:SetAttribute("RelayUrl", settings.relayUrl)
 	State:SetAttribute("Theme", settings.theme)
 	State:SetAttribute("Skin", settings.skin)
 end
@@ -577,6 +605,10 @@ local function newRound(animated: boolean?)
 		holdWeld:Destroy()
 		holdWeld = nil
 	end
+	-- Held, the diamond is unanchored: without this it falls out of the world
+	-- (and is destroyed) while the new mountain is built.
+	diamond.Anchored = true
+	diamond.AssemblyLinearVelocity = Vector3.zero
 	for _, player in Players:GetPlayers() do
 		teleportHome(player)
 	end
@@ -938,6 +970,20 @@ local doubledGifts: { [TikTokFeed.Event]: boolean } = setmetatable({}, { __mode 
 
 -- TikTok ------------------------------------------------------------------------
 local function processTikTok(event: TikTokFeed.Event)
+	if (event.type == "climbRule" or event.type == "chalkRule") and event.gift then
+		-- The control page's Diamond Climb or Chalkboard Count rule for one gift
+		-- (cleared to go back to the coins).
+		local rules = if event.type == "climbRule" then settings.climbRules else settings.chalkRules
+		local limit = if event.type == "climbRule" then ClimbPath.TOP else ChalkBoard.GOAL.max
+		local name = string.lower(event.gift)
+		if event.clear == true or event.amount == nil then
+			rules[name] = nil
+		else
+			rules[name] = math.clamp(math.floor(event.amount), -limit, limit)
+		end
+		saveSettings()
+		return
+	end
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
 		local name = string.lower(event.gift)
 		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
@@ -981,7 +1027,8 @@ local function processTikTok(event: TikTokFeed.Event)
 		-- In Chalkboard Count gifts move the count up or down, the reset gift
 		-- starts the countdown and a big enough gift saves it.
 		if event.type == "like" then return end
-		local ending = chalkGame.gift(who, event, amount, doubledGifts[event] == true)
+		local rule = if event.type == "gift" then settings.chalkRules[string.lower(event.gift or "")] else nil
+		local ending = chalkGame.gift(who, event, amount, doubledGifts[event] == true, rule)
 		if doubledGifts[event] then text = "2X " .. text end
 		Notify:FireAllClients("feed", { text = text .. ending, stone = 0, kind = event.type })
 		return
@@ -992,8 +1039,10 @@ local function processTikTok(event: TikTokFeed.Event)
 		-- shares lift them one platform. Likes leave the climb alone.
 		if event.type == "like" then return end
 		local coins = math.max(1, event.coins or 1)
-		local move = if event.type == "gift"
-			then ClimbGame.giftMove(amount, coins, event.count or 1, climbGame.progress.strength)
+		-- The streamer's own rule for this gift wins; otherwise its coins.
+		local rule = if event.type == "gift" then settings.climbRules[string.lower(event.gift or "")] else nil
+		local move = if rule ~= nil then math.floor(rule) * math.max(1, math.floor(event.count or 1))
+			elseif event.type == "gift" then ClimbGame.giftMove(amount, coins, event.count or 1, climbGame.progress.strength)
 			elseif amount > 0 then 1 else 0
 		local from, to = climbGame.gift(who, move, {
 			coins = if event.type == "gift" then coins else 1,
@@ -1127,9 +1176,19 @@ function enqueue(event: TikTokFeed.Event)
 	end)
 end
 
-TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, function(status: string)
+local function setTikTokStatus(status: string)
 	State:SetAttribute("TikTok", status)
-end)
+end
+TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, setTikTokStatus)
+
+-- A published game played by many streamers: read this streamer's own gifts
+-- from the relay, under the game code they typed in the Y panel.
+local function useRelay()
+	TikTokFeed.useRelay(settings.relayUrl, settings.gameCode, onTikTok, function(status: string)
+		State:SetAttribute("TikTok", if settings.gameCode == "" then status else status .. " (code " .. settings.gameCode .. ")")
+	end)
+end
+useRelay()
 
 -- Pickaxe mining and settings ---------------------------------------------------------
 local function isAdmin(player: Player): boolean
@@ -1280,6 +1339,18 @@ local function setPlace(player: Player, place: string)
 	local now = os.clock()
 	if now - (lastMove[player] or -math.huge) < 1 then return end
 	lastMove[player] = now
+	if from == "rough" and holder == player then
+		-- The winner leaves during the win screen: the diamond stays behind
+		-- (anchored and hidden until the next round) and their arm comes down.
+		diamond.Anchored = true
+		if holdWeld ~= nil then
+			holdWeld:Destroy()
+			holdWeld = nil
+		end
+		showDiamond(false)
+		lowerArms()
+		holder = nil
+	end
 	-- The attribute turning on goes first, so the player is never seen in neither game on the way.
 	if place == "chalk" then player:SetAttribute("InChalk", true) end
 	if place == "climb" then player:SetAttribute("InClimb", true) end
@@ -1409,6 +1480,31 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
 		return
+	elseif action == "setGameCode" and type(value) == "string" then
+		-- GAME CODE in the Y panel: the code the bridge's control page shows.
+		-- The relay then sends this streamer's gifts to this game.
+		local code = string.upper((string.gsub(value, "[^%w]", "")))
+		if #code > Config.RelayMaxCodeLength then
+			notice(player, "That game code is too long. Copy it from the control page.")
+			return
+		end
+		settings.gameCode = code
+		saveSettings()
+		useRelay()
+		notice(player, if code == "" then "Game code cleared." else "Game code set to " .. code .. ".")
+		return
+	elseif action == "setRelayUrl" and type(value) == "string" then
+		-- The relay's address, for a streamer running their own relay.
+		local url = (string.gsub(value, "%s", ""))
+		if url ~= "" and not string.match(url, "^https?://[%w%.%-]+[%w%./%-:]*$") then
+			notice(player, "Enter the relay address, like https://my-relay.example.com")
+			return
+		end
+		settings.relayUrl = (string.gsub(url, "/+$", ""))
+		saveSettings()
+		useRelay()
+		notice(player, if settings.relayUrl == "" then "Relay cleared." else "Relay set.")
+		return
 	elseif action == "setTheme" and type(value) == "string" then
 		setTheme(value)
 		return
@@ -1463,7 +1559,9 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		local now = os.clock()
 		local since = now - (mineCooldown[player] or 0)
-		local allowed = math.min(math.floor(since * Config.DigPerSecond + 0.5), math.ceil(Config.DigPerSecond / 4))
+		-- Up to two strikes' worth, so a strike that arrives late (network
+		-- jitter) makes up for the one before it that came early.
+		local allowed = math.min(math.floor(since * Config.DigPerSecond + 0.5), math.ceil(Config.DigPerSecond / 4) * 2)
 		if allowed < 1 then
 			return
 		end
@@ -1474,7 +1572,8 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 			return
 		end
 		local at = current:keyPosition(key)
-		if (root.Position - at).Magnitude > 16 then
+		-- The client allows 16 studs; the server sees the player a moment late.
+		if (root.Position - at).Magnitude > 20 then
 			return
 		end
 		mineCooldown[player] = now
@@ -1518,6 +1617,27 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 	elseif action == "chalkHold" then
 		-- The writer pressed or let go of the write button.
 		chalkGame.hold(player, value)
+		return
+	end
+	if action == "setHideCard" and type(value) == "table" and type(value.hidden) == "boolean" then
+		-- Settings: hide Diamond Climb's speed and jump card, or Chalkboard
+		-- Count's writing speed card. Remembered for next time.
+		local cards = { climb = { "hiddenClimbCard", "HideClimbCard" }, chalk = { "hiddenChalkCard", "HideChalkCard" } }
+		local card = cards[value.card]
+		if card == nil then return end
+		local now = os.clock()
+		if now - (hideAt[player] or -math.huge) < 0.2 then return end
+		hideAt[player] = now
+		player:SetAttribute(card[2], value.hidden)
+		local list = settings[card[1]]
+		local id = tostring(player.UserId)
+		if (list[id] == true) ~= value.hidden then
+			local count = 0
+			for _ in list do count += 1 end
+			if value.hidden and count >= 500 then return end
+			list[id] = if value.hidden then true else nil
+			Store.save(settings)
+		end
 		return
 	end
 	if action == "setHideButtons" then
@@ -1615,14 +1735,21 @@ local function onPlayer(player: Player)
 	player.CharacterAdded:Connect(function(character)
 		placeCharacter(player, character)
 	end)
-	if player.Character then
-		task.spawn(placeCharacter, player, player.Character)
-	else
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if character and not (humanoid and humanoid.Health <= 0) then
+		task.spawn(placeCharacter, player, character)
+	elseif not Players.CharacterAutoLoads then
+		-- Joined while the world was being built (or died in the empty sky
+		-- then): Roblox won't spawn them, so they spawn now, in the lobby.
+		-- Later joiners are spawned by Roblox itself.
 		task.spawn(function() if player.Parent then player:LoadCharacter() end end)
 	end
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
 	player:SetAttribute("HideButtons", settings.hiddenButtons[tostring(player.UserId)] == true)
+	player:SetAttribute("HideClimbCard", settings.hiddenClimbCard[tostring(player.UserId)] == true)
+	player:SetAttribute("HideChalkCard", settings.hiddenChalkCard[tostring(player.UserId)] == true)
 	if not modernChat then
 		player.Chatted:Connect(function(message)
 			onChat(player, message)

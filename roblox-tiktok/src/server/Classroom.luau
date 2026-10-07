@@ -1,8 +1,8 @@
 --!strict
 -- Chalkboard Count's classroom, built once on startup far off in the sky:
 -- a wooden floor, three walls with windows and a clock, the big chalkboard
--- with its frame and chalk tray, a teacher's desk, rows of school desks,
--- a bookshelf, a plant and ceiling lamps. Everything a theme recolours is
+-- with its frame and chalk tray, a teacher's desk, a bookshelf, a plant and
+-- ceiling lamps (no rows of desks watching). Everything a theme recolours is
 -- tagged with a "Role" attribute, and each theme's extra decorations (gold
 -- trim and a diamond, blossom branches, neon strips) are kept in ServerStorage
 -- until that theme is chosen. No lettering anywhere: the chalk is drawn by
@@ -72,21 +72,6 @@ local function lamp(parent: Instance, at: Vector3)
 	glow.Parent = bulb
 end
 
--- A school desk and chair, seen from behind by the camera.
-local function desk(parent: Instance, at: Vector3)
-	box(parent, "DeskTop", Vector3.new(4, 0.3, 2.6), at + Vector3.new(0, 2.5, 0), WOOD, Enum.Material.Wood, true)
-	for _, x in { -1.8, 1.8 } do
-		for _, z in { -1.1, 1.1 } do
-			box(parent, "DeskLeg", Vector3.new(0.2, 2.5, 0.2), at + Vector3.new(x, 0, z), METAL, Enum.Material.Metal)
-		end
-	end
-	box(parent, "ChairSeat", Vector3.new(2.4, 0.25, 2.2), at + Vector3.new(0, 1.6, 2.6), DARK_WOOD, Enum.Material.Wood)
-	box(parent, "ChairBack", Vector3.new(2.4, 2, 0.25), at + Vector3.new(0, 1.85, 3.6), DARK_WOOD, Enum.Material.Wood)
-	for _, x in { -1, 1 } do
-		box(parent, "ChairLeg", Vector3.new(0.18, 1.6, 0.18), at + Vector3.new(x, 0, 2.6), METAL, Enum.Material.Metal)
-	end
-end
-
 function Classroom.build(parent: Instance, store: Instance, theme: string?): Built
 	local O = ChalkBoard.ORIGIN
 	local model = Instance.new("Model")
@@ -146,19 +131,12 @@ function Classroom.build(parent: Instance, store: Instance, theme: string?): Bui
 	piece(model, "ClockHand", Vector3.new(0.15, 1.2, 0.08), CFrame.new(clockAt + Vector3.new(0.2, 0.45, 0.2)) * CFrame.Angles(0, 0, -0.5), Color3.fromRGB(30, 30, 30), Enum.Material.SmoothPlastic)
 	piece(model, "ClockHand", Vector3.new(0.12, 1.5, 0.08), CFrame.new(clockAt + Vector3.new(-0.35, -0.3, 0.2)) * CFrame.Angles(0, 0, 1.1), Color3.fromRGB(30, 30, 30), Enum.Material.SmoothPlastic)
 
-	-- The teacher's desk on the left, school desks facing the board, a bookshelf and a plant.
+	-- The teacher's desk on the left, a bookshelf and a plant.
 	box(model, "TeacherDesk", Vector3.new(8, 3, 3.6), Vector3.new(-17, 0, boardZ + 7), DARK_WOOD, Enum.Material.Wood, true)
 	box(model, "TeacherDeskTop", Vector3.new(8.6, 0.3, 4.2), Vector3.new(-17, 3, boardZ + 7), WOOD, Enum.Material.Wood, true)
 	box(model, "Apple", Vector3.new(0.7, 0.7, 0.7), Vector3.new(-14.5, 3.3, boardZ + 7), Color3.fromRGB(210, 40, 40), Enum.Material.SmoothPlastic).Shape = Enum.PartType.Ball
 	for k = 0, 2 do
 		box(model, "Book", Vector3.new(1.6, 0.35, 1.1), Vector3.new(-19, 3.3 + k * 0.35, boardZ + 7), ({ Color3.fromRGB(180, 50, 50), Color3.fromRGB(50, 90, 170), Color3.fromRGB(60, 140, 80) })[k + 1], Enum.Material.SmoothPlastic)
-	end
-	for row = 0, 1 do
-		for col = -1, 1 do
-			if not (row == 0 and col == 0) then
-				desk(model, Vector3.new(col * 10 - 4, 0, boardZ + 15 + row * 9))
-			end
-		end
 	end
 	box(model, "Bookshelf", Vector3.new(2.4, 9, 7), Vector3.new(W / 2 - 2.4, 0, boardZ + 6), DARK_WOOD, Enum.Material.Wood, true)
 	for shelf = 0, 3 do

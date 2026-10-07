@@ -134,7 +134,7 @@ function ChalkBoard.standFrame(): CFrame
 	return CFrame.lookAt(at, at - Vector3.new(0, 0, 1))
 end
 
--- The classroom camera: in front of the board and off to one side, looking
+-- The view of the classroom: in front of the board and off to one side, looking
 -- at the writer and the board.
 function ChalkBoard.cameraFrame(): CFrame
 	local O = ChalkBoard.ORIGIN
@@ -307,9 +307,9 @@ return ChalkBoard
         <Properties>
           <string name="Name">ClimbPath</string>
           <string name="Source"><![CDATA[--!strict
--- Diamond Climb's path: 1000 gem platforms spiralling up round a crystal
--- pillar in the sky, far from the valley and the lobby, with the diamond on
--- the last one. Each platform is a little higher above the one before (from
+-- Diamond Climb's path: 1000 big gem platforms spiralling up round a crystal
+-- pillar in the sky, far from the valley and the lobby (and hidden from them,
+-- see ClimbView), with the diamond on the last one. Each platform is a little higher above the one before (from
 -- 1.2 studs at the bottom to 3.5 at the top), always a short, easy hop away.
 -- The server builds the tower from this and checks where players stand; each
 -- player's game draws the climb's display and gift animations from it.
@@ -320,10 +320,10 @@ local ClimbPath = {}
 ClimbPath.TOP = 1000 -- the platform with the diamond
 ClimbPath.ORIGIN = Vector3.new(2600, 200, 0) -- the pillar's foot; platform 0 is the start island
 ClimbPath.RADIUS = 32 -- studs from the pillar to the platforms' centres
-ClimbPath.SPACING = 11 -- studs between neighbouring platforms' centres, along the spiral
+ClimbPath.SPACING = 16.75 -- studs between neighbouring platforms' centres, along the spiral (12 a turn)
 ClimbPath.RISE_LOW, ClimbPath.RISE_HIGH = 1.2, 3.5 -- studs each platform rises, at the bottom and the top
 ClimbPath.THICKNESS = 1.2
-ClimbPath.START_SIZE = 18 -- the start island's width
+ClimbPath.START_SIZE = 30 -- the start island's width
 ClimbPath.MILESTONE = 100 -- every 100th platform is a bigger gold-rimmed one
 
 -- Movement the climber can choose (the climb's sliders), and Roblox's defaults.
@@ -373,13 +373,15 @@ function ClimbPath.top(index: number): Vector3
 	return ClimbPath.ORIGIN + Vector3.new(math.cos(angle) * reach, ClimbPath.height(n), math.sin(angle) * reach)
 end
 
--- How wide platform `index` is.
+-- How wide platform `index` is: 13.6 studs, 18.7 for every hundredth and
+-- 23.8 for the top (1.7 times the first tower's 8, 11 and 14).
+ClimbPath.SCALE = 1.7
 function ClimbPath.size(index: number): number
 	local n = clampIndex(index)
 	if n == 0 then return ClimbPath.START_SIZE end
-	if n == ClimbPath.TOP then return 14 end
-	if n % ClimbPath.MILESTONE == 0 then return 11 end
-	return 8
+	if n == ClimbPath.TOP then return 14 * ClimbPath.SCALE end
+	if n % ClimbPath.MILESTONE == 0 then return 11 * ClimbPath.SCALE end
+	return 8 * ClimbPath.SCALE
 end
 
 -- Platform `index`'s gem colour.
@@ -447,6 +449,26 @@ local Config = {
 	-- (live) Gift rules: gift name -> rocks removed per gift. Change them in the
 	-- settings panel (press Y) while playing.
 	GiftRules = {} :: { [string]: number },
+	-- (live) Diamond Climb and Chalkboard Count's own gift rules: gift name ->
+	-- platforms (or numbers) per gift, up if positive and down if negative.
+	-- Gifts without a rule go up by their coins (a Rose 2, 100 coins 20, a
+	-- Galaxy 63). Change them on the bridge's control page.
+	ClimbGiftRules = {
+		["ice cream cone"] = -2,
+		["finger heart"] = -4,
+		["perfume"] = -9,
+		["confetti"] = -20,
+		["money gun"] = -45,
+		["tiktok universe"] = -374,
+	} :: { [string]: number },
+	ChalkGiftRules = {
+		["ice cream cone"] = -2,
+		["finger heart"] = -4,
+		["perfume"] = -9,
+		["confetti"] = -20,
+		["money gun"] = -45,
+		["tiktok universe"] = -374,
+	} :: { [string]: number },
 	StonePerLike = 2, -- (live)
 	StonePerFollow = 500, -- (live)
 	StonePerShare = 300, -- (live)
@@ -478,6 +500,12 @@ local Config = {
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
 	MessagingTopic = "DiamondRushTikTok", -- Open Cloud topic (published games)
+	-- The relay: lets any number of streamers play one published game, each
+	-- with their own gifts. Put the relay's address here (see relay/README.md)
+	-- and each streamer types their game code in the Y panel. Roblox must be
+	-- allowed to reach it: Game Settings > Security > Allow HTTP Requests.
+	RelayUrl = "", -- (live) e.g. "https://my-relay.example.com"
+	RelayMaxCodeLength = 12,
 
 	-- Single player: whoever plays is the streamer, so every player gets the Y
 	-- panel, test gifts and gift keybinds. Set to false for a game where others
@@ -1213,7 +1241,9 @@ end
 -- The nearest-first queue is a binary heap kept in two flat arrays (distance
 -- and key) and the queued marks are bits in buffers, so a big gift allocates
 -- almost nothing per rock.
-function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?, onRemoved: ((number) -> ())?): ({ number }, number?)
+-- `contained` (digging by hand) stops when the crater runs out of connected
+-- rock instead of carrying on somewhere else on the mountain.
+function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() -> ())?, onRemoved: ((number) -> ())?, contained: boolean?): ({ number }, number?)
 	local removed: { number } = {}
 	local start = if centre ~= nil and self.solid[centre] and self.exposedIndex[centre] then centre else self:randomExposed()
 	if start == nil then
@@ -1262,6 +1292,9 @@ function Grid.blast(self: Grid, count: number, centre: number?, checkpoint: (() 
 	enqueue(start)
 	while #removed < count do
 		if size == 0 then
+			if contained then
+				break
+			end
 			-- The crater ran out of reachable rock: carry on from a new spot.
 			local nextStart = self:randomExposed()
 			if nextStart == nil then
@@ -4976,6 +5009,8 @@ local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
+local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
+local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
 local Keybinds = require(Shared:WaitForChild("Keybinds"))
@@ -5021,13 +5056,26 @@ local settings = {
 	perFollow = Config.StonePerFollow,
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
+	-- Diamond Climb's and Chalkboard Count's own gift rules: platforms (or
+	-- numbers) per gift, negative to send them down (set on the control page).
+	climbRules = table.clone(Config.ClimbGiftRules) :: { [string]: number },
+	chalkRules = table.clone(Config.ChalkGiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
 	-- Players who hid the GAMES tab and SETTINGS button (by user id).
 	hiddenButtons = {} :: { [string]: boolean },
+	-- Players who hid Diamond Climb's movement card or Chalkboard Count's
+	-- writing card (in Settings), by user id.
+	hiddenClimbCard = {} :: { [string]: boolean },
+	hiddenChalkCard = {} :: { [string]: boolean },
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
 	statues = {} :: { any },
+	-- The streamer's game code on the relay (a published game many streamers
+	-- play). Empty means this game reads gifts from the bridge on this PC or
+	-- from its own Open Cloud key instead.
+	gameCode = "",
+	relayUrl = Config.RelayUrl,
 	theme = "default", -- the map's look: "default" (alpine), "sakura", "farm", "desert" or "haunted"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 	-- Diamond Climb's progress, chosen speed and jump, and gift strength (see ClimbGame).
@@ -5056,13 +5104,22 @@ if saved then
 			settings[key] = value
 		end
 	end
-	local rules: { [string]: number } = {}
-	for name, rocks in settings.giftRules do
-		if type(name) == "string" and type(rocks) == "number" then
-			rules[string.lower(name)] = rocks
+	local function cleanRules(saved: { [any]: any }, limit: number): { [string]: number }
+		local rules: { [string]: number } = {}
+		for name, value in saved do
+			if type(name) == "string" and type(value) == "number" and value == value then
+				rules[string.lower(name)] = math.clamp(math.floor(value), -limit, limit)
+			end
 		end
+		return rules
 	end
-	settings.giftRules = rules
+	-- An older save has no relay address; the game's own setting is used then.
+	if settings.relayUrl == "" then settings.relayUrl = Config.RelayUrl end
+	settings.gameCode = string.upper((string.gsub(settings.gameCode, "[^%w]", "")))
+	if #settings.gameCode > Config.RelayMaxCodeLength then settings.gameCode = "" end
+	settings.giftRules = cleanRules(settings.giftRules, 1500000)
+	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
+	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
 		settings.leaderboards = { helpers = {}, griefers = {} }
@@ -5091,10 +5148,14 @@ local function publishSettings()
 	State:SetAttribute("PerFollow", settings.perFollow)
 	State:SetAttribute("PerShare", settings.perShare)
 	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
+	State:SetAttribute("ClimbRules", game:GetService("HttpService"):JSONEncode(settings.climbRules))
+	State:SetAttribute("ChalkRules", game:GetService("HttpService"):JSONEncode(settings.chalkRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
+	State:SetAttribute("GameCode", settings.gameCode)
+	State:SetAttribute("RelayUrl", settings.relayUrl)
 	State:SetAttribute("Theme", settings.theme)
 	State:SetAttribute("Skin", settings.skin)
 end
@@ -5537,6 +5598,10 @@ local function newRound(animated: boolean?)
 		holdWeld:Destroy()
 		holdWeld = nil
 	end
+	-- Held, the diamond is unanchored: without this it falls out of the world
+	-- (and is destroyed) while the new mountain is built.
+	diamond.Anchored = true
+	diamond.AssemblyLinearVelocity = Vector3.zero
 	for _, player in Players:GetPlayers() do
 		teleportHome(player)
 	end
@@ -5898,6 +5963,20 @@ local doubledGifts: { [TikTokFeed.Event]: boolean } = setmetatable({}, { __mode 
 
 -- TikTok ------------------------------------------------------------------------
 local function processTikTok(event: TikTokFeed.Event)
+	if (event.type == "climbRule" or event.type == "chalkRule") and event.gift then
+		-- The control page's Diamond Climb or Chalkboard Count rule for one gift
+		-- (cleared to go back to the coins).
+		local rules = if event.type == "climbRule" then settings.climbRules else settings.chalkRules
+		local limit = if event.type == "climbRule" then ClimbPath.TOP else ChalkBoard.GOAL.max
+		local name = string.lower(event.gift)
+		if event.clear == true or event.amount == nil then
+			rules[name] = nil
+		else
+			rules[name] = math.clamp(math.floor(event.amount), -limit, limit)
+		end
+		saveSettings()
+		return
+	end
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
 		local name = string.lower(event.gift)
 		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
@@ -5941,7 +6020,8 @@ local function processTikTok(event: TikTokFeed.Event)
 		-- In Chalkboard Count gifts move the count up or down, the reset gift
 		-- starts the countdown and a big enough gift saves it.
 		if event.type == "like" then return end
-		local ending = chalkGame.gift(who, event, amount, doubledGifts[event] == true)
+		local rule = if event.type == "gift" then settings.chalkRules[string.lower(event.gift or "")] else nil
+		local ending = chalkGame.gift(who, event, amount, doubledGifts[event] == true, rule)
 		if doubledGifts[event] then text = "2X " .. text end
 		Notify:FireAllClients("feed", { text = text .. ending, stone = 0, kind = event.type })
 		return
@@ -5952,8 +6032,10 @@ local function processTikTok(event: TikTokFeed.Event)
 		-- shares lift them one platform. Likes leave the climb alone.
 		if event.type == "like" then return end
 		local coins = math.max(1, event.coins or 1)
-		local move = if event.type == "gift"
-			then ClimbGame.giftMove(amount, coins, event.count or 1, climbGame.progress.strength)
+		-- The streamer's own rule for this gift wins; otherwise its coins.
+		local rule = if event.type == "gift" then settings.climbRules[string.lower(event.gift or "")] else nil
+		local move = if rule ~= nil then math.floor(rule) * math.max(1, math.floor(event.count or 1))
+			elseif event.type == "gift" then ClimbGame.giftMove(amount, coins, event.count or 1, climbGame.progress.strength)
 			elseif amount > 0 then 1 else 0
 		local from, to = climbGame.gift(who, move, {
 			coins = if event.type == "gift" then coins else 1,
@@ -6087,9 +6169,19 @@ function enqueue(event: TikTokFeed.Event)
 	end)
 end
 
-TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, function(status: string)
+local function setTikTokStatus(status: string)
 	State:SetAttribute("TikTok", status)
-end)
+end
+TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, setTikTokStatus)
+
+-- A published game played by many streamers: read this streamer's own gifts
+-- from the relay, under the game code they typed in the Y panel.
+local function useRelay()
+	TikTokFeed.useRelay(settings.relayUrl, settings.gameCode, onTikTok, function(status: string)
+		State:SetAttribute("TikTok", if settings.gameCode == "" then status else status .. " (code " .. settings.gameCode .. ")")
+	end)
+end
+useRelay()
 
 -- Pickaxe mining and settings ---------------------------------------------------------
 local function isAdmin(player: Player): boolean
@@ -6240,6 +6332,18 @@ local function setPlace(player: Player, place: string)
 	local now = os.clock()
 	if now - (lastMove[player] or -math.huge) < 1 then return end
 	lastMove[player] = now
+	if from == "rough" and holder == player then
+		-- The winner leaves during the win screen: the diamond stays behind
+		-- (anchored and hidden until the next round) and their arm comes down.
+		diamond.Anchored = true
+		if holdWeld ~= nil then
+			holdWeld:Destroy()
+			holdWeld = nil
+		end
+		showDiamond(false)
+		lowerArms()
+		holder = nil
+	end
 	-- The attribute turning on goes first, so the player is never seen in neither game on the way.
 	if place == "chalk" then player:SetAttribute("InChalk", true) end
 	if place == "climb" then player:SetAttribute("InClimb", true) end
@@ -6369,6 +6473,31 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
 		return
+	elseif action == "setGameCode" and type(value) == "string" then
+		-- GAME CODE in the Y panel: the code the bridge's control page shows.
+		-- The relay then sends this streamer's gifts to this game.
+		local code = string.upper((string.gsub(value, "[^%w]", "")))
+		if #code > Config.RelayMaxCodeLength then
+			notice(player, "That game code is too long. Copy it from the control page.")
+			return
+		end
+		settings.gameCode = code
+		saveSettings()
+		useRelay()
+		notice(player, if code == "" then "Game code cleared." else "Game code set to " .. code .. ".")
+		return
+	elseif action == "setRelayUrl" and type(value) == "string" then
+		-- The relay's address, for a streamer running their own relay.
+		local url = (string.gsub(value, "%s", ""))
+		if url ~= "" and not string.match(url, "^https?://[%w%.%-]+[%w%./%-:]*$") then
+			notice(player, "Enter the relay address, like https://my-relay.example.com")
+			return
+		end
+		settings.relayUrl = (string.gsub(url, "/+$", ""))
+		saveSettings()
+		useRelay()
+		notice(player, if settings.relayUrl == "" then "Relay cleared." else "Relay set.")
+		return
 	elseif action == "setTheme" and type(value) == "string" then
 		setTheme(value)
 		return
@@ -6423,7 +6552,9 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		local now = os.clock()
 		local since = now - (mineCooldown[player] or 0)
-		local allowed = math.min(math.floor(since * Config.DigPerSecond + 0.5), math.ceil(Config.DigPerSecond / 4))
+		-- Up to two strikes' worth, so a strike that arrives late (network
+		-- jitter) makes up for the one before it that came early.
+		local allowed = math.min(math.floor(since * Config.DigPerSecond + 0.5), math.ceil(Config.DigPerSecond / 4) * 2)
 		if allowed < 1 then
 			return
 		end
@@ -6434,7 +6565,8 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 			return
 		end
 		local at = current:keyPosition(key)
-		if (root.Position - at).Magnitude > 16 then
+		-- The client allows 16 studs; the server sees the player a moment late.
+		if (root.Position - at).Magnitude > 20 then
 			return
 		end
 		mineCooldown[player] = now
@@ -6478,6 +6610,27 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 	elseif action == "chalkHold" then
 		-- The writer pressed or let go of the write button.
 		chalkGame.hold(player, value)
+		return
+	end
+	if action == "setHideCard" and type(value) == "table" and type(value.hidden) == "boolean" then
+		-- Settings: hide Diamond Climb's speed and jump card, or Chalkboard
+		-- Count's writing speed card. Remembered for next time.
+		local cards = { climb = { "hiddenClimbCard", "HideClimbCard" }, chalk = { "hiddenChalkCard", "HideChalkCard" } }
+		local card = cards[value.card]
+		if card == nil then return end
+		local now = os.clock()
+		if now - (hideAt[player] or -math.huge) < 0.2 then return end
+		hideAt[player] = now
+		player:SetAttribute(card[2], value.hidden)
+		local list = settings[card[1]]
+		local id = tostring(player.UserId)
+		if (list[id] == true) ~= value.hidden then
+			local count = 0
+			for _ in list do count += 1 end
+			if value.hidden and count >= 500 then return end
+			list[id] = if value.hidden then true else nil
+			Store.save(settings)
+		end
 		return
 	end
 	if action == "setHideButtons" then
@@ -6575,14 +6728,21 @@ local function onPlayer(player: Player)
 	player.CharacterAdded:Connect(function(character)
 		placeCharacter(player, character)
 	end)
-	if player.Character then
-		task.spawn(placeCharacter, player, player.Character)
-	else
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if character and not (humanoid and humanoid.Health <= 0) then
+		task.spawn(placeCharacter, player, character)
+	elseif not Players.CharacterAutoLoads then
+		-- Joined while the world was being built (or died in the empty sky
+		-- then): Roblox won't spawn them, so they spawn now, in the lobby.
+		-- Later joiners are spawned by Roblox itself.
 		task.spawn(function() if player.Parent then player:LoadCharacter() end end)
 	end
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
 	player:SetAttribute("HideButtons", settings.hiddenButtons[tostring(player.UserId)] == true)
+	player:SetAttribute("HideClimbCard", settings.hiddenClimbCard[tostring(player.UserId)] == true)
+	player:SetAttribute("HideChalkCard", settings.hiddenChalkCard[tostring(player.UserId)] == true)
 	if not modernChat then
 		player.Chatted:Connect(function(message)
 			onChat(player, message)
@@ -6618,18 +6778,21 @@ newRound()
           <string name="Name">ChalkGame</string>
           <string name="Source"><![CDATA[--!strict
 -- Chalkboard Count, the third game in the games menu: the writer stands at a
--- big green chalkboard, filmed by the classroom camera, and holds down to
+-- big green chalkboard in a classroom and holds down to
 -- write the next number, and the next, at their chosen writing speed, until
--- they reach the goal. TikTok gifts move the count up (gifts that would break
+-- they reach the goal and hold it for Config.HoldSeconds (15 real seconds,
+-- shown as a countdown from 10 that slows near the end) without a gift
+-- taking the count back down. TikTok gifts move the count up (gifts that would break
 -- the mountain) or down (gifts that add stone). The reset gift (a Galaxy) starts
 -- a 60 second countdown that wipes the board back to 0, unless someone sends
--- a gift worth 1,000 coins or more to save it. Reaching the goal wins.
+-- a gift worth 1,000 coins or more to save it. Holding the goal wins.
 --
 -- Everything is saved in settings.chalk and shown to every player through the
 -- State attributes ChalkCount, ChalkGoal, ChalkWins, ChalkBest, ChalkSpeed,
 -- ChalkTheme, ChalkResetGift, ChalkSaveCoins, ChalkResetSeconds,
 -- ChalkStrength, ChalkResetEnds (server time the board is wiped, 0 when no
--- countdown) and ChalkWriting. The game is single player, so there is one count.
+-- countdown), ChalkHoldStart (server time the count reached the goal, 0 when
+-- not holding) and ChalkWriting. The game is single player, so there is one count.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local StarterPlayer = game:GetService("StarterPlayer")
@@ -6637,6 +6800,7 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
+local Config = require(Shared:WaitForChild("Config"))
 local Classroom = require(script.Parent:WaitForChild("Classroom"))
 
 local ChalkGame = {}
@@ -6701,7 +6865,7 @@ export type Game = {
 	characterAdded: (player: Player, character: Model) -> (),
 	hold: (player: Player, value: any) -> (),
 	setting: (player: Player, action: string, value: any) -> boolean,
-	gift: (who: string, event: { [string]: any }, rocks: number, doubled: boolean) -> string,
+	gift: (who: string, event: { [string]: any }, rocks: number, doubled: boolean, rule: number?) -> string,
 	removing: (player: Player) -> (),
 }
 
@@ -6717,6 +6881,8 @@ function ChalkGame.start(options: Options): Game
 	local resetSerial = 0
 	local winning = false
 	local dirty = false
+	local holdStart = 0
+	local holdSerial = 0
 
 	local function publish()
 		state:SetAttribute("ChalkCount", progress.count)
@@ -6730,6 +6896,7 @@ function ChalkGame.start(options: Options): Game
 		state:SetAttribute("ChalkResetSeconds", progress.resetSeconds)
 		state:SetAttribute("ChalkStrength", progress.strength)
 		state:SetAttribute("ChalkResetEnds", resetEnds)
+		state:SetAttribute("ChalkHoldStart", holdStart)
 	end
 	publish()
 	state:SetAttribute("ChalkWriting", false)
@@ -6779,10 +6946,19 @@ function ChalkGame.start(options: Options): Game
 		state:SetAttribute("ChalkResetEnds", 0)
 	end
 
+	local function cancelHold()
+		holdSerial += 1
+		if holdStart ~= 0 then
+			holdStart = 0
+			state:SetAttribute("ChalkHoldStart", 0)
+		end
+	end
+
 	-- The goal: a win, then the board is wiped for the next count.
 	local function reachGoal()
 		if winning then return end
 		winning = true
+		cancelHold()
 		cancelReset()
 		progress.wins += 1
 		state:SetAttribute("ChalkWins", progress.wins)
@@ -6791,15 +6967,32 @@ function ChalkGame.start(options: Options): Game
 		notify:FireAllClients("chalkWin", { wins = progress.wins, goal = progress.goal, name = if who then who.DisplayName else "" })
 		task.delay(ChalkGame.WIN_SECONDS, function()
 			winning = false
-			setCount(0)
+			-- The show first, then the count: the board keeps the old number
+			-- until the eraser passes over it.
 			notify:FireAllClients("chalkWipe", { reason = "win" })
+			setCount(0)
+		end)
+	end
+
+	-- At the goal the hold starts: the count has to stay there for it to win.
+	local function startHold()
+		if winning or holdStart ~= 0 or progress.count < progress.goal or writer() == nil then return end
+		holdSerial += 1
+		local serial = holdSerial
+		holdStart = workspace:GetServerTimeNow()
+		state:SetAttribute("ChalkHoldStart", holdStart)
+		task.delay(Config.HoldSeconds, function()
+			if serial ~= holdSerial then return end
+			holdStart = 0
+			state:SetAttribute("ChalkHoldStart", 0)
+			if progress.count >= progress.goal and writer() ~= nil then reachGoal() end
 		end)
 	end
 
 	local function add(amount: number)
 		if winning then return end
 		setCount(progress.count + amount)
-		if progress.count >= progress.goal then reachGoal() end
+		if progress.count >= progress.goal then startHold() else cancelHold() end
 	end
 
 	-- Writing: while the writer holds, one number every 1/speed seconds.
@@ -6809,10 +7002,10 @@ function ChalkGame.start(options: Options): Game
 		for player, on in holding do
 			if on and writing(player) and player.Parent ~= nil then anyone = true end
 		end
-		-- The arm rests during the win's celebration.
-		local shown = anyone and not winning
+		-- The arm rests at the goal and during the win's celebration.
+		local shown = anyone and not winning and progress.count < progress.goal
 		if state:GetAttribute("ChalkWriting") ~= shown then state:SetAttribute("ChalkWriting", shown) end
-		if not anyone or winning then
+		if not anyone or winning or progress.count >= progress.goal then
 			carry = 0
 			return
 		end
@@ -6843,9 +7036,16 @@ function ChalkGame.start(options: Options): Game
 		return ChalkBoard.standFrame()
 	end
 
+	-- Back at the board with the goal reached, the hold starts again;
+	-- leaving the classroom stops it.
 	function self.entered(player: Player, isWriting: boolean)
 		if not isWriting then holding[player] = nil end
 		applyMove(player)
+		if isWriting then
+			startHold()
+		elseif writer() == nil then
+			cancelHold()
+		end
 	end
 
 	function self.characterAdded(player: Player, character: Model)
@@ -6872,6 +7072,7 @@ function ChalkGame.start(options: Options): Game
 		elseif action == "setChalkGoal" and type(value) == "number" and value == value then
 			progress.goal = math.clamp(math.floor(value), ChalkBoard.GOAL.min, ChalkBoard.GOAL.max)
 			if progress.count >= progress.goal then setCount(progress.goal - 1) end
+			cancelHold()
 		elseif action == "setChalkResetGift" and type(value) == "string" then
 			local name = string.gsub(string.sub(value, 1, 40), "^%s*(.-)%s*$", "%1")
 			local clean = if name == "" then "" elseif options.filter then options.filter(player, name) else name
@@ -6886,8 +7087,9 @@ function ChalkGame.start(options: Options): Game
 		elseif action == "chalkRestart" then
 			if winning then return true end
 			cancelReset()
-			setCount(0)
+			cancelHold()
 			notify:FireAllClients("chalkWipe", { reason = "restart" })
+			setCount(0)
 		elseif action == "chalkTestReset" then
 			self.gift("Test", { type = "gift", gift = progress.resetGift ~= "" and progress.resetGift or ChalkBoard.RESET_GIFT, coins = 1000, id = "test-reset" }, 1, false)
 			return true
@@ -6902,9 +7104,11 @@ function ChalkGame.start(options: Options): Game
 		return true
 	end
 
-	-- A gift (or a follow or share) for the count. `rocks` is what it would do
-	-- to the mountain: its sign decides up or down. Returns the feed's ending.
-	function self.gift(who: string, event: { [string]: any }, rocks: number, doubled: boolean): string
+	-- A gift (or a follow or share) for the count. `rule` is the streamer's
+	-- own number for this gift (up if positive, down if negative, per gift);
+	-- without one, `rocks` (what it would do to the mountain) decides: its
+	-- sign up or down, the coins how far. Returns the feed's ending.
+	function self.gift(who: string, event: { [string]: any }, rocks: number, doubled: boolean, rule: number?): string
 		if winning then return "" end
 		local coins = math.max(1, event.coins or 1)
 		local count = math.max(1, math.floor(event.count or 1))
@@ -6921,9 +7125,10 @@ function ChalkGame.start(options: Options): Game
 					resetEnds = 0
 					state:SetAttribute("ChalkResetEnds", 0)
 					local lost = progress.count
-					setCount(0)
+					cancelHold()
 					notify:FireAllClients("chalkReset", { state = "wiped", lost = lost })
 					notify:FireAllClients("chalkWipe", { reason = "reset" })
+					setCount(0)
 				end)
 				return string.format("  RESET IN %d", progress.resetSeconds)
 			end
@@ -6935,14 +7140,17 @@ function ChalkGame.start(options: Options): Game
 			notify:FireAllClients("chalkReset", { state = "saved", name = who })
 			ending = "  SAVED THE BOARD"
 		end
-		local amount = if event.type == "gift" then ChalkBoard.giftAmount(rocks, coins, count, progress.strength)
+		local amount = if event.type == "gift" and rule ~= nil then math.floor(rule) * count
+			elseif event.type == "gift" then ChalkBoard.giftAmount(rocks, coins, count, progress.strength)
 			elseif rocks > 0 then 1 else 0
 		if amount ~= 0 then
+			-- The show goes out before the count changes (the eraser rubs out the old number).
 			local from = progress.count
-			add(amount)
-			local moved = progress.count - from
-			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = progress.count, amount = moved, coins = coins, name = who,
+			local to = math.clamp(from + amount, 0, progress.goal)
+			local moved = to - from
+			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = to, amount = moved, coins = coins, name = who,
 				gift = event.gift or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"), doubled = doubled })
+			add(amount)
 			if moved ~= 0 then
 				ending = (if moved > 0 then string.format("  +%d", moved) else string.format("  %d", moved)) .. ending
 			end
@@ -6967,8 +7175,8 @@ return ChalkGame
           <string name="Source"><![CDATA[--!strict
 -- Chalkboard Count's classroom, built once on startup far off in the sky:
 -- a wooden floor, three walls with windows and a clock, the big chalkboard
--- with its frame and chalk tray, a teacher's desk, rows of school desks,
--- a bookshelf, a plant and ceiling lamps. Everything a theme recolours is
+-- with its frame and chalk tray, a teacher's desk, a bookshelf, a plant and
+-- ceiling lamps (no rows of desks watching). Everything a theme recolours is
 -- tagged with a "Role" attribute, and each theme's extra decorations (gold
 -- trim and a diamond, blossom branches, neon strips) are kept in ServerStorage
 -- until that theme is chosen. No lettering anywhere: the chalk is drawn by
@@ -7038,21 +7246,6 @@ local function lamp(parent: Instance, at: Vector3)
 	glow.Parent = bulb
 end
 
--- A school desk and chair, seen from behind by the camera.
-local function desk(parent: Instance, at: Vector3)
-	box(parent, "DeskTop", Vector3.new(4, 0.3, 2.6), at + Vector3.new(0, 2.5, 0), WOOD, Enum.Material.Wood, true)
-	for _, x in { -1.8, 1.8 } do
-		for _, z in { -1.1, 1.1 } do
-			box(parent, "DeskLeg", Vector3.new(0.2, 2.5, 0.2), at + Vector3.new(x, 0, z), METAL, Enum.Material.Metal)
-		end
-	end
-	box(parent, "ChairSeat", Vector3.new(2.4, 0.25, 2.2), at + Vector3.new(0, 1.6, 2.6), DARK_WOOD, Enum.Material.Wood)
-	box(parent, "ChairBack", Vector3.new(2.4, 2, 0.25), at + Vector3.new(0, 1.85, 3.6), DARK_WOOD, Enum.Material.Wood)
-	for _, x in { -1, 1 } do
-		box(parent, "ChairLeg", Vector3.new(0.18, 1.6, 0.18), at + Vector3.new(x, 0, 2.6), METAL, Enum.Material.Metal)
-	end
-end
-
 function Classroom.build(parent: Instance, store: Instance, theme: string?): Built
 	local O = ChalkBoard.ORIGIN
 	local model = Instance.new("Model")
@@ -7112,19 +7305,12 @@ function Classroom.build(parent: Instance, store: Instance, theme: string?): Bui
 	piece(model, "ClockHand", Vector3.new(0.15, 1.2, 0.08), CFrame.new(clockAt + Vector3.new(0.2, 0.45, 0.2)) * CFrame.Angles(0, 0, -0.5), Color3.fromRGB(30, 30, 30), Enum.Material.SmoothPlastic)
 	piece(model, "ClockHand", Vector3.new(0.12, 1.5, 0.08), CFrame.new(clockAt + Vector3.new(-0.35, -0.3, 0.2)) * CFrame.Angles(0, 0, 1.1), Color3.fromRGB(30, 30, 30), Enum.Material.SmoothPlastic)
 
-	-- The teacher's desk on the left, school desks facing the board, a bookshelf and a plant.
+	-- The teacher's desk on the left, a bookshelf and a plant.
 	box(model, "TeacherDesk", Vector3.new(8, 3, 3.6), Vector3.new(-17, 0, boardZ + 7), DARK_WOOD, Enum.Material.Wood, true)
 	box(model, "TeacherDeskTop", Vector3.new(8.6, 0.3, 4.2), Vector3.new(-17, 3, boardZ + 7), WOOD, Enum.Material.Wood, true)
 	box(model, "Apple", Vector3.new(0.7, 0.7, 0.7), Vector3.new(-14.5, 3.3, boardZ + 7), Color3.fromRGB(210, 40, 40), Enum.Material.SmoothPlastic).Shape = Enum.PartType.Ball
 	for k = 0, 2 do
 		box(model, "Book", Vector3.new(1.6, 0.35, 1.1), Vector3.new(-19, 3.3 + k * 0.35, boardZ + 7), ({ Color3.fromRGB(180, 50, 50), Color3.fromRGB(50, 90, 170), Color3.fromRGB(60, 140, 80) })[k + 1], Enum.Material.SmoothPlastic)
-	end
-	for row = 0, 1 do
-		for col = -1, 1 do
-			if not (row == 0 and col == 0) then
-				desk(model, Vector3.new(col * 10 - 4, 0, boardZ + 15 + row * 9))
-			end
-		end
 	end
 	box(model, "Bookshelf", Vector3.new(2.4, 9, 7), Vector3.new(W / 2 - 2.4, 0, boardZ + 6), DARK_WOOD, Enum.Material.Wood, true)
 	for shelf = 0, 3 do
@@ -7389,7 +7575,8 @@ function Climb.build(parent: Instance): Built
 	-- Gold posts round the top platform, each with a glowing orb.
 	for k = 0, 5 do
 		local angle = k * math.pi / 3
-		local at = finish + Vector3.new(math.cos(angle) * 6.4, 0, math.sin(angle) * 6.4)
+		local ring = ClimbPath.size(ClimbPath.TOP) / 2 - 1.2
+		local at = finish + Vector3.new(math.cos(angle) * ring, 0, math.sin(angle) * ring)
 		-- Not solid, so they never block the last jump.
 		piece(model, "FinishPost", Vector3.new(0.6, 3, 0.6), CFrame.new(at + Vector3.new(0, 1.5, 0)), GOLD, Enum.Material.Foil)
 		local orb = piece(model, "FinishOrb", Vector3.new(1, 1, 1), CFrame.new(at + Vector3.new(0, 3.4, 0)), CRYSTAL, Enum.Material.Neon)
@@ -7413,18 +7600,22 @@ return Climb
 -- climber picks their own walk speed and jump height. TikTok gifts send the
 -- climber up the tower (gifts that would break the mountain) or down it
 -- (gifts that would add stone), more platforms for bigger gifts, each with
--- its own animation (see ClimbEffects). Reaching the top wins a climb and
--- starts the next one from the bottom.
+-- its own animation (see ClimbEffects). Reaching the top starts the hold: the
+-- climber must stay there for Config.HoldSeconds (15 real seconds, shown as a
+-- countdown from 10 that slows near the end) without a gift sending them back
+-- down. Then the climb is won and the next one starts from the bottom.
 --
 -- The climb's progress is part of the saved settings (settings.climb) and is
 -- shown to every player through the State attributes ClimbCheckpoint,
--- ClimbBest, ClimbWins, ClimbSpeed, ClimbJump and ClimbStrength. The game is
+-- ClimbBest, ClimbWins, ClimbSpeed, ClimbJump and ClimbStrength, and
+-- ClimbHoldStart (the server time the hold at the top began, 0 when none). The game is
 -- single player, so there is one climb: the streamer's.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterPlayer = game:GetService("StarterPlayer")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
+local Config = require(Shared:WaitForChild("Config"))
 local Climb = require(script.Parent:WaitForChild("Climb"))
 
 local ClimbGame = {}
@@ -7507,6 +7698,8 @@ function ClimbGame.start(options: Options): Game
 	local notify = options.notify
 	local built = Climb.build(options.parent)
 	local winning = false
+	local holdStart = 0
+	local holdSerial = 0
 	local landAt: { [Player]: number } = {}
 	local moveAt: { [Player]: number } = {}
 
@@ -7517,6 +7710,7 @@ function ClimbGame.start(options: Options): Game
 		state:SetAttribute("ClimbSpeed", progress.speed)
 		state:SetAttribute("ClimbJump", progress.jump)
 		state:SetAttribute("ClimbStrength", progress.strength)
+		state:SetAttribute("ClimbHoldStart", holdStart)
 	end
 	publish()
 
@@ -7565,9 +7759,32 @@ function ClimbGame.start(options: Options): Game
 	end
 
 	-- The top: a win, then the next climb starts from the bottom.
-	local function reachTop(player: Player?)
+	local reachTop: (Player?) -> ()
+	local function cancelHold()
+		holdSerial += 1
+		if holdStart ~= 0 then
+			holdStart = 0
+			state:SetAttribute("ClimbHoldStart", 0)
+		end
+	end
+	-- At the top: the climber has to stay there for the hold to win.
+	local function startHold()
+		if winning or holdStart ~= 0 or progress.checkpoint < ClimbPath.TOP or climber() == nil then return end
+		holdSerial += 1
+		local serial = holdSerial
+		holdStart = workspace:GetServerTimeNow()
+		state:SetAttribute("ClimbHoldStart", holdStart)
+		task.delay(Config.HoldSeconds, function()
+			if serial ~= holdSerial then return end
+			holdStart = 0
+			state:SetAttribute("ClimbHoldStart", 0)
+			if progress.checkpoint >= ClimbPath.TOP and climber() ~= nil then reachTop(climber()) end
+		end)
+	end
+	function reachTop(player: Player?)
 		if winning then return end
 		winning = true
+		cancelHold()
 		progress.wins += 1
 		setCheckpoint(ClimbPath.TOP)
 		notify:FireAllClients("climbWin", { wins = progress.wins, name = if player then player.DisplayName else "" })
@@ -7591,9 +7808,15 @@ function ClimbGame.start(options: Options): Game
 		return ClimbPath.standFrame(progress.checkpoint)
 	end
 
-	-- Called when a player joins the climb (true) or leaves it (false).
+	-- Called when a player joins the climb (true) or leaves it (false). Back
+	-- at the top, the hold starts again; leaving the climb stops it.
 	function self.entered(player: Player, isClimbing: boolean)
 		applyMove(player)
+		if isClimbing then
+			startHold()
+		elseif climber() == nil then
+			cancelHold()
+		end
 	end
 
 	function self.characterAdded(player: Player, character: Model)
@@ -7619,7 +7842,7 @@ function ClimbGame.start(options: Options): Game
 		local feet = root.Position - Vector3.new(0, humanoid.HipHeight + root.Size.Y / 2, 0)
 		if not ClimbPath.isOn(index, feet, 4) then return end
 		setCheckpoint(index)
-		if index == ClimbPath.TOP then reachTop(player) end
+		if index == ClimbPath.TOP then startHold() end
 	end
 
 	-- The climb's sliders: { speed = studs a second, jump = studs high }.
@@ -7667,6 +7890,7 @@ function ClimbGame.start(options: Options): Game
 	-- From the streamer panel: back to the bottom (wins and best stay).
 	function self.restart()
 		if winning then return end
+		cancelHold()
 		setCheckpoint(0)
 		notify:FireAllClients("climbRestart", {})
 		for _, player in game:GetService("Players"):GetPlayers() do
@@ -7683,6 +7907,8 @@ function ClimbGame.start(options: Options): Game
 		local to = math.clamp(from + move, 0, ClimbPath.TOP)
 		-- Already at the bottom (or top): no ride that goes nowhere.
 		if to == from then return from, from end
+		-- Sent down from the top: the hold is lost.
+		if to < ClimbPath.TOP then cancelHold() end
 		setCheckpoint(to)
 		local data = table.clone(info)
 		data.up = move > 0
@@ -7692,12 +7918,9 @@ function ClimbGame.start(options: Options): Game
 		data.name = who
 		notify:FireAllClients("climbGift", data)
 		if to == ClimbPath.TOP and from ~= to then
-			-- The win waits for the ride up to finish.
-			winning = true
-			task.delay(ClimbPath.giftSeconds(info.coins or 1), function()
-				winning = false
-				reachTop(climber())
-			end)
+			-- The hold starts once the ride up has finished (unless another
+			-- gift has sent them down meanwhile).
+			task.delay(ClimbPath.giftSeconds(info.coins or 1), startHold)
 		end
 		return from, to
 	end
@@ -10199,7 +10422,8 @@ function Mountain.dig(self: Mountain, key: number, count: number): number
 	if count <= 0 or not self:isExposed(key) then
 		return 0
 	end
-	local keys = self.grid:blast(count, key, nil, function(cell) table.insert(self.removedKeys, cell) end)
+	-- Only rock joined to the one dug: a loose rock never takes rock elsewhere with it.
+	local keys = self.grid:blast(count, key, nil, function(cell) table.insert(self.removedKeys, cell) end, true)
 	self.grid:takeFresh()
 	self:_syncDiamond()
 	return #keys
@@ -11904,6 +12128,7 @@ return Statue
 -- Access to API Services"). Without them everything still works; it just is
 -- not remembered between sessions.
 local DataStoreService = game:GetService("DataStoreService")
+local RunService = game:GetService("RunService")
 
 local Store = {}
 
@@ -11939,7 +12164,9 @@ function Store.load(key: string?): ({ [string]: any }?, boolean)
 		return nil, false
 	end
 	local ok, data = pcall(target.GetAsync, target, key or KEY)
-	for _ = 1, 2 do
+	-- A passing DataStore hiccup gets two more tries; Studio without API
+	-- access fails the same way every time, so it doesn't wait for nothing.
+	for _ = 1, if RunService:IsStudio() then 0 else 2 do
 		if ok then break end
 		task.wait(2)
 		ok, data = pcall(target.GetAsync, target, key or KEY)
@@ -11998,14 +12225,17 @@ return Store
 --  * In Roblox Studio the game polls the bridge on this PC over HTTP.
 --  * In a published game the bridge publishes to MessagingService through
 --    Roblox Open Cloud (see the README), and the game subscribes here.
--- Both paths can run at once; every event has a unique id and runs once.
+--  * A published game that many streamers play reads the streamer's own
+--    events from the relay, using the game code they typed in the Y panel
+--    (see relay/relay.mjs). Only that code's gifts arrive.
+-- Every path can run at once; every event has a unique id and runs once.
 local HttpService = game:GetService("HttpService")
 local MessagingService = game:GetService("MessagingService")
 local RunService = game:GetService("RunService")
 
 export type Event = {
 	id: string,
-	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "theme" | "skin"
+	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "climbRule" | "chalkRule" | "theme" | "skin"
 	user: string?,
 	name: string?,
 	gift: string?,
@@ -12016,6 +12246,8 @@ export type Event = {
 	likes: number?,
 	rocks: number?,
 	keybind: string?,
+	amount: number?, -- "climbRule" and "chalkRule" events: platforms or numbers per gift, negative for down
+	clear: boolean?, -- and true when the rule is removed
 	theme: string?, -- "theme" events: the map theme the control page chose
 	skin: string?, -- "skin" events: stone and diamond, or hay and needle
 }
@@ -12040,6 +12272,8 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 	local event: Event = {
 		rocks = if type(raw.rocks) == "number" and raw.rocks == raw.rocks then math.clamp(raw.rocks, -1500000, 1500000) else nil,
 		keybind = if type(raw.keybind) == "string" then string.sub(raw.keybind, 1, 16) else nil,
+		amount = if type(raw.amount) == "number" and raw.amount == raw.amount then math.clamp(raw.amount, -100000, 100000) else nil,
+		clear = if raw.clear == true then true else nil,
 		theme = if type(raw.theme) == "string" then string.sub(raw.theme, 1, 16) else nil,
 		skin = if type(raw.skin) == "string" then string.sub(raw.skin, 1, 16) else nil,
 		id = raw.id,
@@ -12057,6 +12291,76 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 	if not ok then
 		warn("[DiamondRush] event failed: " .. tostring(problem))
 	end
+end
+
+-- The relay (a published game played by many streamers) ------------------------
+-- The game asks the relay for its code's events and holds the request open
+-- until something arrives, so gifts land about as fast as in Studio.
+local RELAY_WAIT = 15
+local relayCode = ""
+local relayUrl = ""
+-- Goes up whenever the code or address changes, so an older loop stops.
+local relayGeneration = 0
+
+local function relayLoop(generation: number, onEvent: (Event) -> (), onStatus: (string) -> ())
+	local session = ""
+	local since = 0
+	local failures = 0
+	local code = relayCode
+	while relayGeneration == generation and code ~= "" do
+		local url = string.format(
+			"%s/c/%s/events?since=%d&session=%s&wait=%d",
+			relayUrl,
+			HttpService:UrlEncode(code),
+			since,
+			HttpService:UrlEncode(session),
+			RELAY_WAIT
+		)
+		local ok, body = pcall(HttpService.GetAsync, HttpService, url, true)
+		local decoded, data = false, nil
+		if ok then
+			decoded, data = pcall(HttpService.JSONDecode, HttpService, body)
+		end
+		if decoded and type(data) == "table" and type(data.events) == "table" then
+			failures = 0
+			if data.session ~= session then
+				session = tostring(data.session)
+				since = 0
+			end
+			for _, raw in data.events do
+				deliver(raw, onEvent)
+			end
+			if type(data.last) == "number" then
+				since = data.last
+			end
+			onStatus(if type(data.tiktok) == "string" and data.tiktok ~= "" then data.tiktok else "waiting for your bridge")
+			task.wait(0.2)
+		else
+			failures += 1
+			onStatus(if failures > 2 then "can't reach the relay (check the game code)" else "connecting to the relay…")
+			task.wait(math.min(2 * failures, 15))
+		end
+	end
+end
+
+-- The streamer's game code and the relay's address, from the Y panel. An empty
+-- code stops reading from the relay.
+function TikTokFeed.useRelay(url: string, code: string, onEvent: (Event) -> (), onStatus: (string) -> ())
+	local cleanUrl = (string.gsub(url, "/+$", ""))
+	-- The streamer may type the code with a space or dash, as it is shown.
+	local cleanCode = if cleanUrl == "" then "" else string.upper((string.gsub(code, "[^%w]", "")))
+	if cleanUrl == relayUrl and cleanCode == relayCode then
+		return
+	end
+	relayUrl = cleanUrl
+	relayCode = cleanCode
+	-- Any loop still running is for the old code, so it stops on its own.
+	relayGeneration += 1
+	if relayCode == "" then
+		onStatus("no game code set")
+		return
+	end
+	task.spawn(relayLoop, relayGeneration, onEvent, onStatus)
 end
 
 -- onStatus receives a short line for the screen, such as
@@ -12101,6 +12405,10 @@ function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (
 			end
 			if decoded and type(data) == "table" then
 				failures = 0
+				-- The game just started: the bridge's older events were already
+				-- played (or sent before Play), so only its gift rules apply
+				-- (the mountain's, the climb's and the chalkboard's).
+				local fresh = session == ""
 				if data.session ~= session then
 					-- The bridge restarted: start again from its first event.
 					session = tostring(data.session)
@@ -12108,7 +12416,9 @@ function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (
 				end
 				if type(data.events) == "table" then
 					for _, raw in data.events do
-						deliver(raw, onEvent)
+						if not fresh or (type(raw) == "table" and (raw.type == "giftRule" or raw.type == "climbRule" or raw.type == "chalkRule")) then
+							deliver(raw, onEvent)
+						end
 					end
 				end
 				if type(data.last) == "number" then
@@ -12364,6 +12674,7 @@ local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
 local Skin = require(Shared:WaitForChild("Skin"))
 local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local FirstPerson = require(script:WaitForChild("FirstPerson"))
+local Sounds = require(script:WaitForChild("Sounds"))
 -- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
 FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
 FirstPerson.start()
@@ -12468,6 +12779,9 @@ end
 local gui = make("ScreenGui", {
 	Name = "DiamondRushHud",
 	ResetOnSpawn = false,
+	-- Above the climb's and chalkboard's own cards, so the Y panel and the
+	-- settings are never covered (the games menu, 5, stays above).
+	DisplayOrder = 2,
 	IgnoreGuiInset = false,
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, player:WaitForChild("PlayerGui"))
@@ -12483,14 +12797,14 @@ local roughHud = make("Frame", {
 -- Diamond Climb: its display, sliders, landings and gift rides.
 local ClimbView = require(script:WaitForChild("ClimbView"))
 local climb = ClimbView.start(Request, State)
--- Chalkboard Count: the classroom camera, chalk numbers and its display.
+-- Chalkboard Count: the view of the board, chalk numbers and its display.
 local ChalkView = require(script:WaitForChild("ChalkView"))
 local chalk = ChalkView.start(Request, State)
 
 -- The games menu: the game's display, first-person view and hands only show
 -- while playing Diamond in the Rough, not in the lobby; Diamond Climb has a
--- third-person camera and its own display, and Chalkboard Count films the
--- writer from a fixed classroom camera.
+-- third-person camera and its own display, and Chalkboard Count shows the
+-- writer and the board from a fixed view.
 local LobbyView = require(script:WaitForChild("LobbyView"))
 -- How to play: from the lobby board, the games menu or H.
 local HowToPlay = require(script:WaitForChild("HowToPlay"))
@@ -12771,6 +13085,7 @@ local winBest = winLine(174, 30, FONT_MEDIUM, 20, GOLD)
 local winNewBest = winLine(230, 32, FONT, 18, GREEN)
 
 local function showWin(data: { [string]: any })
+	if player:GetAttribute("InGame") == true then Sounds.play("cheer") end
 	local words = Skin.words(attr("Skin", "stone"))
 	winTitle.Text = string.upper(words.gem) .. " SECURED"
 	winWho.Text = tostring(data.winner or "") .. " wins!"
@@ -12789,7 +13104,8 @@ end
 local panel = make("ScrollingFrame", {
 	AnchorPoint = Vector2.new(1, 0),
 	Position = UDim2.new(1, -12, 0, 92),
-	Size = UDim2.fromOffset(340, 520),
+	-- As tall as the screen allows (Studio's play area can be short), up to 520.
+	Size = UDim2.new(0, 340, 1, -104),
 	CanvasSize = UDim2.fromOffset(0, 0),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ScrollBarThickness = 4,
@@ -12798,6 +13114,7 @@ local panel = make("ScrollingFrame", {
 	ZIndex = 10,
 }, gui)
 glass(panel, 14, 0.06)
+make("UISizeConstraint", { MaxSize = Vector2.new(340, 520) }, panel)
 make("UIPadding", {
 	PaddingLeft = UDim.new(0, 12),
 	PaddingRight = UDim.new(0, 14),
@@ -12989,6 +13306,7 @@ local function refreshRules()
 			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = WHITE,
+			TextTruncate = Enum.TextTruncate.AtEnd,
 			Text = string.format("%s: %s %s rocks", tostring(name), if (tonumber(rocks) or 0) < 0 then "adds" else "removes", Format.commas(math.abs(tonumber(rocks) or 0))),
 			ZIndex = 12,
 		}, row)
@@ -13018,7 +13336,9 @@ local testGifts = {
 	{ "Finger Heart · 5", "Finger Heart", 5, 1 },
 	{ "Rose x10", "Rose", 1, 10 },
 	{ "Doughnut · 30", "Doughnut", 30, 1 },
+	{ "Perfume · 20", "Perfume", 20, 1 },
 	{ "Hand Hearts · 100", "Hand Hearts", 100, 1 },
+	{ "Confetti · 100", "Confetti", 100, 1 },
 	{ "Money Gun · 500", "Money Gun", 500, 1 },
 	{ "Galaxy · 1,000", "Galaxy", 1000, 1 },
 	{ "Doughnut x40", "Doughnut", 30, 40 },
@@ -13240,6 +13560,19 @@ panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
 
+-- A published game that many streamers play: the code from the bridge's
+-- control page tells the relay which stream's gifts belong to this game.
+panelLabel("GAME CODE (published game: from localhost:8787)")
+local gameCodeBox = panelBox("", function(text)
+	send("setGameCode", text)
+end)
+gameCodeBox.PlaceholderText = "e.g. ABCD EFGH, or empty for none"
+panelLabel("RELAY ADDRESS (only if you run your own relay)")
+local relayBox = panelBox("", function(text)
+	send("setRelayUrl", text)
+end)
+relayBox.PlaceholderText = "https://my-relay.example.com"
+
 panelLabel("MAP THEME (changes for everyone straight away)")
 local THEME_BUTTONS = { { "Alpine", "default" }, { "Sakura", "sakura" }, { "Farm", "farm" }, { "Desert", "desert" }, { "Haunted", "haunted" } }
 local themeButtons: { TextButton } = {}
@@ -13427,6 +13760,9 @@ local function refreshPanelFields()
 	perLikeBox.Text = "Like: " .. tostring(attr("PerLike", Config.StonePerLike))
 	perFollowBox.Text = "Follow: " .. tostring(attr("PerFollow", Config.StonePerFollow))
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
+	local code = attr("GameCode", "")
+	gameCodeBox.Text = if #code == 8 then string.sub(code, 1, 4) .. " " .. string.sub(code, 5) else code
+	relayBox.Text = attr("RelayUrl", Config.RelayUrl)
 end
 
 -- Settings (every player): the field of view and hiding the buttons, from the
@@ -13447,7 +13783,7 @@ glass(settingsButton, 16)
 make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, settingsButton)
 local settingsCard = make("Frame", {
 	Position = UDim2.fromOffset(12, 50),
-	Size = UDim2.fromOffset(300, 214),
+	Size = UDim2.fromOffset(300, 306),
 	Visible = false,
 	ZIndex = 15,
 }, gui)
@@ -13493,7 +13829,7 @@ local fovKnob = make("Frame", {
 rounded(fovKnob, 9)
 local function settingsAction(text: string, x: number, colour: Color3): TextButton
 	local button = make("TextButton", {
-		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 160),
+		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 252),
 		Size = UDim2.new(0.5, -4, 0, 30),
 		BackgroundColor3 = colour,
 		Font = FONT,
@@ -13530,7 +13866,9 @@ local hideKnob = make("Frame", {
 }, hideSwitch)
 rounded(hideKnob, 10)
 local function refreshHidden()
-	local hidden = player:GetAttribute("HideButtons") == true
+	-- Phones and tablets have no G or P key to bring the buttons back, so
+	-- they always show there.
+	local hidden = player:GetAttribute("HideButtons") == true and UserInputService.KeyboardEnabled
 	hideSwitch.BackgroundColor3 = if hidden then SELECTED else BUTTON
 	hideKnob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
 	settingsButton.Visible = not hidden
@@ -13544,6 +13882,44 @@ hideSwitch.Activated:Connect(function()
 	player:SetAttribute("HideButtons", hidden)
 	Request:FireServer("setHideButtons", hidden)
 end)
+-- Switches that hide a game's own card: Diamond Climb's speed and jump
+-- sliders, Chalkboard Count's writing speed and themes. Remembered by the server.
+local function cardSwitch(y: number, title: string, card: string, attribute: string)
+	settingsText({ Position = UDim2.fromOffset(0, y), Size = UDim2.new(1, -60, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = title })
+	local switch = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, y + 2),
+		Size = UDim2.fromOffset(46, 26),
+		BackgroundColor3 = BUTTON,
+		AutoButtonColor = false,
+		Text = "",
+		ZIndex = 16,
+	}, settingsCard)
+	rounded(switch, 13)
+	local knob = make("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 3, 0.5, 0),
+		Size = UDim2.fromOffset(20, 20),
+		BackgroundColor3 = WHITE,
+		BorderSizePixel = 0,
+		ZIndex = 17,
+	}, switch)
+	rounded(knob, 10)
+	local function refresh()
+		local hidden = player:GetAttribute(attribute) == true
+		switch.BackgroundColor3 = if hidden then SELECTED else BUTTON
+		knob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
+	end
+	player:GetAttributeChangedSignal(attribute):Connect(refresh)
+	refresh()
+	switch.Activated:Connect(function()
+		local hidden = player:GetAttribute(attribute) ~= true
+		player:SetAttribute(attribute, hidden)
+		Request:FireServer("setHideCard", { card = card, hidden = hidden })
+	end)
+end
+cardSwitch(156, "Hide climb speed card", "climb", "HideClimbCard")
+cardSwitch(204, "Hide chalk writing card", "chalk", "HideChalkCard")
 local fovReset = settingsAction("Reset", 0, BUTTON)
 local settingsDone = settingsAction("Done", 0.5, SELECTED)
 
@@ -13588,6 +13964,8 @@ local function settingsOpen(): boolean
 end
 local function setSettingsOpen(show: boolean)
 	settingsCard.Visible = show
+	-- The games menu would cover the card.
+	if show then LobbyView.close() end
 	draggingFov = false
 	if show then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
 end
@@ -13615,6 +13993,13 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	end
 end)
 RunService.RenderStepped:Connect(function()
+	-- Back in the lobby the game's display is off: its panel and settings close
+	-- (Y and P can't reach them there) and the lobby's camera keeps the mouse.
+	if not gui.Enabled then
+		panel.Visible = false
+		settingsCard.Visible = false
+		return
+	end
 	-- First person locks the mouse; free it while the panel or settings are open.
 	if panel.Visible or settingsOpen() then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
@@ -13689,6 +14074,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 		setText(countHolder, string.upper(tostring(attr("Holder", ""))) .. " IS HOLDING IT")
 		setText(countNumber, tostring(shown))
 		if shown ~= lastCount then
+			if lastCount ~= -1 and roughHud.Visible then Sounds.play("tick") end
 			lastCount = shown
 			countNumber.TextColor3 = WHITE:Lerp(GOLD, 1 - shown / Config.HoldCountFrom)
 			countScale.Scale = 1.35
@@ -13708,6 +14094,11 @@ RunService.RenderStepped:Connect(function(dt: number)
 			banner.TextTransparency = 0.15 + 0.15 * math.sin(now * 5)
 		end
 	end
+end)
+
+-- A chime when the diamond (or needle) is uncovered.
+State:GetAttributeChangedSignal("Phase"):Connect(function()
+	if attr("Phase", "Digging") == "Revealed" and player:GetAttribute("InGame") == true then Sounds.play("chime") end
 end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
@@ -13879,11 +14270,19 @@ end
 RunService.Heartbeat:Connect(function()
 	player:SetAttribute("DiggingRock", digTarget() ~= nil)
 end)
+-- Each landed strike cracks the rock with a crunch; every fourth a bigger
+-- chunk breaks away.
+local strikes = 0
 FirstPerson.onStrike(function()
 	local key = digTarget()
 	local character = player.Character
 	if key ~= nil and (character == nil or character:FindFirstChildOfClass("Tool") == nil) then
 		Request:FireServer("mine", key)
+		local rock = aimTarget
+		local at = if rock then rock.Position else nil
+		strikes += 1
+		Sounds.play("dig", at)
+		if strikes % 4 == 0 then Sounds.play("crumble", at) end
 	end
 end)
 
@@ -14088,23 +14487,706 @@ return CameraShake
         </Item>
         <Item class="ModuleScript" referent="48">
           <Properties>
+            <string name="Name">ChalkEffects</string>
+            <string name="Source"><![CDATA[--!strict
+-- Chalkboard Count's gift animations, played on the board and in the
+-- classroom: six for gifts that count up and six for gifts that count down,
+-- one per gift tier, each wilder than the last, with its own sounds.
+--
+-- Counting up:
+--   1  CHALK STAR      (1+ coins)       a gold star is chalked beside the number and bursts
+--   2  GOLD STARS      (10+ coins)      three gold star stickers fly in and stamp the board
+--   3  PAPER PLANES    (100+ coins)     paper planes loop round the room and dive at the number
+--   4  CHALK STORM     (500+ coins)     sticks of chalk whirl round the number, then slam in
+--   5  FIREWORKS       (1,000+ coins)   rockets shoot up from the floor and burst over the board
+--   6  SUPERNOVA       (10,000+ coins)  the room goes dark, a star swells on the board, light
+--                                       rays sweep the room and it goes nova in confetti
+-- Counting down:
+--   1  SPITBALL        a paper ball arcs in and splats on the number
+--   2  ERASER TOSS     an eraser tumbles in, bounces off the board in a cloud of dust
+--   3  SPONGE SPLASH   a wet sponge splats, water sprays and drips run down the board
+--   4  BOARD QUAKE     the board shakes, cracks race over it and the number crumbles
+--   5  DUSTER TORNADO  a whirlwind of erasers spins over the board and scrubs it
+--   6  BLACK HOLE      a black hole opens in the board and swallows the number
+--
+-- play() returns when the number should change (the impact), so the board
+-- keeps the old number until then. Nothing is physical; every piece is gone
+-- a few seconds after its show, and each tier has a part budget.
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
+local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
+local Sounds = require(script.Parent:WaitForChild("Sounds"))
+
+local ChalkEffects = {}
+
+ChalkEffects.UP_TITLES = { "CHALK STAR", "GOLD STARS", "PAPER PLANES", "CHALK STORM", "FIREWORKS", "SUPERNOVA" }
+ChalkEffects.DOWN_TITLES = { "SPITBALL", "ERASER TOSS", "SPONGE SPLASH", "BOARD QUAKE", "DUSTER TORNADO", "BLACK HOLE" }
+-- When the number changes, seconds into each show.
+ChalkEffects.UP_IMPACT = { 0.5, 0.75, 1.3, 2.1, 2.5, 3.4 }
+ChalkEffects.DOWN_IMPACT = { 0.55, 0.85, 1, 1.6, 2.2, 3 }
+ChalkEffects.PART_LIMITS = { 30, 40, 60, 80, 100, 120 }
+ChalkEffects.LIFETIMES = { 3, 3.5, 4.5, 5.5, 6.5, 8 }
+
+local WHITE = Color3.new(1, 1, 1)
+local BLACK = Color3.new(0, 0, 0)
+local GOLD = Color3.fromRGB(255, 206, 92)
+local PINK = Color3.fromRGB(255, 120, 200)
+local CYAN = Color3.fromRGB(110, 225, 255)
+local VIOLET = Color3.fromRGB(168, 96, 255)
+local RED = Color3.fromRGB(255, 84, 84)
+local WATER = Color3.fromRGB(120, 190, 255)
+local WOOD = Color3.fromRGB(110, 76, 48)
+local FELT = Color3.fromRGB(70, 74, 86)
+local SPONGE = Color3.fromRGB(240, 210, 80)
+local PAPER = Color3.fromRGB(246, 244, 236)
+local CONFETTI = { GOLD, PINK, CYAN, Color3.fromRGB(120, 230, 150), VIOLET, Color3.fromRGB(255, 150, 80) }
+local TEXTURES = {
+	spark = "rbxasset://textures/particles/sparkles_main.dds",
+	smoke = "rbxasset://textures/particles/smoke_main.dds",
+	ring = "rbxasset://textures/particles/explosion01_shockwave_main.dds",
+	fire = "rbxasset://textures/particles/fire_main.dds",
+}
+ChalkEffects.TEXTURES = TEXTURES
+
+local random = Random.new()
+
+-- What a show may use from Chalkboard Count's view.
+export type Context = {
+	chalk: Color3, -- the theme's chalk colour
+	glow: boolean, -- the theme's chalk glows
+	digits: () -> { BasePart }, -- the number's chalk strokes on the board now
+	drawStroke: (a: Vector3, b: Vector3, width: number, colour: Color3, glow: boolean, start: number, finish: number) -> Part,
+	shake: (degrees: number, seconds: number) -> (),
+}
+
+local function sequence(...: Color3): ColorSequence
+	local colours = { ... }
+	if #colours == 1 then return ColorSequence.new(colours[1]) end
+	local points = {}
+	for i, colour in colours do
+		table.insert(points, ColorSequenceKeypoint.new((i - 1) / (#colours - 1), colour))
+	end
+	return ColorSequence.new(points)
+end
+
+local function curve(...: number): NumberSequence
+	local values = { ... }
+	if #values == 1 then return NumberSequence.new(values[1]) end
+	local points = {}
+	for i, value in values do
+		table.insert(points, NumberSequenceKeypoint.new((i - 1) / (#values - 1), value))
+	end
+	return NumberSequence.new(points)
+end
+
+-- Plays the show for a gift of `coins` going up (`up`) or down; `tier` is
+-- 1 to 6. Returns the seconds until the number should change.
+function ChalkEffects.play(tier: number, up: boolean, context: Context): number
+	tier = math.clamp(math.floor(tier), 1, 6)
+	local folder = Instance.new("Folder")
+	folder.Name = "ChalkGiftShow"
+	folder.Parent = workspace
+	Debris:AddItem(folder, ChalkEffects.LIFETIMES[tier])
+	local made = 0
+	local function alive(): boolean
+		return folder.Parent ~= nil
+	end
+	local function after(delay: number, callback: () -> ())
+		task.delay(delay, function()
+			if alive() then callback() end
+		end)
+	end
+	local loudness = 1 + (tier - 1) * 0.12
+	local function noise(name: string, at: Vector3?)
+		if alive() then Sounds.play(name, at, loudness) end
+	end
+	-- Board positions: `x` across, `y` up from the floor, `out` towards the room.
+	local function board(x: number, y: number, out: number?): Vector3
+		return ChalkBoard.onBoard(x, y) + Vector3.new(0, 0, out or 0.3)
+	end
+	local middle = board(0, ChalkBoard.NUMBER_Y, 0.5)
+	local function part(shape: Enum.PartType, size: Vector3, frame: CFrame, colour: Color3, material: Enum.Material?): Part?
+		if not alive() or made >= ChalkEffects.PART_LIMITS[tier] then return nil end
+		made += 1
+		local p = Instance.new("Part")
+		p.Shape = shape
+		p.Size = size
+		p.CFrame = frame
+		p.Color = colour
+		p.Material = material or Enum.Material.SmoothPlastic
+		p.Anchored = true
+		p.CanCollide = false
+		p.CanQuery = false
+		p.CanTouch = false
+		p.CastShadow = false
+		p.Parent = folder
+		return p
+	end
+	-- A chalk line drawn by the view, counted towards the show's parts.
+	local function stroke(a: Vector3, b: Vector3, width: number, colour: Color3, glow: boolean, start: number, finish: number): Part?
+		if not alive() or made >= ChalkEffects.PART_LIMITS[tier] then return nil end
+		made += 1
+		local line = context.drawStroke(a, b, width, colour, glow, start, finish)
+		line.Parent = folder
+		return line
+	end
+	local function tween(p: Instance, seconds: number, goal: { [string]: any }, style: Enum.EasingStyle?, direction: Enum.EasingDirection?)
+		TweenService:Create(p, TweenInfo.new(seconds, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out), goal):Play()
+	end
+	local function fade(p: Instance, seconds: number, goal: { [string]: any })
+		tween(p, seconds, goal)
+		Debris:AddItem(p, seconds + 0.05)
+	end
+	local function motion(seconds: number, update: (number) -> (), finish: (() -> ())?)
+		local start = os.clock()
+		local connection: RBXScriptConnection? = nil
+		connection = RunService.RenderStepped:Connect(function()
+			local t = math.clamp((os.clock() - start) / seconds, 0, 1)
+			if alive() then update(t) end
+			if t >= 1 or not alive() then
+				if connection then
+					connection:Disconnect()
+					connection = nil
+				end
+				if alive() and finish then finish() end
+			end
+		end)
+	end
+	local function emit(at: Vector3, spec: { [string]: any })
+		if not alive() then return end
+		local spot = Instance.new("Attachment")
+		spot.Position = at
+		spot.Parent = workspace.Terrain
+		Debris:AddItem(spot, (spec.lifetime[2] or 1) + 0.3)
+		local particles = Instance.new("ParticleEmitter")
+		particles.Texture = spec.texture
+		particles.Color = spec.colour
+		particles.Size = spec.size
+		particles.Transparency = spec.transparency or curve(0, 1)
+		particles.Lifetime = NumberRange.new(spec.lifetime[1], spec.lifetime[2])
+		particles.Speed = NumberRange.new(spec.speed[1], spec.speed[2])
+		local spread = spec.spread or 180
+		particles.SpreadAngle = Vector2.new(spread, spread)
+		particles.Drag = spec.drag or 0
+		particles.Acceleration = spec.acceleration or Vector3.zero
+		particles.LightEmission = spec.glow or 1
+		particles.Rotation = NumberRange.new(0, 360)
+		particles.RotSpeed = NumberRange.new(-(spec.spin or 0), spec.spin or 0)
+		particles.EmissionDirection = spec.direction or Enum.NormalId.Top
+		if spec.flat then particles.Orientation = Enum.ParticleOrientation.VelocityPerpendicular end
+		particles.Enabled = false
+		particles.Parent = spot
+		particles:Emit(spec.count)
+	end
+	local function sparks(at: Vector3, colour: Color3, count: number, power: number?)
+		local p = power or 1
+		emit(at, { texture = TEXTURES.spark, count = count, colour = sequence(WHITE, colour), size = curve(1, 0.5, 0),
+			lifetime = { 0.5, 1.2 }, speed = { 8 * p, 20 * p }, drag = 2.5, acceleration = Vector3.new(0, -10, 0), spin = 200 })
+	end
+	local function dust(at: Vector3, colour: Color3, count: number, size: number?)
+		local s = size or 1
+		emit(at, { texture = TEXTURES.smoke, count = count, colour = sequence(colour), size = curve(0.6 * s, 2.2 * s),
+			transparency = curve(0.3, 1), lifetime = { 0.8, 1.6 }, speed = { 2, 7 }, spread = 80, drag = 2.5, glow = 0.2, spin = 40,
+			acceleration = Vector3.new(0, -1.5, 0) })
+	end
+	local function confetti(at: Vector3, count: number, power: number?)
+		local p = power or 1
+		for k = 1, 3 do
+			emit(at, { texture = TEXTURES.spark, count = math.ceil(count / 3), colour = sequence(CONFETTI[(k * 2 + tier) % #CONFETTI + 1], CONFETTI[(k + tier) % #CONFETTI + 1]),
+				size = curve(0.9, 0.6), lifetime = { 1.2, 2.2 }, speed = { 10 * p, 26 * p }, drag = 2, acceleration = Vector3.new(0, -9, 0), spin = 300 })
+		end
+	end
+	-- A ring of light racing out flat over the board.
+	local function ring(at: Vector3, radius: number, colour: Color3, seconds: number)
+		emit(at, { texture = TEXTURES.ring, count = 1, colour = sequence(WHITE, colour), size = curve(1, radius * 2), transparency = curve(0, 1),
+			lifetime = { seconds, seconds }, speed = { 0.01, 0.01 }, spread = 0, flat = true, direction = Enum.NormalId.Back })
+	end
+	local function flash(at: Vector3, colour: Color3, size: number, seconds: number?)
+		local ball = part(Enum.PartType.Ball, Vector3.one * size * 0.25, CFrame.new(at), WHITE, Enum.Material.Neon)
+		if ball == nil then return end
+		ball.Transparency = 0.1
+		fade(ball, seconds or 0.35, { Size = Vector3.one * size, Transparency = 1, Color = colour })
+	end
+	local function grade(tint: Color3, brightness: number, rise: number, hold: number, fall: number)
+		local effect = Instance.new("ColorCorrectionEffect")
+		effect.Name = "ChalkGrade"
+		effect.Parent = Lighting
+		tween(effect, rise, { TintColor = tint, Brightness = brightness })
+		task.delay(rise + hold, function()
+			if effect.Parent then tween(effect, fall, { TintColor = WHITE, Brightness = 0 }) end
+		end)
+		Debris:AddItem(effect, rise + hold + fall + 0.1)
+	end
+	-- A flat star of `size` facing the room, as five chalk-like spokes.
+	local function star(at: Vector3, size: number, colour: Color3, material: Enum.Material): { Part }
+		local spokes = {}
+		for k = 0, 4 do
+			local angle = k * math.pi * 2 / 5 + math.pi / 2
+			local tip = at + Vector3.new(math.cos(angle) * size / 2, math.sin(angle) * size / 2, 0)
+			local spoke = part(Enum.PartType.Block, Vector3.new(size * 0.18, size * 0.18, size / 2), CFrame.lookAt((at + tip) / 2, tip), colour, material)
+			if spoke then table.insert(spokes, spoke) end
+		end
+		return spokes
+	end
+	local function arc(a: Vector3, b: Vector3, height: number, t: number): Vector3
+		return a + (b - a) * t + Vector3.new(0, math.sin(math.pi * t) * height, 0)
+	end
+	-- Where things fly in from: the room in front of the board, off to a side.
+	local function roomPoint(side: number, height: number, out: number): Vector3
+		return ChalkBoard.onBoard(side, height) + Vector3.new(0, 0, out)
+	end
+
+	local impact = (if up then ChalkEffects.UP_IMPACT else ChalkEffects.DOWN_IMPACT)[tier]
+	local chalk = context.chalk
+
+	if up and tier == 1 then
+		-- CHALK STAR: a gold star is chalked beside the number, then bursts.
+		local centre = Vector2.new(random:NextNumber(-12, -8) * (if random:NextNumber() < 0.5 then -1 else 1), ChalkBoard.NUMBER_Y + 2.4)
+		local points = {}
+		for k = 0, 5 do
+			local angle = math.pi / 2 + k * math.pi * 4 / 5
+			table.insert(points, ChalkBoard.onBoard(centre.X + math.cos(angle) * 1.6, centre.Y + math.sin(angle) * 1.6))
+		end
+		local strokes: { Part } = {}
+		for k = 1, 5 do
+			local line = stroke(points[k], points[k + 1], 0.2, GOLD, true, (k - 1) * 0.08, k * 0.08)
+			if line then table.insert(strokes, line) end
+		end
+		noise("chalk", points[1])
+		after(0.45, function()
+			local at = ChalkBoard.onBoard(centre.X, centre.Y) + Vector3.new(0, 0, 0.4)
+			sparks(at, GOLD, 30)
+			flash(at, GOLD, 4)
+			noise("pop", at)
+			for _, p in strokes do fade(p, 0.4, { Transparency = 1 }) end
+		end)
+		after(impact, function() sparks(middle, chalk, 16, 0.7) end)
+	elseif up and tier == 2 then
+		-- GOLD STARS: three star stickers fly in from the room and stamp the board.
+		noise("whoosh", middle)
+		for k = 1, 3 do
+			local target = board((k - 2) * 8, ChalkBoard.NUMBER_Y + (if k == 2 then 3.6 else 2.4), 0.25)
+			local from = roomPoint((k - 2) * 20, 4, 24)
+			local spokes = star(from, 2.2, GOLD, Enum.Material.Neon)
+			local offsets = {}
+			for _, spoke in spokes do table.insert(offsets, CFrame.new(from):ToObjectSpace(spoke.CFrame)) end
+			after((k - 1) * 0.12, function()
+				motion(0.45, function(t)
+					local at = arc(from, target, 4, t)
+					local turn = CFrame.new(at) * CFrame.Angles(0, 0, (1 - t) * 8)
+					for i, spoke in spokes do spoke.CFrame = turn * offsets[i] end
+				end, function()
+					noise("pop", target)
+					sparks(target, GOLD, 18)
+					ring(target, 3, GOLD, 0.5)
+					for _, spoke in spokes do
+						tween(spoke, 0.12, { Size = spoke.Size * 1.4 }, Enum.EasingStyle.Back)
+						after(0.9, function() fade(spoke, 0.5, { Transparency = 1 }) end)
+					end
+				end)
+			end)
+		end
+		after(impact, function() sparks(middle, chalk, 20) end)
+	elseif up and tier == 3 then
+		-- PAPER PLANES: planes loop round the room and dive at the number.
+		noise("whoosh", middle)
+		for k = 1, 5 do
+			local plane: { Part } = {}
+			local wing = part(Enum.PartType.Block, Vector3.new(1.6, 0.06, 1.2), CFrame.identity, PAPER)
+			local body = part(Enum.PartType.Block, Vector3.new(0.18, 0.4, 1.4), CFrame.identity, PAPER)
+			if wing then table.insert(plane, wing) end
+			if body then table.insert(plane, body) end
+			local side = if k % 2 == 0 then 1 else -1
+			local loop = roomPoint(side * random:NextNumber(10, 18), random:NextNumber(10, 15), random:NextNumber(10, 18))
+			local start = roomPoint(-side * 22, 6, 26)
+			local target = board(random:NextNumber(-6, 6), ChalkBoard.NUMBER_Y + random:NextNumber(-1.5, 1.5), 0.3)
+			local previous = start
+			after((k - 1) * 0.12, function()
+				motion(1.05, function(t)
+					local a = start:Lerp(loop, t)
+					local b = loop:Lerp(target, t)
+					local at = a:Lerp(b, t) + Vector3.new(0, math.sin(t * math.pi * 2) * 1.5, 0)
+					local heading = if (at - previous).Magnitude > 1e-3 then at - previous else Vector3.new(0, 0, -1)
+					previous = at
+					local frame = CFrame.lookAt(at, at + heading) * CFrame.Angles(0, 0, math.sin(t * 9) * 0.6)
+					if wing then wing.CFrame = frame end
+					if body then body.CFrame = frame * CFrame.new(0, -0.2, 0) end
+				end, function()
+					noise("pop", target)
+					sparks(target, if k % 2 == 0 then GOLD else chalk, 14)
+					dust(target, chalk, 4)
+					for _, p in plane do fade(p, 0.3, { Transparency = 1, Size = p.Size * 0.4 }) end
+				end)
+			end)
+		end
+		after(impact, function()
+			flash(middle, GOLD, 8)
+			ring(middle, 7, GOLD, 0.6)
+			noise("boom", middle)
+		end)
+	elseif up and tier == 4 then
+		-- CHALK STORM: sticks of chalk whirl round the number, then slam in.
+		noise("deepWhoosh", middle)
+		local sticks: { Part } = {}
+		for k = 1, 24 do
+			local stick = part(Enum.PartType.Cylinder, Vector3.new(1, 0.24, 0.24), CFrame.new(middle), CONFETTI[k % #CONFETTI + 1]:Lerp(chalk, 0.4))
+			if stick then table.insert(sticks, stick) end
+		end
+		local positions: { Vector3 } = {}
+		motion(1.7, function(t)
+			local spin = t * t * 18
+			local reach = 4 + math.sin(t * math.pi) * 9
+			for k, stick in sticks do
+				local angle = spin + k * math.pi * 2 / #sticks
+				local at = middle + Vector3.new(math.cos(angle) * reach * 1.6, math.sin(angle) * reach * 0.6, 1.5 + math.sin(angle * 2) * 1.2)
+				positions[k] = at
+				stick.CFrame = CFrame.new(at) * CFrame.Angles(angle, angle * 2, 0)
+			end
+			if math.random() < 0.3 then dust(middle + Vector3.new(random:NextNumber(-8, 8), random:NextNumber(-3, 3), 1), chalk, 2) end
+		end, function()
+			for k, stick in sticks do
+				local from = positions[k] or middle
+				motion(0.25, function(t)
+					stick.CFrame = CFrame.new(from:Lerp(middle, t * t)) * CFrame.Angles(t * 4, 0, 0)
+				end, function() stick:Destroy() end)
+			end
+		end)
+		after(impact - 0.15, function()
+			flash(middle, chalk, 12)
+			ring(middle, 10, GOLD, 0.7)
+			sparks(middle, GOLD, 50, 1.4)
+			dust(middle, chalk, 16, 1.5)
+			context.shake(1.2, 0.6)
+			noise("boom", middle)
+		end)
+	elseif up and tier == 5 then
+		-- FIREWORKS: rockets shoot up from the floor and burst over the board.
+		noise("launch", middle)
+		for k = 1, 6 do
+			local floor = ChalkBoard.ORIGIN + Vector3.new((k - 3.5) * 6, 0.5, ChalkBoard.BOARD_Z + 6)
+			local burstAt = board((k - 3.5) * 5.5, ChalkBoard.NUMBER_Y + random:NextNumber(-2, 4), 1.5)
+			local colour = CONFETTI[k]
+			local rocket = part(Enum.PartType.Ball, Vector3.one * 0.6, CFrame.new(floor), colour, Enum.Material.Neon)
+			if rocket == nil then continue end
+			local a0 = Instance.new("Attachment")
+			a0.Position = Vector3.new(0, 0.3, 0)
+			a0.Parent = rocket
+			local a1 = Instance.new("Attachment")
+			a1.Position = Vector3.new(0, -0.3, 0)
+			a1.Parent = rocket
+			local trail = Instance.new("Trail")
+			trail.Attachment0 = a0
+			trail.Attachment1 = a1
+			trail.Color = sequence(WHITE, colour)
+			trail.Lifetime = 0.4
+			trail.LightEmission = 1
+			trail.FaceCamera = true
+			trail.Parent = rocket
+			after((k - 1) * 0.22, function()
+				noise("whoosh", floor)
+				motion(0.7, function(t)
+					rocket.CFrame = CFrame.new(arc(floor, burstAt, 2, 1 - (1 - t) ^ 2))
+				end, function()
+					rocket:Destroy()
+					noise("pop", burstAt)
+					emit(burstAt, { texture = TEXTURES.spark, count = 45, colour = sequence(WHITE, colour, colour), size = curve(1.2, 0.8, 0),
+						lifetime = { 0.8, 1.5 }, speed = { 14, 24 }, drag = 2.5, acceleration = Vector3.new(0, -8, 0), spin = 300 })
+					flash(burstAt, colour, 5)
+				end)
+			end)
+		end
+		after(impact, function()
+			flash(middle, GOLD, 16, 0.5)
+			ring(middle, 14, GOLD, 0.8)
+			confetti(middle + Vector3.new(0, 4, 2), 90, 1.2)
+			context.shake(1.4, 0.7)
+			noise("bigBoom", middle)
+		end)
+	elseif up then
+		-- SUPERNOVA: the room goes dark, a star swells on the board, light rays
+		-- sweep the room and it goes nova in confetti.
+		grade(Color3.fromRGB(170, 160, 220), -0.25, 0.6, impact - 0.6, 1.2)
+		noise("rumble", middle)
+		after(0.8, function() noise("deepWhoosh", middle) end)
+		local core = part(Enum.PartType.Ball, Vector3.one * 0.5, CFrame.new(middle + Vector3.new(0, 0, 0.6)), WHITE, Enum.Material.Neon)
+		local halo = part(Enum.PartType.Ball, Vector3.one * 1, CFrame.new(middle + Vector3.new(0, 0, 0.5)), GOLD, Enum.Material.Neon)
+		if halo then halo.Transparency = 0.55 end
+		local light = Instance.new("PointLight")
+		light.Color = GOLD
+		light.Range = 40
+		light.Brightness = 0
+		light.Shadows = false
+		if core then light.Parent = core end
+		local rays: { Part } = {}
+		for k = 1, 8 do
+			local ray = part(Enum.PartType.Block, Vector3.new(0.4, 0.4, 0.1), CFrame.new(middle), if k % 2 == 0 then GOLD else WHITE, Enum.Material.Neon)
+			if ray then
+				ray.Transparency = 0.35
+				table.insert(rays, ray)
+			end
+		end
+		motion(impact, function(t)
+			local grow = t * t
+			if core then core.Size = Vector3.one * (0.5 + grow * 5) end
+			if halo then halo.Size = Vector3.one * (1 + grow * 10 + math.sin(t * 40) * 0.4) end
+			light.Brightness = grow * 6
+			local length = 4 + grow * 40
+			for k, ray in rays do
+				local angle = k * math.pi / 4 + t * 3
+				local tip = middle + Vector3.new(math.cos(angle) * length, math.sin(angle) * length * 0.5, 6 + length * 0.4)
+				ray.Size = Vector3.new(0.3 + grow, 0.3 + grow, (tip - middle).Magnitude)
+				ray.CFrame = CFrame.lookAt((middle + tip) / 2, tip)
+			end
+			if math.random() < 0.25 then sparks(middle + Vector3.new(random:NextNumber(-14, 14), random:NextNumber(-5, 5), 1), GOLD, 6, 0.6) end
+		end, function()
+			for _, ray in rays do fade(ray, 0.3, { Transparency = 1 }) end
+			if core then fade(core, 0.6, { Size = Vector3.one * 40, Transparency = 1 }) end
+			if halo then fade(halo, 0.5, { Size = Vector3.one * 30, Transparency = 1 }) end
+		end)
+		after(impact, function()
+			noise("bigBoom", middle)
+			flash(middle, GOLD, 30, 0.7)
+			ring(middle, 22, GOLD, 1)
+			after(0.12, function() ring(middle, 14, WHITE, 0.8) end)
+			confetti(middle + Vector3.new(0, 2, 3), 150, 1.5)
+			sparks(middle, GOLD, 80, 1.6)
+			context.shake(2.2, 1)
+		end)
+		after(impact + 0.8, function()
+			confetti(board(-10, ChalkBoard.BOARD_BOTTOM + ChalkBoard.BOARD_HEIGHT, 3), 60)
+			confetti(board(10, ChalkBoard.BOARD_BOTTOM + ChalkBoard.BOARD_HEIGHT, 3), 60)
+			noise("pop", middle)
+		end)
+	elseif tier == 1 then
+		-- SPITBALL: a paper ball arcs in and splats on the number.
+		local from = roomPoint(18, 5, 20)
+		local target = middle + Vector3.new(random:NextNumber(-3, 3), random:NextNumber(-1, 1), -0.2)
+		local ball = part(Enum.PartType.Ball, Vector3.one * 0.7, CFrame.new(from), PAPER)
+		noise("whoosh", target)
+		motion(impact, function(t)
+			if ball then ball.CFrame = CFrame.new(arc(from, target, 3, t)) * CFrame.Angles(t * 9, t * 6, 0) end
+		end, function()
+			if ball then ball:Destroy() end
+			noise("splat", target)
+			local splat = part(Enum.PartType.Cylinder, Vector3.new(0.05, 0.4, 0.4), CFrame.new(target + Vector3.new(0, 0, 0.1)) * CFrame.Angles(0, math.pi / 2, 0), PAPER)
+			if splat then
+				tween(splat, 0.12, { Size = Vector3.new(0.05, 2.4, 2.4) }, Enum.EasingStyle.Back)
+				after(0.8, function() fade(splat, 0.6, { Transparency = 1 }) end)
+			end
+			dust(target, chalk, 6)
+		end)
+	elseif tier == 2 then
+		-- ERASER TOSS: an eraser tumbles in and bounces off the board in a cloud of dust.
+		local from = roomPoint(-20, 6, 22)
+		local target = middle + Vector3.new(random:NextNumber(-2, 2), 0, 0.4)
+		local back = target + Vector3.new(6, -6, 8)
+		local wood = part(Enum.PartType.Block, Vector3.new(2.6, 1, 1), CFrame.new(from), WOOD, Enum.Material.Wood)
+		local felt = part(Enum.PartType.Block, Vector3.new(2.6, 0.4, 1), CFrame.new(from), FELT, Enum.Material.Fabric)
+		local function place(at: Vector3, spin: number)
+			local frame = CFrame.new(at) * CFrame.Angles(spin, spin * 0.7, spin * 0.3)
+			if wood then wood.CFrame = frame end
+			if felt then felt.CFrame = frame * CFrame.new(0, -0.7, 0) end
+		end
+		noise("whoosh", target)
+		motion(impact, function(t) place(arc(from, target, 4, t), t * 10) end, function()
+			noise("thud", target)
+			noise("erase", target)
+			dust(target, chalk, 18, 1.4)
+			context.shake(0.6, 0.3)
+			motion(0.6, function(t) place(arc(target, back, 3, t), 10 + t * 8) end, function()
+				if wood then fade(wood, 0.3, { Transparency = 1 }) end
+				if felt then fade(felt, 0.3, { Transparency = 1 }) end
+			end)
+		end)
+	elseif tier == 3 then
+		-- SPONGE SPLASH: a wet sponge splats, water sprays and drips run down the board.
+		local from = roomPoint(16, 9, 24)
+		local target = middle + Vector3.new(0, 0, 0.6)
+		local sponge = part(Enum.PartType.Block, Vector3.new(2.4, 1.4, 1.2), CFrame.new(from), SPONGE, Enum.Material.Sand)
+		noise("whoosh", target)
+		motion(impact, function(t)
+			if sponge then sponge.CFrame = CFrame.new(arc(from, target, 3, t)) * CFrame.Angles(t * 6, t * 4, 0) end
+		end, function()
+			noise("splash", target)
+			if sponge then
+				tween(sponge, 0.1, { Size = Vector3.new(3.4, 1.8, 0.5) })
+				after(0.5, function()
+					fade(sponge, 0.8, { CFrame = sponge.CFrame - Vector3.new(0, 8, -2), Transparency = 1 })
+				end)
+			end
+			emit(target, { texture = TEXTURES.spark, count = 60, colour = sequence(WHITE, WATER), size = curve(0.5, 0.2),
+				lifetime = { 0.5, 1 }, speed = { 10, 22 }, drag = 1.5, acceleration = Vector3.new(0, -30, 0), spread = 70, direction = Enum.NormalId.Back })
+			emit(target, { texture = TEXTURES.smoke, count = 10, colour = sequence(WHITE), size = curve(1, 3), transparency = curve(0.6, 1),
+				lifetime = { 1, 2 }, speed = { 1, 3 }, glow = 0, acceleration = Vector3.new(0, 3, 0) })
+			for k = 1, 10 do
+				local top = board(random:NextNumber(-7, 7), ChalkBoard.NUMBER_Y + random:NextNumber(-1.5, 2), 0.12)
+				local drip = part(Enum.PartType.Block, Vector3.new(0.22, 0.4, 0.06), CFrame.new(top), WATER, Enum.Material.Glass)
+				if drip == nil then break end
+				drip.Transparency = 0.25
+				local fall = random:NextNumber(3, 6)
+				after(k * 0.04, function()
+					motion(1.6, function(t)
+						local length = 0.4 + t * fall
+						drip.Size = Vector3.new(0.22, length, 0.06)
+						drip.CFrame = CFrame.new(top - Vector3.new(0, length / 2, 0))
+					end, function() fade(drip, 0.5, { Transparency = 1 }) end)
+				end)
+			end
+		end)
+	elseif tier == 4 then
+		-- BOARD QUAKE: the board shakes, cracks race over it and the number crumbles.
+		noise("rumble", middle)
+		context.shake(1, impact + 0.3)
+		for k = 1, 7 do
+			local from = Vector2.new(random:NextNumber(-3, 3), ChalkBoard.NUMBER_Y + random:NextNumber(-1, 1))
+			local angle = k * math.pi * 2 / 7 + random:NextNumber(-0.3, 0.3)
+			local previous = from
+			for step = 1, 3 do
+				local nextPoint = previous + Vector2.new(math.cos(angle + random:NextNumber(-0.5, 0.5)), math.sin(angle + random:NextNumber(-0.5, 0.5)) * 0.6) * random:NextNumber(2, 4)
+				local a, b = ChalkBoard.onBoard(previous.X, previous.Y), ChalkBoard.onBoard(nextPoint.X, nextPoint.Y)
+				previous = nextPoint
+				after(0.2 + (step - 1) * 0.25 + k * 0.03, function()
+					local crack = stroke(a + Vector3.new(0, 0, 0.02), b + Vector3.new(0, 0, 0.02), 0.12, BLACK, false, 0, 0.2)
+					if crack then after(1.6, function() fade(crack, 0.6, { Transparency = 1 }) end) end
+				end)
+			end
+		end
+		-- Chalk falls off the tray and dust rains from the ceiling.
+		for k = 1, 6 do
+			local at = ChalkBoard.ORIGIN + Vector3.new((k - 3.5) * 5, ChalkBoard.BOARD_BOTTOM - 0.2, ChalkBoard.BOARD_Z + 1)
+			local stick = part(Enum.PartType.Cylinder, Vector3.new(1, 0.22, 0.22), CFrame.new(at), chalk)
+			if stick then
+				after(0.3 + k * 0.08, function()
+					fade(stick, 0.6, { CFrame = CFrame.new(at + Vector3.new(random:NextNumber(-1, 1), -2.2, 1.5)) * CFrame.Angles(1, 2, 3), Transparency = 1 })
+				end)
+			end
+		end
+		after(0.4, function() dust(board(0, ChalkBoard.BOARD_BOTTOM + ChalkBoard.BOARD_HEIGHT + 1, 2), Color3.fromRGB(200, 196, 188), 16, 1.6) end)
+		after(impact, function()
+			noise("boom", middle)
+			-- The number crumbles: copies of its strokes fall to the floor.
+			for _, piece in context.digits() do
+				local copy = part(Enum.PartType.Block, piece.Size, piece.CFrame, piece.Color, piece.Material)
+				if copy == nil then break end
+				local drop = random:NextNumber(6, 9)
+				fade(copy, 0.9, { CFrame = piece.CFrame * CFrame.Angles(random:NextNumber(-1, 1), random:NextNumber(-1, 1), random:NextNumber(-1, 1)) - Vector3.new(0, drop, -random:NextNumber(0.5, 2)), Transparency = 1 })
+			end
+			dust(middle, chalk, 20, 1.6)
+			context.shake(1.6, 0.5)
+		end)
+	elseif tier == 5 then
+		-- DUSTER TORNADO: a whirlwind of erasers spins over the board and scrubs it.
+		noise("deepWhoosh", middle)
+		local erasers: { { Part } } = {}
+		for k = 1, 8 do
+			local wood = part(Enum.PartType.Block, Vector3.new(2.2, 0.8, 0.8), CFrame.new(middle), WOOD, Enum.Material.Wood)
+			local felt = part(Enum.PartType.Block, Vector3.new(2.2, 0.3, 0.8), CFrame.new(middle), FELT, Enum.Material.Fabric)
+			if wood and felt then table.insert(erasers, { wood, felt }) end
+		end
+		motion(impact + 0.5, function(t)
+			local sweep = math.sin(t * math.pi * 2) * 9
+			local centre = middle + Vector3.new(sweep, 0, 1.2)
+			for k, pair in erasers do
+				local angle = t * 22 + k * math.pi / 4
+				local reach = 3 + k * 0.35
+				local at = centre + Vector3.new(math.cos(angle) * reach, (k - 4.5) * 0.7 + math.sin(angle) * 0.5, math.sin(angle) * reach * 0.4)
+				local frame = CFrame.new(at) * CFrame.Angles(0, -angle, math.sin(angle) * 0.5)
+				pair[1].CFrame = frame
+				pair[2].CFrame = frame * CFrame.new(0, -0.55, 0)
+			end
+			if math.random() < 0.5 then dust(centre + Vector3.new(random:NextNumber(-3, 3), random:NextNumber(-3, 3), 0), Color3.fromRGB(200, 196, 188), 2, 1.3) end
+			if math.random() < 0.08 then noise("erase", centre) end
+		end, function()
+			for _, pair in erasers do
+				local out = Vector3.new(random:NextNumber(-1, 1), random:NextNumber(-0.3, 1), random:NextNumber(0.5, 1)).Unit * 20
+				for _, p in pair do fade(p, 0.6, { CFrame = p.CFrame + out, Transparency = 1 }) end
+			end
+		end)
+		after(impact, function()
+			dust(middle, chalk, 24, 1.8)
+			context.shake(1.2, 0.5)
+			noise("thud", middle)
+		end)
+	else
+		-- BLACK HOLE: a black hole opens in the board and swallows the number.
+		grade(Color3.fromRGB(190, 160, 255), -0.2, 0.5, impact - 0.3, 1)
+		noise("deepWhoosh", middle)
+		after(1.2, function() noise("deepWhoosh", middle) end)
+		local hole = part(Enum.PartType.Cylinder, Vector3.new(0.1, 0.4, 0.4), CFrame.new(middle + Vector3.new(0, 0, -0.1)) * CFrame.Angles(0, math.pi / 2, 0), BLACK)
+		local rim = part(Enum.PartType.Cylinder, Vector3.new(0.08, 0.6, 0.6), CFrame.new(middle + Vector3.new(0, 0, -0.15)) * CFrame.Angles(0, math.pi / 2, 0), VIOLET, Enum.Material.Neon)
+		if hole then tween(hole, 0.8, { Size = Vector3.new(0.1, 9, 9) }, Enum.EasingStyle.Back) end
+		if rim then tween(rim, 0.8, { Size = Vector3.new(0.08, 10.5, 10.5) }, Enum.EasingStyle.Back) end
+		-- The number's strokes (copies) spiral in.
+		local pieces: { { part: Part, from: CFrame } } = {}
+		after(0.6, function()
+			for _, piece in context.digits() do
+				local copy = part(Enum.PartType.Block, piece.Size, piece.CFrame, piece.Color, piece.Material)
+				if copy == nil then break end
+				table.insert(pieces, { part = copy, from = piece.CFrame })
+			end
+			motion(impact - 0.7, function(t)
+				local pull = t * t
+				for k, entry in pieces do
+					local offset = entry.from.Position - middle
+					local angle = pull * 8 + k * 0.1
+					local spun = Vector3.new(offset.X * math.cos(angle) - offset.Y * math.sin(angle), offset.X * math.sin(angle) + offset.Y * math.cos(angle), 0)
+					entry.part.CFrame = CFrame.new(middle + spun * (1 - pull) + Vector3.new(0, 0, 0.3)) * entry.from.Rotation * CFrame.Angles(0, 0, angle)
+					entry.part.Size = entry.part.Size:Lerp(Vector3.new(0.05, 0.05, 0.05), pull * 0.06)
+				end
+				if math.random() < 0.4 then
+					local edge = middle + Vector3.new(random:NextNumber(-14, 14), random:NextNumber(-5, 5), 0.5)
+					emit(edge, { texture = TEXTURES.spark, count = 3, colour = sequence(WHITE, VIOLET), size = curve(0.6, 0),
+						lifetime = { 0.5, 0.7 }, speed = { 0.5, 1 }, glow = 1 })
+				end
+			end, function()
+				for _, entry in pieces do entry.part:Destroy() end
+			end)
+		end)
+		after(impact, function()
+			noise("bigBoom", middle)
+			if hole then fade(hole, 0.25, { Size = Vector3.new(0.1, 0.2, 0.2) }) end
+			if rim then fade(rim, 0.35, { Size = Vector3.new(0.08, 14, 14), Transparency = 1 }) end
+			flash(middle, VIOLET, 20, 0.5)
+			ring(middle, 18, VIOLET, 0.8)
+			sparks(middle, VIOLET, 60, 1.4)
+			context.shake(2, 0.8)
+		end)
+	end
+	return impact
+end
+
+return ChalkEffects
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="49">
+          <Properties>
             <string name="Name">ChalkView</string>
             <string name="Source"><![CDATA[--!strict
--- Chalkboard Count on this computer: the classroom camera, holding to write,
--- the chalk on the board (the count, written stroke by stroke as it goes up,
--- the goal in the corner, a progress line and the reset countdown, all drawn
--- with chalk strokes rather than text), the writer's arm and chalk, the
--- display (count, best and wins, the camera's REC light, the reset banner),
--- the writing speed and theme card, and the gift, reset, save and win shows.
+-- Chalkboard Count on this computer: the fixed view of the board, holding to
+-- write, the chalk on the board (the count, drawn line by line as it goes up
+-- with a stick of chalk at the tip, the goal in the corner, a progress line
+-- and the reset countdown, all chalk strokes rather than text), the writer's
+-- arm and chalk, the display (count, best and wins, the reset banner and the
+-- hold countdown at the goal), the writing speed and theme card (Settings can
+-- hide it), and the gift (see ChalkEffects), reset, save and win shows. The
+-- classroom is kept out of sight from the other games.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local Debris = game:GetService("Debris")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
 local Format = require(Shared:WaitForChild("Format"))
+local Sounds = require(script.Parent:WaitForChild("Sounds"))
+local HoldCountdown = require(script.Parent:WaitForChild("HoldCountdown"))
+local ChalkEffects = require(script.Parent:WaitForChild("ChalkEffects"))
 
 local ChalkView = {}
 
@@ -14225,17 +15307,25 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	local shout = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 192), Size = UDim2.fromOffset(700, 46),
 		BackgroundTransparency = 1, Font = FONT_HEAVY, TextSize = 38, TextColor3 = GOLD, TextStrokeTransparency = 0.3, TextTransparency = 1, Text = "" }, gui)
 	local shoutScale = make("UIScale", { Scale = 1 }, shout)
+	-- Who sent what, under a gift show's name.
+	local subLine = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 240), Size = UDim2.fromOffset(700, 24),
+		BackgroundTransparency = 1, Font = FONT, TextSize = 18, TextColor3 = WHITE, TextStrokeTransparency = 0.3, TextTransparency = 1, Text = "" }, gui)
 	local shoutSerial = 0
-	local function showShout(text: string, colour: Color3, seconds: number, size: number?)
+	local function showShout(text: string, colour: Color3, seconds: number, size: number?, sub: string?)
 		shoutSerial += 1
 		local serial = shoutSerial
 		shout.Text = text
 		shout.TextColor3 = colour
 		shout.TextTransparency = 0
+		subLine.Text = sub or ""
+		subLine.TextTransparency = if sub then 0 else 1
 		shoutScale.Scale = size or 1.8
 		TweenService:Create(shoutScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 		task.delay(seconds, function()
-			if serial == shoutSerial then TweenService:Create(shout, TweenInfo.new(0.6), { TextTransparency = 1 }):Play() end
+			if serial == shoutSerial then
+				TweenService:Create(shout, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
+				TweenService:Create(subLine, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
+			end
 		end)
 	end
 	local function pop(scale: number)
@@ -14243,26 +15333,15 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		TweenService:Create(cardScale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 	end
 
-	-- The classroom camera's viewfinder: corner marks and a blinking REC light.
-	local viewfinder = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, gui)
-	for _, corner in { Vector2.new(0, 0), Vector2.new(1, 0), Vector2.new(0, 1), Vector2.new(1, 1) } do
-		local holder = make("Frame", { AnchorPoint = corner, Position = UDim2.new(corner.X, if corner.X == 0 then 24 else -24, corner.Y, if corner.Y == 0 then 60 else -24),
-			Size = UDim2.fromOffset(46, 46), BackgroundTransparency = 1 }, viewfinder)
-		make("Frame", { AnchorPoint = corner, Position = UDim2.fromScale(corner.X, corner.Y), Size = UDim2.fromOffset(46, 3), BackgroundColor3 = WHITE,
-			BackgroundTransparency = 0.25, BorderSizePixel = 0 }, holder)
-		make("Frame", { AnchorPoint = corner, Position = UDim2.fromScale(corner.X, corner.Y), Size = UDim2.fromOffset(3, 46), BackgroundColor3 = WHITE,
-			BackgroundTransparency = 0.25, BorderSizePixel = 0 }, holder)
-	end
-	local rec = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -80, 0, 70), Size = UDim2.fromOffset(150, 26), BackgroundTransparency = 1 }, viewfinder)
-	local recDot = make("Frame", { Position = UDim2.fromOffset(0, 6), Size = UDim2.fromOffset(14, 14), BackgroundColor3 = RED, BorderSizePixel = 0 }, rec)
-	rounded(recDot, 7)
-	local recLabel = make("TextLabel", { Position = UDim2.fromOffset(22, 0), Size = UDim2.new(1, -22, 1, 0), BackgroundTransparency = 1, Font = FONT, TextSize = 16,
-		TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = WHITE, TextStrokeTransparency = 0.5, Text = "REC" }, rec)
+	-- The hold at the goal, under the reset banner's place.
+	local hold = HoldCountdown.new(gui, 270, "HOLD THE GOAL")
 	local hint = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -40), Size = UDim2.fromOffset(520, 22), BackgroundTransparency = 1,
 		Font = FONT, TextSize = 16, TextColor3 = WHITE, TextStrokeTransparency = 0.4, Text = "Hold the left mouse button, Space or the screen to write" }, gui)
 
-	-- The writing card: speed and theme.
-	local settingsCard = make("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -14, 1, -36), Size = UDim2.fromOffset(290, 178) }, gui)
+	-- The writing card: speed and theme (Settings can hide it).
+	-- Higher on touch screens, clear of Roblox's jump button.
+	local settingsCard = make("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -14, 1, if UserInputService.TouchEnabled then -190 else -36),
+		Size = UDim2.fromOffset(290, 178) }, gui)
 	glass(settingsCard, 14)
 	make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), PaddingTop = UDim.new(0, 10) }, settingsCard)
 	make("TextLabel", { Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = FONT, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
@@ -14337,6 +15416,11 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	end
 	state:GetAttributeChangedSignal("ChalkSpeed"):Connect(refreshSettings)
 	refreshSettings()
+	local function refreshCard()
+		settingsCard.Visible = player:GetAttribute("HideChalkCard") ~= true
+	end
+	player:GetAttributeChangedSignal("HideChalkCard"):Connect(refreshCard)
+	refreshCard()
 
 	-- The chalk on the board -----------------------------------------------------------------
 	local drawing = make("Folder", { Name = "ChalkDrawing" }, workspace)
@@ -14363,43 +15447,100 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		}, spot)
 		puff:Emit(count)
 	end
-	-- Writes digit `d` in slot `i` of `n`, its strokes appearing one by one over `seconds`.
-	local function writeSlot(i: number, n: number, d: number, seconds: number)
+	-- Drawing: each chalk line grows from its start to its end, one after
+	-- another, with a stick of chalk at the tip and a scratch as it goes.
+	type Growing = { part: Part, a: Vector3, b: Vector3, width: number, start: number, finish: number, begun: boolean }
+	local growing: { Growing } = {}
+	local tip = make("Part", { Name = "ChalkTip", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.1, 0.26, 0.26), Material = Enum.Material.SmoothPlastic,
+		Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false, Transparency = 1 }, effects)
+	-- A line from `a` to `b` drawn between `start` and `finish` seconds from now.
+	local function drawStroke(a: Vector3, b: Vector3, width: number, colour: Color3, glow: boolean, start: number, finish: number): Part
+		local p = stroke(drawing, a, b, width, colour, glow)
+		if finish > 0 then
+			p.Transparency = 1
+			local now = os.clock()
+			table.insert(growing, { part = p, a = a, b = b, width = width, start = now + start, finish = now + math.max(finish, start + 0.01), begun = false })
+		end
+		return p
+	end
+	local function growStrokes()
+		local now = os.clock()
+		local at: Vector3? = nil
+		for k = #growing, 1, -1 do
+			local g = growing[k]
+			if g.part.Parent == nil then
+				table.remove(growing, k)
+				continue
+			end
+			local u = math.clamp((now - g.start) / (g.finish - g.start), 0, 1)
+			if u <= 0 then continue end
+			if not g.begun then
+				g.begun = true
+				Sounds.play("chalk", g.a)
+			end
+			local reach = g.a + (g.b - g.a) * u
+			local length = (reach - g.a).Magnitude
+			g.part.Size = Vector3.new(g.width, g.width, math.max(0.05, length) + g.width * 0.8)
+			g.part.CFrame = CFrame.lookAt((g.a + reach) / 2, g.b)
+			g.part.Transparency = 0.04
+			if u >= 1 then
+				table.remove(growing, k)
+			else
+				at = reach
+			end
+		end
+		if at then
+			tip.Color = theme().chalk
+			tip.Transparency = 0
+			-- Held at an angle, its end on the board.
+			tip.CFrame = CFrame.new(at + Vector3.new(0.3, -0.25, 0.55)) * CFrame.Angles(0, math.rad(60), math.rad(35))
+			if math.random() < 0.15 then dust(at, theme().chalk, 1, { 0.3, 1 }) end
+		elseif tip.Transparency < 1 then
+			tip.Transparency = 1
+		end
+	end
+	-- Writes digit `d` in slot `i` of `n`: its lines drawn one after another
+	-- over `seconds`, starting `delay` seconds from now (all at once if 0).
+	local function writeSlot(i: number, n: number, d: number, seconds: number, delay: number?)
 		local look = theme()
 		local lefts = ChalkBoard.digitLefts(n)
 		local bottom = ChalkBoard.NUMBER_Y - ChalkBoard.NUMBER_HEIGHT / 2
 		local segments = ChalkBoard.segments(d, lefts[i], bottom, ChalkBoard.NUMBER_HEIGHT)
+		local total = 0
+		for _, seg in segments do total += (seg[2] - seg[1]).Magnitude end
 		local parts: { Part } = {}
+		local done = delay or 0
 		for _, seg in segments do
-			local p = stroke(drawing, seg[1], seg[2], ChalkView.STROKE, look.chalk, look.glow)
-			if seconds > 0 then p.Transparency = 1 end
-			table.insert(parts, p)
+			local share = if seconds > 0 then seconds * (seg[2] - seg[1]).Magnitude / math.max(total, 1e-3) else 0
+			table.insert(parts, drawStroke(seg[1], seg[2], ChalkView.STROKE, look.chalk, look.glow, done, if seconds > 0 then done + share else 0))
+			done += share
 		end
 		slots[i] = { digit = d, parts = parts }
 		if seconds > 0 then
 			revealSerial += 1
 			local serial = revealSerial
-			local step = seconds / math.max(1, #parts)
-			for k, p in parts do
-				task.delay(step * (k - 1), function()
-					if p.Parent then p.Transparency = 0.04 end
-					if k == #parts and serial == revealSerial then dust(segments[k][2], look.chalk, 3, { 0.5, 2 }) end
-				end)
-			end
+			task.delay(done, function()
+				if serial == revealSerial and #segments > 0 then dust(segments[#segments][2], look.chalk, 3, { 0.5, 2 }) end
+			end)
 		end
 	end
 	-- Draws the count: only the digits that changed are written again, unless
-	-- the number of digits changed.
+	-- the number of digits changed. Each takes `seconds`, one after another.
 	local function drawCount(count: number, seconds: number)
 		local digits = ChalkBoard.digits(math.min(count, 10 ^ ChalkBoard.MAX_DIGITS - 1))
+		local delay = 0
 		if #digits ~= #slots then
 			clearSlots()
-			for i, d in digits do writeSlot(i, #digits, d, if i == #digits then seconds else 0) end
+			for i, d in digits do
+				writeSlot(i, #digits, d, seconds, delay)
+				delay += seconds
+			end
 		else
 			for i, d in digits do
 				if slots[i].digit ~= d then
 					for _, p in slots[i].parts do p:Destroy() end
-					writeSlot(i, #digits, d, seconds)
+					writeSlot(i, #digits, d, seconds, delay)
+					delay += seconds
 				end
 			end
 		end
@@ -14533,54 +15674,71 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		}, spot)
 		sparks:Emit(count)
 	end
+	-- A gift: its show (see ChalkEffects) plays on the board, and the number
+	-- changes when the show hits it.
+	local effectContext: ChalkEffects.Context = {
+		chalk = theme().chalk,
+		glow = theme().glow,
+		digits = function(): { BasePart }
+			local list = {}
+			for _, slot in slots do
+				for _, p in slot.parts do table.insert(list, p) end
+			end
+			return list
+		end,
+		drawStroke = drawStroke,
+		shake = function(degrees: number, seconds: number) camShake(degrees, seconds) end,
+	}
 	local function onGift(data: any)
 		if not active or type(data) ~= "table" then return end
 		local coins = tonumber(data.coins) or 1
 		local tier = ChalkBoard.tier(coins)
 		local amount = tonumber(data.amount) or 0
+		local up = data.up == true
 		local look = theme()
-		local middle = ChalkBoard.onBoard(0, ChalkBoard.NUMBER_Y) + Vector3.new(0, 0, 0.5)
-		if data.up then
-			for k = 1, tier do
-				task.delay((k - 1) * 0.12, function()
-					local offset = Vector3.new((math.random() - 0.5) * 16, (math.random() - 0.5) * 5, 0)
-					burst(middle + offset, if k % 2 == 0 then GOLD else look.chalk, 14 + tier * 6)
-					dust(middle + offset, look.chalk, 4 + tier, { 2, 6 })
-				end)
-			end
-			showShout(string.format("%s  +%s", tostring(data.name or "Someone"), Format.commas(amount)), GREEN, 2.2, 1 + tier * 0.25)
-		else
-			sweep(false, 0.5 + tier * 0.1)
-			dust(middle, look.chalk, 8 + tier * 4, { 2, 7 })
-			showShout(string.format("%s  %s", tostring(data.name or "Someone"), Format.commas(amount)), RED, 2.2, 1 + tier * 0.25)
-		end
-		if tier >= 3 then camShake(0.4 + tier * 0.25, 0.4 + tier * 0.15) end
-		pop(1.1 + tier * 0.05)
+		effectContext.chalk = look.chalk
+		effectContext.glow = look.glow
+		local impact = ChalkEffects.play(tier, up, effectContext)
+		-- The board keeps the old number until the show hits it.
+		holdDrawUntil = math.max(holdDrawUntil, os.clock() + impact)
+		local title = (if up then ChalkEffects.UP_TITLES else ChalkEffects.DOWN_TITLES)[tier]
+		local sub = string.format("%s sent %s  ·  %s%s", tostring(data.name or "Someone"), tostring(data.gift or "a gift"),
+			if amount > 0 then "+" else "", Format.commas(amount))
+		showShout(title, if up then GREEN else RED, 2 + tier * 0.4, 1 + tier * 0.2, sub)
+		task.delay(impact, function()
+			if active then pop(1.1 + tier * 0.05) end
+		end)
 	end
 	local function onReset(data: any)
 		if not active or type(data) ~= "table" then return end
 		if data.state == "started" then
+			Sounds.play("rumble")
 			showShout(string.format("%s sent the RESET!", tostring(data.name or "Someone")), RED, 3, 2.2)
 			camShake(1.4, 0.8)
 			resetScale.Scale = 1.6
 			TweenService:Create(resetScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 		elseif data.state == "saved" then
+			Sounds.play("chime")
 			showShout(string.format("SAVED BY %s!", string.upper(tostring(data.name or "someone"))), GREEN, 3, 2.2)
 			local middle = ChalkBoard.onBoard(0, ChalkBoard.NUMBER_Y) + Vector3.new(0, 0, 0.5)
 			for k = 1, 5 do
 				task.delay(k * 0.1, function() burst(middle + Vector3.new((k - 3) * 4, 0, 0), GREEN, 30) end)
 			end
 		elseif data.state == "wiped" then
+			Sounds.play("boom")
 			showShout("THE BOARD WAS WIPED!", RED, 3, 2)
 			camShake(1.2, 0.6)
 		end
 	end
 	local function onWipe(_data: any)
 		if not active then return end
+		Sounds.play("erase")
+		task.delay(0.6, function() if active then Sounds.play("erase") end end)
 		sweep(true, 1.4)
 	end
 	local function onWin(data: any)
 		if not active or type(data) ~= "table" then return end
+		Sounds.play("cheer")
 		showShout(string.format("YOU REACHED %s!", Format.commas(tonumber(data.goal) or 0)), GOLD, 5, 2.4)
 		pop(1.4)
 		for k = 1, 8 do
@@ -14601,12 +15759,22 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	local function isWriteInput(input: InputObject): boolean
 		return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch or input.KeyCode == Enum.KeyCode.Space
 	end
+	-- The mouse and the screen (clicks on buttons don't write).
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-		-- Space is the jump key, so Roblox's controls mark it as used: it still writes
-		-- (the writer can't jump), but never while typing. Clicks on buttons don't write.
-		local space = input.KeyCode == Enum.KeyCode.Space
-		if active and (space or not processed) and isWriteInput(input) and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
+		if active and not processed and isWriteInput(input) and input.KeyCode ~= Enum.KeyCode.Space and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
 	end)
+	-- Space is the jump key, which Roblox's controls take, so in the classroom
+	-- it is taken first (bound while writing); bound keys never fire while
+	-- typing in chat.
+	local WRITE_ACTION = "ChalkboardWrite"
+	local function onWriteKey(_name: string, inputState: Enum.UserInputState, _input: InputObject): Enum.ContextActionResult
+		if inputState == Enum.UserInputState.Begin then
+			setHeld(true)
+		elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
+			setHeld(false)
+		end
+		return Enum.ContextActionResult.Sink
+	end
 	UserInputService.InputEnded:Connect(function(input: InputObject)
 		if isWriteInput(input) then setHeld(false) end
 	end)
@@ -14643,15 +15811,15 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		end
 		return true
 	end
-	local recBlink = 0
+	local wasHolding = false
 	RunService.RenderStepped:Connect(function(dt: number)
 		if not active then return end
-		-- The classroom camera, with a gentle hand-held drift.
+		-- A steady view of the writer and the board (gifts may shake it).
 		local camera = workspace.CurrentCamera
 		if camera then
 			if camera.CameraType ~= Enum.CameraType.Scriptable then camera.CameraType = Enum.CameraType.Scriptable end
 			local t = os.clock()
-			local frame = ChalkBoard.cameraFrame() * CFrame.Angles(math.sin(t * 0.7) * 0.004, math.sin(t * 0.5) * 0.006, 0)
+			local frame = ChalkBoard.cameraFrame()
 			local shook = t - shakeStart
 			if shook < shakeSeconds then
 				local a = math.rad(shakeDegrees) * (1 - shook / shakeSeconds)
@@ -14663,11 +15831,14 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		end
 		-- The mouse stays free in the classroom.
 		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
-		-- The REC light blinks and the camera's clock runs.
-		recBlink += dt
-		recDot.BackgroundTransparency = if recBlink % 1.2 < 0.7 then 0 else 1
-		local now = os.date("*t")
-		recLabel.Text = string.format("REC  %02d:%02d:%02d", now.hour, now.min, now.sec)
+		growStrokes()
+		-- The hold at the goal: a gift that takes the count down ends it.
+		local holdStart = attr("ChalkHoldStart", 0)
+		hold.update(holdStart, workspace:GetServerTimeNow())
+		if wasHolding and holdStart == 0 and attr("ChalkCount", 0) < attr("ChalkGoal", ChalkBoard.GOAL.default) then
+			showShout("KNOCKED DOWN! THE HOLD IS LOST", RED, 3, 1.8)
+		end
+		wasHolding = holdStart > 0
 		-- The arm writes while the server is writing.
 		local writingNow = state:GetAttribute("ChalkWriting") == true
 		if writingNow then
@@ -14686,7 +15857,9 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		local count = attr("ChalkCount", 0)
 		if count ~= shownCount and os.clock() >= holdDrawUntil then
 			local stepUp = count == shownCount + 1
-			drawCount(count, if stepUp then ChalkView.writeSeconds(speed) else 0)
+			-- Writing draws the next number at the writing speed; a jump
+			-- (a gift) draws each changed digit quickly.
+			drawCount(count, if stepUp then ChalkView.writeSeconds(speed) elseif shownCount >= 0 then 0.22 else 0)
 			drawProgress(count)
 			if not stepUp and shownCount >= 0 then dust(ChalkBoard.onBoard(0, ChalkBoard.NUMBER_Y), theme().chalk, 6, { 1, 4 }) end
 		end
@@ -14721,8 +15894,10 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		active = on
 		gui.Enabled = on
 		if on then
+			ContextActionService:BindActionAtPriority(WRITE_ACTION, onWriteKey, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Space)
 			redrawAll()
 		else
+			ContextActionService:UnbindAction(WRITE_ACTION)
 			setHeld(false)
 			releaseArm()
 			clearSlots()
@@ -14748,7 +15923,7 @@ return ChalkView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="49">
+        <Item class="ModuleScript" referent="50">
           <Properties>
             <string name="Name">ClimbEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -14795,6 +15970,7 @@ local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
 local Format = require(Shared:WaitForChild("Format"))
 local CameraShake = require(script.Parent:WaitForChild("CameraShake"))
+local Sounds = require(script.Parent:WaitForChild("Sounds"))
 
 local ClimbEffects = {}
 
@@ -14813,6 +15989,23 @@ ClimbEffects.DOWN_TITLES = ClimbPath.DOWN_TITLES
 ClimbEffects.PART_LIMITS = { 40, 60, 130, 170, 210, 260 }
 ClimbEffects.LIGHT_LIMITS = { 2, 3, 4, 5, 6, 7 }
 ClimbEffects.PARTICLE_BUDGETS = { 300, 450, 1400, 1800, 2200, 2800 }
+-- Each show's own sounds: { seconds in, cue } (see Sounds).
+ClimbEffects.UP_SOUNDS = {
+	{ { 0.22, "boing" } },
+	{ { 0.3, "boing" }, { 0.45, "whoosh" } },
+	{ { 0, "launch" }, { 0.6, "whoosh" } },
+	{ { 0, "rumble" }, { 0.8, "launch" } },
+	{ { 0, "chime" }, { 0.5, "deepWhoosh" } },
+	{ { 0, "rumble" }, { 0.6, "deepWhoosh" }, { 1.2, "launch" } },
+}
+ClimbEffects.DOWN_SOUNDS = {
+	{ { 0.3, "slip" } },
+	{ { 0.15, "zap" }, { 0.35, "falling" } },
+	{ { 0.1, "falling" }, { 0.75, "clang" } },
+	{ { 0, "deepWhoosh" }, { 0.8, "falling" } },
+	{ { 0, "rumble" }, { 0.9, "falling" } },
+	{ { 0, "deepWhoosh" }, { 0.7, "deepWhoosh" }, { 1.4, "falling" } },
+}
 -- From this tier up the show takes over the camera.
 ClimbEffects.CINEMATIC_TIER = 3
 
@@ -15054,6 +16247,15 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 			if alive() then callback() end
 		end)
 	end
+	-- The climber hears their own ride, wherever the camera is.
+	local loudness = 1 + (tier - 1) * 0.15
+	local function noise(name: string)
+		if alive() then Sounds.play(name, nil, loudness) end
+	end
+	-- Each show's own sounds, on top of its bangs and sparkles.
+	for _, cue in (if up then ClimbEffects.UP_SOUNDS else ClimbEffects.DOWN_SOUNDS)[tier] do
+		after(cue[1], function() noise(cue[2]) end)
+	end
 	local function part(shape: Enum.PartType, size: Vector3, frame: CFrame, tint: Color3, material: Enum.Material?): Part?
 		if not alive() or made >= ClimbEffects.PART_LIMITS[tier] then return nil end
 		made += 1
@@ -15166,26 +16368,31 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 
 	-- Effects ---------------------------------------------------------------------------
 	local function sparkles(at: Vector3, tint: Color3, count: number, speedRange: { number }, size: number?)
+		noise("sparkle")
 		burst(at, { texture = TEXTURES.spark, count = count, colour = sequence(WHITE, tint), size = curve(size or 1.2, (size or 1.2) * 0.4, 0),
 			lifetime = { 0.5, 1.2 }, speed = speedRange, drag = 3, spin = 200 })
 	end
 	local function shockwave(at: Vector3, radius: number, tint: Color3, duration: number)
+		noise(if radius >= 18 then "bigBoom" elseif radius >= 7 then "boom" else "thud")
 		burst(at, { texture = TEXTURES.ring, count = 1, colour = sequence(WHITE, tint),
 			size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.35, radius * 1.5), NumberSequenceKeypoint.new(1, radius * 2) }),
 			transparency = curve(0, 0.2, 1), lifetime = { duration, duration }, speed = { 0.01, 0.01 }, spread = 0, flat = true })
 	end
 	local function fireball(at: Vector3, size: number, count: number)
+		noise("boom")
 		burst(at, { texture = TEXTURES.fire, count = count, colour = sequence(YELLOW, ORANGE, RED), size = curve(size * 0.6, size, size * 0.3),
 			lifetime = { 0.4, 0.9 }, speed = { size * 1.5, size * 4 }, drag = 4, spin = 90 })
 		burst(at, { texture = TEXTURES.smoke, count = math.ceil(count / 2), colour = sequence(SMOKE, Color3.fromRGB(60, 56, 54)), size = curve(size * 0.8, size * 1.8),
 			transparency = curve(0.3, 1), lifetime = { 1, 2 }, speed = { size, size * 2.5 }, drag = 2, glow = 0, acceleration = Vector3.new(0, 4, 0) })
 	end
 	local function firework(at: Vector3, tint: Color3, count: number)
+		noise("pop")
 		burst(at, { texture = TEXTURES.spark, count = count, colour = sequence(WHITE, tint, tint), size = curve(1.6, 1, 0),
 			lifetime = { 0.8, 1.6 }, speed = { 18, 34 }, drag = 2.5, acceleration = Vector3.new(0, -10, 0), spin = 300 })
 		burst(at, { texture = TEXTURES.glow, count = 2, colour = sequence(tint), size = curve(6, 14, 0), lifetime = { 0.4, 0.5 }, speed = { 0, 0.1 } })
 	end
 	local function nova(at: Vector3, tint: Color3, radius: number, duration: number)
+		noise("bigBoom")
 		local ball = part(Enum.PartType.Ball, Vector3.one * 2, CFrame.new(at), WHITE)
 		if ball then
 			ball.Transparency = 0.05
@@ -15213,6 +16420,7 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 	end
 	-- A jagged bolt of lightning from `a` to `b`.
 	local function bolt(a: Vector3, b: Vector3, tint: Color3, width: number)
+		noise("zap")
 		local steps = 6
 		local last = a
 		for i = 1, steps do
@@ -16121,7 +17329,7 @@ return ClimbEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="50">
+        <Item class="ModuleScript" referent="51">
           <Properties>
             <string name="Name">ClimbView</string>
             <string name="Source"><![CDATA[--!strict
@@ -16130,7 +17338,10 @@ return ClimbEffects
 -- climber lands on a platform (a bigger one every hundred), sending each new
 -- platform to the server as the checkpoint, putting the climber back on
 -- their checkpoint when they fall, the gift rides (one after another, see
--- ClimbEffects) and the win at the top. Also turns the climb's diamond.
+-- ClimbEffects), the hold at the top (stay there through a countdown from 10
+-- without being sent down) and the win. Also turns the climb's diamond, and
+-- keeps the whole tower out of sight from the other games (it is far off in
+-- the sky, but tall enough to see from the mountain).
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -16141,11 +17352,14 @@ local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
 local Format = require(Shared:WaitForChild("Format"))
 local ClimbEffects = require(script.Parent:WaitForChild("ClimbEffects"))
+local Sounds = require(script.Parent:WaitForChild("Sounds"))
+local HoldCountdown = require(script.Parent:WaitForChild("HoldCountdown"))
 
 local ClimbView = {}
 
 local WHITE = Color3.new(1, 1, 1)
 local GOLD = Color3.fromRGB(246, 200, 92)
+local RED = Color3.fromRGB(255, 84, 84)
 local MUTED = Color3.fromRGB(168, 174, 190)
 local PANEL = Color3.fromRGB(16, 18, 26)
 local SELECTED = Color3.fromRGB(64, 128, 236)
@@ -16294,10 +17508,14 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		end)
 	end
 
-	-- The speed and jump sliders, bottom right.
+	-- The hold at the top, under the display.
+	local hold = HoldCountdown.new(gui, 166, "HOLD THE TOP")
+
+	-- The speed and jump sliders, bottom right (Settings can hide them).
 	local moveCard = make("Frame", {
 		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -14, 1, -36),
+		-- Higher on touch screens, clear of Roblox's jump button.
+		Position = UDim2.new(1, -14, 1, if UserInputService.TouchEnabled then -190 else -36),
 		Size = UDim2.fromOffset(280, 136),
 	}, gui)
 	glass(moveCard, 14)
@@ -16446,6 +17664,11 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	state:GetAttributeChangedSignal("ClimbSpeed"):Connect(refreshMove)
 	state:GetAttributeChangedSignal("ClimbJump"):Connect(refreshMove)
 	refreshMove()
+	local function refreshCard()
+		moveCard.Visible = player:GetAttribute("HideClimbCard") ~= true
+	end
+	player:GetAttributeChangedSignal("HideClimbCard"):Connect(refreshCard)
+	refreshCard()
 
 	-- The display follows the checkpoint, or the ride while a gift carries the climber.
 	local shownPlatform = attr("ClimbCheckpoint", 0)
@@ -16457,8 +17680,16 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	state:GetAttributeChangedSignal("ClimbWins"):Connect(refreshStats)
 	refreshStats()
 	local lastWhole = -1
+	local wasHolding = false
 	RunService.RenderStepped:Connect(function(dt: number)
 		if not active then return end
+		-- The hold at the top: a gift that sends them down ends it.
+		local holdStart = attr("ClimbHoldStart", 0)
+		hold.update(holdStart, workspace:GetServerTimeNow())
+		if wasHolding and holdStart == 0 and attr("ClimbCheckpoint", 0) < ClimbPath.TOP then
+			showShout("SENT DOWN! THE HOLD IS LOST", RED, 3)
+		end
+		wasHolding = holdStart > 0
 		local target = ClimbEffects.shownIndex() or attr("ClimbCheckpoint", 0)
 		shownPlatform += (target - shownPlatform) * math.min(1, dt * 12)
 		if math.abs(target - shownPlatform) < 0.5 then shownPlatform = target end
@@ -16480,7 +17711,17 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	-- The tower's platforms by number, for the landing animation.
 	local platforms: { [number]: BasePart } = {}
 	local tower: Instance? = nil
-	task.spawn(function()
+	-- Out of sight (and not drawn) unless climbing: only this computer's copy
+	-- of the tower moves here; the server's stays where it is.
+	local hiddenTower = Instance.new("Folder")
+	hiddenTower.Name = "HiddenClimb"
+	hiddenTower.Parent = ReplicatedStorage
+	local function showTower()
+		if tower then tower.Parent = if active then workspace else hiddenTower end
+	end
+	local startDiamond: (Instance) -> ()
+	-- Started at the end (once everything it uses is ready).
+	local function findTower()
 		local model = workspace:WaitForChild("DiamondClimb", math.huge)
 		tower = model
 		local function add(item: Instance)
@@ -16489,7 +17730,9 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		end
 		for _, item in model:GetDescendants() do add(item) end
 		model.DescendantAdded:Connect(add)
-	end)
+		task.spawn(startDiamond, model)
+		showTower()
+	end
 
 	-- The landing animation: the platform bounces and flashes, a ring of light
 	-- races out, sparkles fly up and a chime rings, rising through each ten.
@@ -16658,6 +17901,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	-- Gift rides, one after another.
 	local winWaiting: any = nil
 	local function celebrate()
+		Sounds.play("cheer")
 		showShout("YOU REACHED THE DIAMOND!", GOLD, 6)
 		pop(1.4)
 		local finish = ClimbPath.top(ClimbPath.TOP)
@@ -16729,6 +17973,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		if on == active then return end
 		active = on
 		gui.Enabled = on
+		showTower()
 		if not on then
 			-- The server is moving the climber elsewhere: no putting them back on the tower.
 			ClimbEffects.stop(true)
@@ -16743,8 +17988,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	end
 
 	-- The diamond at the top turns slowly and bobs (only when near).
-	task.spawn(function()
-		local model = workspace:WaitForChild("DiamondClimb", math.huge)
+	function startDiamond(model: Instance)
 		local gem = model:WaitForChild("ClimbDiamond", math.huge)
 		local centre = gem:GetAttribute("Centre")
 		if typeof(centre) ~= "Vector3" then return end
@@ -16764,9 +18008,12 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 			local t = os.clock()
 			local turn = CFrame.new(centre + Vector3.new(0, math.sin(t * 1.3) * 0.6, 0)) * CFrame.Angles(0, t * 0.8, 0)
 			for i, offset in offsets do frames[i] = turn * offset end
+			if not active then return end
 			workspace:BulkMoveTo(parts, frames, Enum.BulkMoveMode.FireCFrameChanged)
 		end)
-	end)
+	end
+
+	task.spawn(findTower)
 
 	return {
 		setActive = setActive,
@@ -16780,7 +18027,7 @@ return ClimbView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="51">
+        <Item class="ModuleScript" referent="52">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -17267,7 +18514,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="52">
+        <Item class="ModuleScript" referent="53">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -17308,6 +18555,7 @@ local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Format = require(Shared:WaitForChild("Format"))
 local CameraShake = require(script.Parent:WaitForChild("CameraShake"))
+local Sounds = require(script.Parent:WaitForChild("Sounds"))
 
 local GiftEffects = {}
 
@@ -17499,6 +18747,11 @@ function GiftEffects.play(data: any)
 	local function alive(): boolean
 		return folder.Parent ~= nil
 	end
+	-- Sounds grow deeper and louder with the tier.
+	local loudness = 1 + (tier - 1) * 0.15
+	local function noise(name: string, at: Vector3?)
+		if alive() then Sounds.play(name, at, loudness) end
+	end
 	local function after(delay: number, callback: () -> ())
 		task.delay(delay, function()
 			if alive() then callback() end
@@ -17595,6 +18848,7 @@ function GiftEffects.play(data: any)
 	end
 	-- A shockwave ring that races out flat across the ground.
 	local function shockwave(at: Vector3, radius: number, tint: Color3, seconds: number)
+		noise(if radius >= 18 then "bigBoom" elseif radius >= 6 then "boom" else "thud", at)
 		burst(at + Vector3.new(0, 0.4, 0), {
 			texture = TEXTURES.ring, count = 1, colour = sequence(WHITE, tint),
 			size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.35, radius * 1.5), NumberSequenceKeypoint.new(1, radius * 2) }),
@@ -17602,12 +18856,14 @@ function GiftEffects.play(data: any)
 		})
 	end
 	local function flash(at: Vector3, size: number, tint: Color3, seconds: number)
+		if size < 6 then noise("pop", at) end
 		local orb = part(Enum.PartType.Ball, Vector3.one * 0.4, CFrame.new(at), WHITE)
 		if orb == nil then return end
 		orb.Transparency = 0.05
 		fade(orb, seconds, { Size = Vector3.one * size, Transparency = 1, Color = tint })
 	end
 	local function sparks(at: Vector3, count: number, tint: Color3, power: number)
+		noise("sparkle", at)
 		burst(at, {
 			texture = TEXTURES.spark, count = count, colour = sequence(WHITE, tint), size = curve(0.55, 0.35, 0),
 			lifetime = { 0.45, 1 }, speed = { 6 * power, 14 * power }, drag = 3.5, acceleration = Vector3.new(0, -14, 0), spin = 200,
@@ -17642,6 +18898,7 @@ function GiftEffects.play(data: any)
 	end
 	-- Chunks of rock (or hay) thrown out of the crater, tumbling as they fall.
 	local function chunks(at: Vector3, count: number, power: number)
+		noise("rubble", at)
 		for _ = 1, count do
 			local size = random:NextNumber(0.35, 0.75) * math.sqrt(power)
 			local chunk = part(Enum.PartType.Block, Vector3.new(size, size * random:NextNumber(0.6, 1), size), CFrame.new(at), rock.colour:Lerp(rock.dust, random:NextNumber(0, 0.5)), rock.material)
@@ -17660,6 +18917,7 @@ function GiftEffects.play(data: any)
 	end
 	-- A vertical column of light from `top` down to `bottom`.
 	local function column(bottom: Vector3, height: number, width: number, tint: Color3, seconds: number, material: Enum.Material?): Part?
+		noise("beam", bottom)
 		local beam = part(Enum.PartType.Cylinder, Vector3.new(height, width * 0.2, width * 0.2), CFrame.new(bottom + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, 0, math.pi / 2), tint, material)
 		if beam == nil then return nil end
 		animate(beam, 0.08, { Size = Vector3.new(height, width, width) })
@@ -17671,6 +18929,7 @@ function GiftEffects.play(data: any)
 	-- A glowing ball streaking along a curve from the sky to `target`, with a
 	-- trail and fire behind it. `land` runs when it hits.
 	local function streak(from: Vector3, target: Vector3, size: number, seconds: number, tint: Color3, withLight: boolean, land: () -> ())
+		noise("whoosh", target)
 		local ball = part(Enum.PartType.Ball, Vector3.one * size, CFrame.new(from), tint:Lerp(WHITE, 0.6))
 		if ball == nil then return end
 		local a = Instance.new("Attachment")
@@ -17761,6 +19020,7 @@ function GiftEffects.play(data: any)
 	-- Glowing veins along the rock from `radius` out, racing in to the centre
 	-- (inward) or out from it.
 	local function veins(origin: Vector3, branches: number, radius: number, inward: boolean, width: number, seconds: number)
+		noise("zap", origin)
 		local rotation = random:NextNumber(0, math.pi * 2)
 		for branch = 1, branches do
 			local angle = rotation + branch * math.pi * 2 / branches
@@ -17897,6 +19157,7 @@ function GiftEffects.play(data: any)
 					local apex = towards(from, landing, 0.5) + Vector3.new(0, random:NextNumber(28, 42), 0)
 					local rocks = lump(random:NextNumber(1.6, 2.3), CFrame.new(from))
 					if rocks == nil then return end
+					noise("whoosh", landing)
 					local trail = Instance.new("Attachment")
 					trail.Parent = rocks.parts[1]
 					local dustTrail = emitter({
@@ -18011,6 +19272,9 @@ function GiftEffects.play(data: any)
 			-- up from all round, lands on the peak with a blast of light, and a
 			-- ring of green pillars erupts round the mountain.
 			local descent = 2.8
+			noise("rumble", summit)
+			after(1.2, function() noise("rumble", summit) end)
+			after(descent - 0.5, function() noise("deepWhoosh", summit) end)
 			grade({ Brightness = -0.12, Contrast = 0.2, Saturation = -0.05, TintColor = Color3.fromRGB(205, 255, 220) }, 0.6, 3.4, 1.4)
 			for i = 0, 9 do
 				after(i * 0.3, function() addShake(0.45) end)
@@ -18168,6 +19432,7 @@ function GiftEffects.play(data: any)
 			end
 			-- Then they shatter.
 			after(0.42, function()
+				noise("shatter", origin)
 				flash(origin + Vector3.new(0, 1.5, 0), radius * 0.9, colour, 0.35)
 				shockwave(origin, radius * 1.4, colour, 0.6)
 				sparks(origin + Vector3.new(0, 1.5, 0), 45, colour, 1.3)
@@ -18282,6 +19547,8 @@ function GiftEffects.play(data: any)
 		-- pulse, and a beam of starlight drives into the mountain.
 		local core = centre + Vector3.new(0, 11, 0)
 		local gather = 1.8
+		noise("deepWhoosh", core)
+		after(0.9, function() noise("deepWhoosh", core) end)
 		local hole = part(Enum.PartType.Ball, Vector3.one * 0.2, CFrame.new(core), Color3.new(0, 0, 0), Enum.Material.SmoothPlastic)
 		local halo = part(Enum.PartType.Ball, Vector3.one * 0.3, CFrame.new(core), colour)
 		if hole then animate(hole, 0.8, { Size = Vector3.one * 3.8 }, Enum.EasingStyle.Back) end
@@ -18423,6 +19690,7 @@ function GiftEffects.play(data: any)
 		-- fire geysers erupt in a ring, more meteors fall, and a final cosmic
 		-- shock rolls out across the whole valley.
 		grade({ Brightness = -0.15, Contrast = 0.22, Saturation = 0.1, TintColor = Color3.fromRGB(255, 205, 190) }, 0.5, 5.6, 1.5)
+		noise("rumble", centre)
 		local function meteor(delay: number, spread: number, size: number)
 			after(delay, function()
 				local target = centre + Vector3.new(random:NextNumber(-spread, spread), 0, random:NextNumber(-spread, spread))
@@ -18525,7 +19793,94 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="53">
+        <Item class="ModuleScript" referent="54">
+          <Properties>
+            <string name="Name">HoldCountdown</string>
+            <string name="Source"><![CDATA[--!strict
+-- The hold countdown for Diamond Climb (standing at the top) and Chalkboard
+-- Count (the count at the goal): like the diamond's, the hold lasts
+-- Config.HoldSeconds of real time (15) but the screen counts down from
+-- Config.HoldCountFrom (10), quickly at first and slower near the end. Each
+-- new number pops in with a tick. A gift that sends the player down ends it.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local Config = require(Shared:WaitForChild("Config"))
+local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
+local Sounds = require(script.Parent:WaitForChild("Sounds"))
+
+local HoldCountdown = {}
+
+local WHITE = Color3.new(1, 1, 1)
+local GOLD = Color3.fromRGB(246, 200, 92)
+
+-- The number on screen `elapsed` real seconds into the hold.
+function HoldCountdown.shown(elapsed: number): number
+	return HoldTimer.display(elapsed, Config.HoldSeconds, Config.HoldCountFrom, Config.HoldSlowdown)
+end
+
+export type Countdown = { update: (holdStart: number, now: number) -> (), frame: Frame }
+
+-- A countdown under the top of `parent`, `y` pixels down, with `title`
+-- (such as "HOLD THE TOP") over the number.
+function HoldCountdown.new(parent: Instance, y: number, title: string): Countdown
+	local frame = Instance.new("Frame")
+	frame.Name = "HoldCountdown"
+	frame.AnchorPoint = Vector2.new(0.5, 0)
+	frame.Position = UDim2.new(0.5, 0, 0, y)
+	frame.Size = UDim2.fromOffset(320, 140)
+	frame.BackgroundTransparency = 1
+	frame.Visible = false
+	frame.Parent = parent
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 0, 30)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 20
+	label.TextColor3 = WHITE
+	label.TextStrokeTransparency = 0.35
+	label.Text = title
+	label.Parent = frame
+	local number = Instance.new("TextLabel")
+	number.Position = UDim2.fromOffset(0, 30)
+	number.Size = UDim2.new(1, 0, 0, 100)
+	number.BackgroundTransparency = 1
+	number.Font = Enum.Font.GothamBlack
+	number.TextSize = 88
+	number.TextColor3 = WHITE
+	number.TextStrokeTransparency = 0.2
+	number.Text = tostring(Config.HoldCountFrom)
+	number.Parent = frame
+	local scale = Instance.new("UIScale")
+	scale.Scale = 1
+	scale.Parent = number
+
+	local last = -1
+	local function update(holdStart: number, now: number)
+		if holdStart <= 0 then
+			frame.Visible = false
+			last = -1
+			return
+		end
+		frame.Visible = true
+		local shown = HoldCountdown.shown(now - holdStart)
+		if shown ~= last then
+			last = shown
+			number.Text = tostring(shown)
+			number.TextColor3 = WHITE:Lerp(GOLD, 1 - shown / Config.HoldCountFrom)
+			scale.Scale = 1.35
+			TweenService:Create(scale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+			Sounds.play("tick")
+		end
+	end
+	return { update = update, frame = frame }
+end
+
+return HoldCountdown
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="55">
           <Properties>
             <string name="Name">HowToPlay</string>
             <string name="Source"><![CDATA[--!strict
@@ -18578,7 +19933,7 @@ HowToPlay.PAGES = {
 			"",
 			"<b>GIFT KEYBINDS</b>: type a gift name and its coins, press <b>Key</b>, then press the key you want, and press <b>Save keybind</b>. Pressing that key in the game now sends that gift, with or without the bridge.",
 			"",
-			"The control page at localhost:8787 has the same test buttons.",
+			"The control page at localhost:8787 can't send pretend gifts: only real gifts from your LIVE come through it.",
 		}, "\n"),
 	},
 	{
@@ -18617,11 +19972,11 @@ HowToPlay.PAGES = {
 			"",
 			"Every platform you land on is a <b>checkpoint</b>. Fall off and you are put straight back on it. Each platform is a little higher than the last, but every jump is a short hop.",
 			"",
-			"<b>MOVEMENT</b> (bottom right): drag <b>Speed</b> and <b>Jump height</b> to suit you. Reset puts them back.",
+			"<b>MOVEMENT</b> (bottom right): drag <b>Speed</b> and <b>Jump height</b> to suit you. Reset puts them back. Settings (<b>P</b>) can hide this card.",
 			"",
-			"<b>Gifts</b> send you up the tower, more platforms for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Gifts set to add stone send you <b>down</b> instead. From 100 coins the rides take over the camera, and every tier is crazier than the last. Follows and shares lift you one platform.",
+			"<b>Gifts</b> send you up the tower, more platforms for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Some send you <b>down</b>: to start with an Ice Cream Cone, Finger Heart, Perfume, Confetti, Money Gun and TikTok Universe. The bridge's control page sets how far each gift sends you, up or down. From 100 coins the rides take over the camera, and every tier is crazier than the last. Follows and shares lift you one platform.",
 			"",
-			"Reach the top to win a climb. The next one starts from the bottom.",
+			"Reach the top, then <b>hold it</b>: stay there while the countdown runs from 10 (it slows down near the end). A gift that sends you down ends the hold. Make it to 0 to win the climb. The next one starts from the bottom.",
 			"",
 			"In the streamer panel (<b>Y</b>), <b>DIAMOND CLIMB</b> restarts the climb and sets the gift strength. TEST GIFTS send you up and REBUILD TEST GIFTS send you down.",
 		}, "\n"),
@@ -18629,13 +19984,13 @@ HowToPlay.PAGES = {
 	{
 		title = "Chalkboard",
 		text = table.concat({
-			"Press <b>G</b> and <b>JOIN</b> Chalkboard Count. You stand at a big green board while the classroom camera films you.",
+			"Press <b>G</b> and <b>JOIN</b> Chalkboard Count. You stand at a big green chalkboard in a classroom.",
 			"",
-			"<b>Hold to write</b>: hold the left mouse button, Space or the screen and you chalk up the next number, one after another. Reach the <b>goal</b> (1,000 to start) to win, then the board is wiped for the next one.",
+			"<b>Hold to write</b>: hold the left mouse button, Space or the screen and you chalk up the next number, one after another. Reach the <b>goal</b> (1,000 to start) and <b>hold it</b> while the countdown runs from 10 (it slows down near the end). A gift that takes the count down ends the hold. Make it to 0 to win, then the board is wiped for the next one.",
 			"",
-			"<b>WRITING</b> (bottom right): drag <b>Speed</b> to write faster or slower, and pick a <b>theme</b> for the classroom: Classic green, Blackboard, Neon night, Sakura or Royal diamond.",
+			"<b>WRITING</b> (bottom right): drag <b>Speed</b> to write faster or slower, and pick a <b>theme</b> for the classroom: Classic green, Blackboard, Neon night, Sakura or Royal diamond. Settings (<b>P</b>) can hide this card.",
 			"",
-			"<b>Gifts</b> write numbers for you, more for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Gifts set to add stone rub numbers <b>off</b> instead. Follows and shares add one.",
+			"<b>Gifts</b> write numbers for you, more for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Some take numbers <b>off</b>: to start with an Ice Cream Cone, Finger Heart, Perfume, Confetti, Money Gun and TikTok Universe. The bridge's control page sets how far each gift moves the count, up or down. Every gift has its own animation, bigger for bigger gifts. Follows and shares add one.",
 			"",
 			"<b>The reset</b>: a <b>Galaxy</b> starts a 60 second countdown. When it runs out the board is wiped back to 0. Anyone who sends a different gift worth <b>1,000 coins or more</b> saves the board and stops the countdown.",
 			"",
@@ -18836,7 +20191,7 @@ return HowToPlay
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="54">
+        <Item class="ModuleScript" referent="56">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
@@ -18874,6 +20229,12 @@ local refreshTab: () -> () = function() end
 
 function LobbyView.isOpen(): boolean
 	return open
+end
+
+-- Closes the menu (the settings card opens where it would cover it).
+local closeHandler: () -> () = function() end
+function LobbyView.close()
+	closeHandler()
 end
 
 -- Hides the GAMES tab (the settings' "Hide buttons"); G still opens the menu.
@@ -19004,6 +20365,15 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	}, gui)
 	rounded(panel, 18)
 	stroke(panel, GOLD, 3)
+	-- Shrinks to fit short screens (Studio's play area, phones).
+	local fit = make("UIScale", { Scale = 1 }, panel)
+	local function refit()
+		local camera = workspace.CurrentCamera
+		local height = if camera then camera.ViewportSize.Y else 768
+		fit.Scale = math.clamp((height - 60) / 620, 0.5, 1)
+	end
+	refit()
+	if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit) end
 	make("UIGradient", {
 		Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(240, 235, 222)),
 		Rotation = 90,
@@ -19265,6 +20635,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 		end)
 		tween:Play()
 	end
+	closeHandler = function() setOpen(false) end
 	refreshTab = function()
 		tab.Visible = not open and not tabHidden
 	end
@@ -19399,7 +20770,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="55">
+        <Item class="ModuleScript" referent="57">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -19900,7 +21271,7 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="56">
+        <Item class="ModuleScript" referent="58">
           <Properties>
             <string name="Name">PetalView</string>
             <string name="Source"><![CDATA[--!strict
@@ -20002,7 +21373,7 @@ return PetalView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="57">
+        <Item class="ModuleScript" referent="59">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -20130,7 +21501,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="58">
+        <Item class="ModuleScript" referent="60">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -20274,15 +21645,227 @@ return SceneryView
 ]]></string>
           </Properties>
         </Item>
+        <Item class="ModuleScript" referent="61">
+          <Properties>
+            <string name="Name">Sounds</string>
+            <string name="Source"><![CDATA[--!strict
+-- Sound effects for every game: digging, the gift shows (Diamond in the
+-- Rough's blasts and rebuilds, Diamond Climb's rides, Chalkboard Count's
+-- gifts) and the chalk being written. Every sound is one that ships with the
+-- Roblox client (rbxasset://sounds), so nothing has to be uploaded or made
+-- public; each cue layers a few of them at different pitches to make the
+-- sound. To use your own uploads instead, change the ids in FILES.
+--
+-- Sounds.play(cue, at?, scale?) plays a cue: at a point in the world (it
+-- fades with distance) or, without one, straight to the player. `scale`
+-- (default 1) makes it louder and deeper for bigger gifts. The same cue is
+-- not started again within a few hundredths of a second, and only so many
+-- sounds play at once, so a hundred sparks never make a hundred sounds.
+local SoundService = game:GetService("SoundService")
+
+local Sounds = {}
+
+Sounds.FILES = {
+	crunch = "rbxasset://sounds/collide.wav",
+	hit = "rbxasset://sounds/hit.wav",
+	snap = "rbxasset://sounds/snap.wav",
+	click = "rbxasset://sounds/clickfast.wav",
+	button = "rbxasset://sounds/button.wav",
+	boom = "rbxasset://sounds/impact_explosion_03.mp3",
+	whoosh = "rbxasset://sounds/swoosh.wav",
+	ping = "rbxasset://sounds/electronicpingshort.wav",
+	glass = "rbxasset://sounds/glassbreak.wav",
+	splash = "rbxasset://sounds/impact_water.mp3",
+	splat = "rbxasset://sounds/splat.wav",
+	land = "rbxasset://sounds/action_jump_land.mp3",
+	jump = "rbxasset://sounds/action_jump.mp3",
+	fall = "rbxasset://sounds/action_falling.mp3",
+	victory = "rbxasset://sounds/victory.wav",
+	plunk = "rbxasset://sounds/Kerplunk.wav",
+	rocket = "rbxasset://sounds/Rocket shot.wav",
+	page = "rbxasset://sounds/pageturn.wav",
+}
+
+-- A layer: which file, how loud, its pitch (a range picks one at random),
+-- and how long after the cue starts it plays.
+export type Layer = { file: string, volume: number, pitch: { number }, delay: number? }
+
+Sounds.CUES = {
+	-- Digging: a hand hits the rock, it cracks and pebbles scatter.
+	dig = {
+		{ file = "crunch", volume = 0.55, pitch = { 0.55, 0.7 } },
+		{ file = "snap", volume = 0.22, pitch = { 0.75, 0.95 } },
+		{ file = "click", volume = 0.12, pitch = { 0.6, 0.8 }, delay = 0.04 },
+	},
+	-- Every few strikes a bigger chunk breaks away.
+	crumble = {
+		{ file = "boom", volume = 0.14, pitch = { 1.7, 2.1 } },
+		{ file = "crunch", volume = 0.4, pitch = { 0.45, 0.55 }, delay = 0.03 },
+	},
+	-- Gift shows.
+	pop = {
+		{ file = "snap", volume = 0.5, pitch = { 1.1, 1.3 } },
+		{ file = "ping", volume = 0.25, pitch = { 1.6, 1.9 }, delay = 0.02 },
+	},
+	sparkle = { { file = "ping", volume = 0.3, pitch = { 2, 2.6 } } },
+	rubble = {
+		{ file = "crunch", volume = 0.45, pitch = { 0.5, 0.65 } },
+		{ file = "click", volume = 0.18, pitch = { 0.5, 0.7 }, delay = 0.06 },
+		{ file = "click", volume = 0.14, pitch = { 0.7, 0.9 }, delay = 0.14 },
+	},
+	boom = {
+		{ file = "boom", volume = 0.7, pitch = { 0.85, 1.05 } },
+		{ file = "crunch", volume = 0.45, pitch = { 0.4, 0.5 } },
+	},
+	bigBoom = {
+		{ file = "boom", volume = 1, pitch = { 0.5, 0.6 } },
+		{ file = "boom", volume = 0.6, pitch = { 0.8, 0.9 }, delay = 0.08 },
+		{ file = "crunch", volume = 0.6, pitch = { 0.3, 0.38 } },
+	},
+	thud = {
+		{ file = "land", volume = 0.6, pitch = { 0.6, 0.8 } },
+		{ file = "crunch", volume = 0.35, pitch = { 0.55, 0.7 } },
+	},
+	rumble = {
+		{ file = "boom", volume = 0.45, pitch = { 0.3, 0.36 } },
+		{ file = "boom", volume = 0.35, pitch = { 0.34, 0.4 }, delay = 0.35 },
+	},
+	whoosh = { { file = "whoosh", volume = 0.5, pitch = { 0.8, 1.1 } } },
+	deepWhoosh = { { file = "whoosh", volume = 0.7, pitch = { 0.4, 0.55 } } },
+	shatter = {
+		{ file = "glass", volume = 0.55, pitch = { 0.9, 1.15 } },
+		{ file = "ping", volume = 0.2, pitch = { 2.4, 2.8 }, delay = 0.05 },
+	},
+	beam = {
+		{ file = "rocket", volume = 0.4, pitch = { 0.6, 0.75 } },
+		{ file = "ping", volume = 0.25, pitch = { 0.5, 0.6 } },
+	},
+	zap = {
+		{ file = "snap", volume = 0.6, pitch = { 0.5, 0.6 } },
+		{ file = "boom", volume = 0.4, pitch = { 1.4, 1.6 } },
+	},
+	clang = {
+		{ file = "hit", volume = 0.8, pitch = { 0.45, 0.55 } },
+		{ file = "hit", volume = 0.5, pitch = { 0.9, 1 }, delay = 0.03 },
+	},
+	boing = {
+		{ file = "jump", volume = 0.7, pitch = { 0.7, 0.8 } },
+		{ file = "whoosh", volume = 0.35, pitch = { 1.3, 1.5 }, delay = 0.05 },
+	},
+	launch = {
+		{ file = "rocket", volume = 0.7, pitch = { 0.9, 1.05 } },
+		{ file = "whoosh", volume = 0.45, pitch = { 0.7, 0.8 }, delay = 0.1 },
+	},
+	slip = {
+		{ file = "whoosh", volume = 0.5, pitch = { 1.4, 1.6 } },
+		{ file = "plunk", volume = 0.45, pitch = { 1, 1.1 }, delay = 0.25 },
+	},
+	falling = { { file = "fall", volume = 0.55, pitch = { 0.9, 1.1 } } },
+	splash = {
+		{ file = "splash", volume = 0.6, pitch = { 0.9, 1.1 } },
+		{ file = "splat", volume = 0.4, pitch = { 0.8, 1 } },
+	},
+	splat = { { file = "splat", volume = 0.6, pitch = { 0.9, 1.15 } } },
+	cheer = {
+		{ file = "victory", volume = 0.6, pitch = { 1, 1 } },
+	},
+	-- Chalk on the board: a short scratch per stroke, a tap per number.
+	chalk = {
+		{ file = "whoosh", volume = 0.12, pitch = { 2.6, 3.2 } },
+		{ file = "click", volume = 0.05, pitch = { 1.6, 2 } },
+	},
+	erase = {
+		{ file = "whoosh", volume = 0.35, pitch = { 0.6, 0.75 } },
+		{ file = "page", volume = 0.2, pitch = { 0.7, 0.9 } },
+	},
+	-- The hold countdowns: a tick each number, and a rising chime at the end.
+	tick = { { file = "click", volume = 0.35, pitch = { 1.2, 1.2 } } },
+	chime = {
+		{ file = "ping", volume = 0.4, pitch = { 1, 1 } },
+		{ file = "ping", volume = 0.4, pitch = { 1.26, 1.26 }, delay = 0.12 },
+		{ file = "ping", volume = 0.4, pitch = { 1.5, 1.5 }, delay = 0.24 },
+	},
+} :: { [string]: { Layer } }
+
+Sounds.MAX_PLAYING = 24 -- sounds at once
+Sounds.REPEAT_SECONDS = 0.045 -- the same cue is not restarted sooner than this
+Sounds.HEARD_FROM = 260 -- studs: a cue in the world fades out by this far away
+
+local playing = 0
+local lastPlayed: { [string]: number } = {}
+local muted = false
+
+-- Turns every sound off (or back on).
+function Sounds.setMuted(value: boolean)
+	muted = value
+end
+
+local function startLayer(layer: Layer, at: Vector3?, scale: number)
+	if playing >= Sounds.MAX_PLAYING then return end
+	local file = Sounds.FILES[layer.file]
+	if file == nil then return end
+	local low, high = layer.pitch[1], layer.pitch[2] or layer.pitch[1]
+	local pitch = (low + (high - low) * math.random()) / math.sqrt(math.max(scale, 0.25))
+	local sound = Instance.new("Sound")
+	sound.SoundId = file
+	sound.Volume = math.min(2, layer.volume * math.sqrt(scale))
+	sound.PlaybackSpeed = math.clamp(pitch, 0.2, 4)
+	local holder: Instance
+	if at then
+		local spot = Instance.new("Attachment")
+		spot.Position = at
+		spot.Parent = workspace.Terrain
+		sound.RollOffMode = Enum.RollOffMode.InverseTapered
+		sound.RollOffMinDistance = 30 * scale
+		sound.RollOffMaxDistance = Sounds.HEARD_FROM * math.max(1, scale)
+		holder = spot
+	else
+		holder = SoundService
+	end
+	sound.Parent = holder
+	sound:Play()
+	playing += 1
+	-- Gone once it has had time to finish (the longest file is a few seconds).
+	local life = 4 / sound.PlaybackSpeed + 0.5
+	task.delay(life, function()
+		playing -= 1
+		if holder ~= SoundService then holder:Destroy() else sound:Destroy() end
+	end)
+end
+
+-- Plays cue `name`: at `at` in the world, or to the player when `at` is nil.
+function Sounds.play(name: string, at: Vector3?, scale: number?)
+	if muted then return end
+	local cue = Sounds.CUES[name]
+	if cue == nil then return end
+	local now = os.clock()
+	if now - (lastPlayed[name] or -math.huge) < Sounds.REPEAT_SECONDS then return end
+	lastPlayed[name] = now
+	local size = scale or 1
+	for _, layer in cue do
+		if layer.delay and layer.delay > 0 then
+			task.delay(layer.delay, function()
+				pcall(startLayer, layer, at, size)
+			end)
+		else
+			pcall(startLayer, layer, at, size)
+		end
+	end
+end
+
+return Sounds
+]]></string>
+          </Properties>
+        </Item>
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="59">
+  <Item class="Workspace" referent="62">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="60">
+    <Item class="Terrain" referent="63">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>

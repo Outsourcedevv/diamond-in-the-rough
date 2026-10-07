@@ -1,7 +1,7 @@
 --!strict
--- Diamond Climb's path: 1000 gem platforms spiralling up round a crystal
--- pillar in the sky, far from the valley and the lobby, with the diamond on
--- the last one. Each platform is a little higher above the one before (from
+-- Diamond Climb's path: 1000 big gem platforms spiralling up round a crystal
+-- pillar in the sky, far from the valley and the lobby (and hidden from them,
+-- see ClimbView), with the diamond on the last one. Each platform is a little higher above the one before (from
 -- 1.2 studs at the bottom to 3.5 at the top), always a short, easy hop away.
 -- The server builds the tower from this and checks where players stand; each
 -- player's game draws the climb's display and gift animations from it.
@@ -12,10 +12,10 @@ local ClimbPath = {}
 ClimbPath.TOP = 1000 -- the platform with the diamond
 ClimbPath.ORIGIN = Vector3.new(2600, 200, 0) -- the pillar's foot; platform 0 is the start island
 ClimbPath.RADIUS = 32 -- studs from the pillar to the platforms' centres
-ClimbPath.SPACING = 11 -- studs between neighbouring platforms' centres, along the spiral
+ClimbPath.SPACING = 16.75 -- studs between neighbouring platforms' centres, along the spiral (12 a turn)
 ClimbPath.RISE_LOW, ClimbPath.RISE_HIGH = 1.2, 3.5 -- studs each platform rises, at the bottom and the top
 ClimbPath.THICKNESS = 1.2
-ClimbPath.START_SIZE = 18 -- the start island's width
+ClimbPath.START_SIZE = 30 -- the start island's width
 ClimbPath.MILESTONE = 100 -- every 100th platform is a bigger gold-rimmed one
 
 -- Movement the climber can choose (the climb's sliders), and Roblox's defaults.
@@ -65,13 +65,15 @@ function ClimbPath.top(index: number): Vector3
 	return ClimbPath.ORIGIN + Vector3.new(math.cos(angle) * reach, ClimbPath.height(n), math.sin(angle) * reach)
 end
 
--- How wide platform `index` is.
+-- How wide platform `index` is: 13.6 studs, 18.7 for every hundredth and
+-- 23.8 for the top (1.7 times the first tower's 8, 11 and 14).
+ClimbPath.SCALE = 1.7
 function ClimbPath.size(index: number): number
 	local n = clampIndex(index)
 	if n == 0 then return ClimbPath.START_SIZE end
-	if n == ClimbPath.TOP then return 14 end
-	if n % ClimbPath.MILESTONE == 0 then return 11 end
-	return 8
+	if n == ClimbPath.TOP then return 14 * ClimbPath.SCALE end
+	if n % ClimbPath.MILESTONE == 0 then return 11 * ClimbPath.SCALE end
+	return 8 * ClimbPath.SCALE
 end
 
 -- Platform `index`'s gem colour.

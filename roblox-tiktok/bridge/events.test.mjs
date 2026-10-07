@@ -34,6 +34,34 @@ test('likes carry their batch size', () => {
   assert.equal(likeEvent({ likeCount: 15, user: { uniqueId: 'a' } }).likes, 15);
 });
 
+// tiktok-live-connector 2.x passes on TikTok's newer layout: the gift is under
+// `gift`, ids are strings, the viewer's handle is displayId, likes are `count`.
+const newRose = (repeatCount, repeatEnd, displayId = 'fan1') => ({
+  giftId: '5655',
+  repeatCount,
+  repeatEnd: repeatEnd ? 1 : 0,
+  groupId: '77',
+  user: { id: '6800000000000000001', displayId, nickname: 'Fan One' },
+  gift: { id: '5655', name: 'Rose', diamondCount: 1, type: 1 },
+});
+
+test('the newer event layout: a streak counts each gift once, with its name and coins', () => {
+  const handle = createGiftTracker();
+  const events = [newRose(1, false), newRose(2, false), newRose(5, false), newRose(5, true)].map((event) => handle(event));
+  assert.deepEqual(events.map((event) => event?.count ?? 0), [1, 1, 3, 0]);
+  assert.deepEqual([events[0].gift, events[0].coins, events[0].user, events[0].name], ['Rose', 1, 'fan1', 'Fan One']);
+});
+
+test('the newer event layout: big gifts, viewers and likes', () => {
+  const handle = createGiftTracker();
+  const galaxy = handle({ giftId: '11046', repeatCount: 1, repeatEnd: 1, user: { id: '1', displayId: 'big', nickname: 'Big Fan' },
+    gift: { id: '11046', name: 'Galaxy', diamondCount: 1000, type: 2 } });
+  assert.deepEqual([galaxy.gift, galaxy.coins, galaxy.count, galaxy.user], ['Galaxy', 1000, 1, 'big']);
+  // Two viewers never share a leaderboard row.
+  assert.notEqual(handle(newRose(1, false, 'a')).user, handle(newRose(1, false, 'b')).user);
+  assert.equal(likeEvent({ count: 15, user: { displayId: 'a' } }).likes, 15);
+});
+
 test('the queue numbers events and returns only newer ones', () => {
   const queue = createEventQueue(3);
   for (let i = 0; i < 5; i += 1) queue.push({ type: 'like', likes: i });

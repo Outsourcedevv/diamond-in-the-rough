@@ -4,11 +4,13 @@
 // games can receive them through Roblox Open Cloud MessagingService.
 // Open http://localhost:8787 for the control page (connect + test gifts).
 import http from 'node:http';
-import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue } from './catalogue.mjs';
+import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue, GAMES, defaultGameRules, validateGameRule, CONNECT_OPTIONS, learnGift, catalogueError, mergeGifts } from './catalogue.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createEventQueue, createGiftTracker, likeEvent, socialEvent, packMessages, rebuildTestEvent, themeEvent, THEMES, skinEvent, SKINS } from './events.mjs';
+import { createEventQueue, createGiftTracker, likeEvent, socialEvent, packMessages, themeEvent, THEMES, skinEvent, SKINS } from './events.mjs';
+import { codeFor } from '../relay/relay.mjs';
+import { randomBytes } from 'node:crypto';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const configPath = path.join(here, 'config.json');
@@ -16,16 +18,30 @@ const defaults = {
   tiktokUsername: '',
   port: 8787,
   giftRules: {},
+  // Diamond Climb's and Chalkboard Count's own rules (see defaultGameRules).
+  climbRules: defaultGameRules(),
+  chalkRules: defaultGameRules(),
   openCloud: { apiKey: '', universeId: '', topic: 'DiamondRushTikTok' },
+  // The relay: lets this bridge feed a published game that other streamers
+  // play too, without sharing the game's Open Cloud key. The secret is this
+  // PC's own; the game code comes from it (see relay/relay.mjs).
+  relay: { url: '', secret: '' },
 };
 
 function loadConfig() {
+  let config;
   try {
     const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    return { ...defaults, ...saved, openCloud: { ...defaults.openCloud, ...(saved.openCloud ?? {}) } };
+    config = { ...defaults, ...saved, openCloud: { ...defaults.openCloud, ...(saved.openCloud ?? {}) }, relay: { ...defaults.relay, ...(saved.relay ?? {}) } };
   } catch {
-    return structuredClone(defaults);
+    config = structuredClone(defaults);
   }
+  // Keybinds used to be set on this page; pressing them sent pretend gifts.
+  // They are gone, so older saves lose theirs (the game's own keybinds stay).
+  for (const rule of Object.values(config.giftRules ?? {})) if (rule && typeof rule === 'object') rule.keybind = '';
+  // This PC's relay secret, made once. The game code is worked out from it.
+  if (typeof config.relay.secret !== 'string' || config.relay.secret.length < 32) config.relay.secret = randomBytes(24).toString('hex');
+  return config;
 }
 
 function saveConfig() {
@@ -33,6 +49,7 @@ function saveConfig() {
 }
 
 const config = loadConfig();
+saveConfig(); // keeps this PC's relay secret (and its game code) for next time
 const queue = createEventQueue();
 const handleGift = createGiftTracker();
 const outbox = [];
@@ -41,6 +58,12 @@ let tiktokStatus = 'not connected';
 let connection = null;
 let reconnectTimer = null;
 let lastRobloxPoll = 0;
+// The relay's queue and state (see "The relay" below).
+const relayOutbox = [];
+let relaySending = false;
+let relayRetryAt = 0;
+let relayStatus = 'off';
+let lastRelayPush = 0;
 
 function log(line) {
   const stamp = new Date().toLocaleTimeString();
@@ -55,7 +78,10 @@ function emit(event) {
   }
   const stamped = queue.push(event);
   outbox.push(stamped);
-  if (event.type === 'giftRule') return;
+  const { seq, ...compact } = stamped;
+  relayOutbox.push(compact);
+  if (relayOutbox.length > 2000) relayOutbox.splice(0, relayOutbox.length - 2000);
+  if (event.type === 'giftRule' || event.type === 'climbRule' || event.type === 'chalkRule') return;
   recent.unshift({ at: Date.now(), ...stamped });
   recent.length = Math.min(recent.length, 30);
   const what = event.type === 'gift' ? `${event.gift} x${event.count} (${event.coins} coins each)` : event.type === 'like' ? `${event.likes} likes` : event.type === 'theme' ? `map theme ${THEMES[event.theme]}` : event.type === 'skin' ? `mountain skin ${SKINS[event.skin]}` : event.type;
@@ -64,8 +90,8 @@ function emit(event) {
 
 const cataloguePath = path.join(here, 'gift-catalogue.json');
 let catalogue = STARTER;
-let catalogueStatus = 'Starter gifts. Refresh to load all gifts available for your TikTok LIVE.';
-try { const cached=JSON.parse(fs.readFileSync(cataloguePath,'utf8')); const rows=normalizeGifts(cached); if(rows.length){catalogue=rows;catalogueStatus='Saved TikTok catalogue';} } catch {}
+let catalogueStatus = 'Starter gifts. Gifts you receive on your LIVE are added automatically.';
+try { const cached=JSON.parse(fs.readFileSync(cataloguePath,'utf8')); const rows=normalizeGifts(cached); if(rows.length){catalogue=mergeGifts(STARTER,rows);catalogueStatus='Saved gift list';} } catch {}
 let catalogueLoading = null;
 async function refreshCatalogue(username = config.tiktokUsername) {
  if(catalogueLoading) return catalogueLoading;
@@ -73,16 +99,38 @@ async function refreshCatalogue(username = config.tiktokUsername) {
   username = String(username ?? '').trim().replace(/^@/, '');
   if(!username) throw new Error('Enter your TikTok username first.');
   const { TikTokLiveConnection }=await import('tiktok-live-connector');
-  const gifts=await fetchCatalogue(TikTokLiveConnection, username);
+  let gifts;
+  try { gifts=await fetchCatalogue(TikTokLiveConnection, username); }
+  catch(error) { throw new Error(catalogueError(error)); }
   if(!gifts.length) throw new Error('TikTok returned no gifts. Try refreshing while your account is LIVE.');
-  catalogue=gifts; catalogueStatus=`${gifts.length} gifts loaded from TikTok`;
+  catalogue=mergeGifts(catalogue,gifts); catalogueStatus=`${gifts.length} gifts loaded from TikTok`;
   fs.writeFileSync(cataloguePath,JSON.stringify(gifts,null,2));
   config.tiktokUsername=username; saveConfig();
  })().finally(()=>{catalogueLoading=null;});
  return catalogueLoading;
 }
+// Gifts seen on the LIVE join the catalogue, so they can be given rules.
+function rememberGift(event) {
+  if (event?.type !== 'gift') return;
+  const updated = learnGift(catalogue, event.gift, event.coins);
+  if (!updated) return;
+  catalogue = updated;
+  try { fs.writeFileSync(cataloguePath, JSON.stringify(catalogue, null, 2)); } catch {}
+}
 function publishRule(rule) { emit({type:'giftRule',name:'Gift catalogue',...rule}); }
 for(const rule of Object.values(config.giftRules ?? {})) publishRule(rule);
+// The climb's and chalkboard's rules, as events for the game: one per rule,
+// and a "clear" for each of the game's own defaults the streamer removed (a
+// new save starts with them).
+function gameRuleEvents(game) {
+  const rules = config[`${game}Rules`] ?? {};
+  const events = Object.values(rules).map((rule) => ({ type: `${game}Rule`, name: 'Gift catalogue', gift: rule.gift, coins: rule.coins, amount: rule.amount }));
+  for (const [key, rule] of Object.entries(defaultGameRules())) {
+    if (!rules[key]) events.push({ type: `${game}Rule`, name: 'Gift catalogue', gift: rule.gift, clear: true });
+  }
+  return events;
+}
+for (const game of Object.keys(GAMES)) for (const event of gameRuleEvents(game)) emit(event);
 
 // TikTok ----------------------------------------------------------------------
 async function connectTikTok(username) {
@@ -98,10 +146,14 @@ async function connectTikTok(username) {
     return;
   }
   const { TikTokLiveConnection, WebcastEvent, ControlEvent } = await import('tiktok-live-connector');
-  const live = new TikTokLiveConnection(username, { processInitialData: false, enableExtendedGiftInfo: true });
+  const live = new TikTokLiveConnection(username, CONNECT_OPTIONS);
   connection = live;
   tiktokStatus = `connecting to @${username}…`;
-  live.on(WebcastEvent.GIFT, (data) => emit(handleGift(data)));
+  live.on(WebcastEvent.GIFT, (data) => {
+    const event = handleGift(data);
+    rememberGift(event);
+    emit(event);
+  });
   live.on(WebcastEvent.LIKE, (data) => emit(likeEvent(data)));
   live.on(WebcastEvent.FOLLOW, (data) => emit(socialEvent('follow', data)));
   live.on(WebcastEvent.SHARE, (data) => emit(socialEvent('share', data)));
@@ -120,7 +172,7 @@ async function connectTikTok(username) {
     if (connection === live) {
       tiktokStatus = `connected to @${username}`;
       log(`Connected to @${username}'s LIVE`);
-      refreshCatalogue().catch(error=>{catalogueStatus=error.message;});
+      refreshCatalogue(username).catch(error=>{catalogueStatus=error.message;});
     }
   } catch (error) {
     if (connection !== live) return;
@@ -132,32 +184,121 @@ async function connectTikTok(username) {
 }
 
 // Roblox Open Cloud (published games) --------------------------------------------
+let flushing = false;
+let retryAt = 0;
 async function flushOpenCloud() {
   const { apiKey, universeId, topic } = config.openCloud;
   if (!apiKey || !universeId || outbox.length === 0) {
     outbox.length = 0;
     return;
   }
+  if (flushing || Date.now() < retryAt) return;
+  flushing = true;
   const batch = outbox.splice(0, outbox.length);
-  for (const message of packMessages(batch)) {
-    try {
-      const response = await fetch(`https://apis.roblox.com/messaging-service/v1/universes/${encodeURIComponent(universeId)}/topics/${encodeURIComponent(topic)}`, {
-        method: 'POST',
-        headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
-        body: JSON.stringify({ message }),
-      });
-      if (!response.ok) log(`Open Cloud refused a message: ${response.status} ${await response.text()}`);
-    } catch (error) {
-      log(`Open Cloud unreachable: ${error.message}`);
+  const messages = packMessages(batch);
+  try {
+    for (let i = 0; i < messages.length; i += 1) {
+      let retry = false;
+      try {
+        const response = await fetch(`https://apis.roblox.com/messaging-service/v1/universes/${encodeURIComponent(universeId)}/topics/${encodeURIComponent(topic)}`, {
+          method: 'POST',
+          headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
+          body: JSON.stringify({ message: messages[i] }),
+        });
+        if (!response.ok) {
+          log(`Open Cloud refused a message: ${response.status} ${await response.text()}`);
+          // Too many messages or Roblox busy: try again shortly. Anything else
+          // (a wrong key or universe) would fail every time, so it is dropped.
+          retry = response.status === 429 || response.status >= 500;
+        }
+      } catch (error) {
+        log(`Open Cloud unreachable: ${error.message}`);
+        retry = true;
+      }
+      if (retry) {
+        // Put this message and the rest back, in order, ahead of newer events.
+        const unsent = messages.slice(i).flatMap((message) => JSON.parse(message));
+        outbox.unshift(...unsent);
+        // A long Roblox outage keeps only the newest events.
+        if (outbox.length > 2000) outbox.splice(0, outbox.length - 2000);
+        retryAt = Date.now() + 3000;
+        return;
+      }
     }
+  } finally {
+    flushing = false;
   }
 }
 setInterval(flushOpenCloud, 1000);
 
+// The relay (many streamers on one published game) ------------------------------
+// Everything the game needs goes to the relay under this PC's game code: the
+// events as they happen, and the gift rules so a game that just started knows
+// them. The relay keeps no account; the code is worked out from the secret.
+function gameCode() {
+  return codeFor(config.relay.secret);
+}
+function relayRules() {
+  const rules = [];
+  for (const [key, rule] of Object.entries(config.giftRules ?? {})) rules.push({ id: `rules:${queue.session}:${key}:${JSON.stringify(rule)}`, type: 'giftRule', ...rule });
+  for (const game of Object.keys(GAMES)) for (const rule of gameRuleEvents(game)) rules.push({ id: `${game}Rules:${queue.session}:${JSON.stringify(rule)}`, ...rule });
+  return rules;
+}
+async function flushRelay() {
+  const url = String(config.relay.url ?? '').trim().replace(/\/+$/, '');
+  if (!url) {
+    relayOutbox.length = 0;
+    relayStatus = 'off';
+    return;
+  }
+  if (relaySending || Date.now() < relayRetryAt) return;
+  // Nothing new: still check in now and then so the relay keeps the rules and
+  // the TikTok status fresh for a game that starts later.
+  const batch = relayOutbox.splice(0, 300);
+  if (batch.length === 0 && Date.now() - lastRelayPush < 15000) return;
+  relaySending = true;
+  lastRelayPush = Date.now();
+  try {
+    const response = await fetch(`${url}/c/${gameCode()}/push`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-relay-secret': config.relay.secret },
+      body: JSON.stringify({ events: batch, rules: relayRules(), tiktok: tiktokStatus }),
+    });
+    if (response.ok) {
+      relayStatus = `sending to the relay as ${gameCode()}`;
+    } else {
+      const text = (await response.text()).slice(0, 200);
+      relayStatus = `the relay refused this bridge (${response.status})`;
+      log(`Relay refused a push: ${response.status} ${text}`);
+      // Busy or down: keep the events and try again. A refusal of this bridge
+      // (a wrong address, or another bridge on this code) would always fail.
+      if (response.status === 429 || response.status >= 500) {
+        relayOutbox.unshift(...batch);
+        relayRetryAt = Date.now() + 3000;
+      } else {
+        relayRetryAt = Date.now() + 30000;
+      }
+    }
+  } catch (error) {
+    relayStatus = `the relay is unreachable (${error.message})`;
+    relayOutbox.unshift(...batch);
+    if (relayOutbox.length > 2000) relayOutbox.splice(0, relayOutbox.length - 2000);
+    relayRetryAt = Date.now() + 5000;
+  } finally {
+    relaySending = false;
+  }
+}
+setInterval(flushRelay, 500);
+
 // Local web server ------------------------------------------------------------------
 function statusLine() {
   const robloxSeen = Date.now() - lastRobloxPoll < 5000;
-  return { tiktok: tiktokStatus, roblox: robloxSeen ? 'connected (Roblox Studio)' : 'waiting for Roblox Studio (press Play)' };
+  return {
+    tiktok: tiktokStatus,
+    roblox: robloxSeen ? 'connected (Roblox Studio)' : 'waiting for Roblox Studio (press Play)',
+    relay: relayStatus,
+    gameCode: gameCode(),
+  };
 }
 
 function sendJson(response, code, body) {
@@ -182,10 +323,26 @@ function readBody(request) {
   });
 }
 
+// Only the control page (on this PC) may change things: another website open
+// in the browser could otherwise send fake gifts or change the settings.
+function fromOtherSite(request) {
+  const origin = request.headers.origin;
+  if (!origin) return false;
+  try {
+    const { hostname } = new URL(origin);
+    return !['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname);
+  } catch {
+    return true;
+  }
+}
+
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
+  if (request.method !== 'GET' && fromOtherSite(request)) {
+    return sendJson(response, 403, { error: 'Only the control page on this PC can do that.' });
+  }
   if (request.method === 'GET' && url.pathname === '/catalogue') {
-    return sendJson(response,200,{gifts:catalogue,status:catalogueStatus,rules:config.giftRules ?? {},keys:KEYS});
+    return sendJson(response,200,{gifts:catalogue,status:catalogueStatus,rules:config.giftRules ?? {},keys:KEYS,climbRules:config.climbRules ?? {},chalkRules:config.chalkRules ?? {}});
   }
   if (request.method === 'POST' && url.pathname === '/catalogue/refresh') {
     try { const body=await readBody(request); await refreshCatalogue(body.username || config.tiktokUsername); return sendJson(response,200,{ok:true}); }
@@ -193,7 +350,7 @@ const server = http.createServer(async (request, response) => {
   }
   if (request.method === 'POST' && url.pathname === '/catalogue/rule') {
     try {
-      const rule=validateRule(await readBody(request));
+      const rule={...validateRule(await readBody(request)),keybind:''};
       const conflict=Object.values(config.giftRules ?? {}).find(other=>other.keybind && other.keybind===rule.keybind && other.gift.toLowerCase()!==rule.gift.toLowerCase());
       if(conflict) throw new Error(`${rule.keybind} is already assigned to ${conflict.gift}. Clear that binding first.`);
       config.giftRules ??= {};
@@ -202,16 +359,33 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response,200,{ok:true});
     } catch(error) {return sendJson(response,400,{error:error.message});}
   }
+  if (request.method === 'POST' && url.pathname === '/game-rule') {
+    try {
+      const rule = validateGameRule(await readBody(request));
+      const rules = (config[`${rule.game}Rules`] ??= {});
+      const key = rule.gift.toLowerCase();
+      if (rule.remove) {
+        delete rules[key];
+        emit({ type: `${rule.game}Rule`, name: 'Gift catalogue', gift: rule.gift, clear: true });
+      } else {
+        rules[key] = { gift: rule.gift, coins: rule.coins, amount: rule.amount };
+        emit({ type: `${rule.game}Rule`, name: 'Gift catalogue', gift: rule.gift, coins: rule.coins, amount: rule.amount });
+      }
+      saveConfig();
+      return sendJson(response, 200, { ok: true });
+    } catch (error) { return sendJson(response, 400, { error: error.message }); }
+  }
   if (request.method === 'GET' && url.pathname === '/events') {
     lastRobloxPoll = Date.now();
     const session = url.searchParams.get('session');
     const since = session === queue.session ? Number(url.searchParams.get('since')) || 0 : 0;
     const events = queue.since(since).map(({ seq, ...event }) => event);
     if(!since) for(const [key,rule] of Object.entries(config.giftRules ?? {})) events.unshift({id:`rules:${queue.session}:${key}:${JSON.stringify(rule)}`,type:'giftRule',...rule});
+    if(!since) for(const game of Object.keys(GAMES)) for(const rule of gameRuleEvents(game)) events.unshift({id:`${game}Rules:${queue.session}:${JSON.stringify(rule)}`,...rule});
     return sendJson(response, 200, { session: queue.session, last: queue.last, tiktok: tiktokStatus, events });
   }
   if (request.method === 'GET' && url.pathname === '/status') {
-    return sendJson(response, 200, { ...statusLine(), username: config.tiktokUsername, openCloud: Boolean(config.openCloud.apiKey && config.openCloud.universeId), recent });
+    return sendJson(response, 200, { ...statusLine(), username: config.tiktokUsername, openCloud: Boolean(config.openCloud.apiKey && config.openCloud.universeId), relayUrl: config.relay.url, recent });
   }
   if (request.method === 'POST' && url.pathname === '/connect') {
     const body = await readBody(request);
@@ -220,18 +394,24 @@ const server = http.createServer(async (request, response) => {
     connectTikTok(config.tiktokUsername);
     return sendJson(response, 200, { ok: true });
   }
+  if (request.method === 'POST' && url.pathname === '/relay') {
+    const body = await readBody(request);
+    const given = String(body.url ?? '').trim();
+    if (given && !/^https?:\/\/[^\s]+$/i.test(given)) return sendJson(response, 400, { error: 'Enter the relay address, like https://my-relay.example.com' });
+    config.relay.url = given.replace(/\/+$/, '');
+    saveConfig();
+    relayRetryAt = 0;
+    lastRelayPush = 0; // check in with the relay at once, so the page can say so
+    relayStatus = config.relay.url ? 'starting' : 'off';
+    if (config.relay.url) log(`Relay set to ${config.relay.url} · game code ${gameCode()}`);
+    return sendJson(response, 200, { ok: true, gameCode: gameCode() });
+  }
   if (request.method === 'POST' && url.pathname === '/opencloud') {
     const body = await readBody(request);
     config.openCloud.apiKey = String(body.apiKey ?? '').trim();
     config.openCloud.universeId = String(body.universeId ?? '').trim();
     saveConfig();
     return sendJson(response, 200, { ok: true });
-  }
-  if (request.method === 'POST' && url.pathname === '/test/rebuild') {
-    try {
-      emit(rebuildTestEvent((await readBody(request)).blocks));
-      return sendJson(response, 200, { ok: true });
-    } catch (error) { return sendJson(response, 400, { error: error.message }); }
   }
   if (request.method === 'POST' && url.pathname === '/theme') {
     try {
@@ -245,14 +425,8 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { ok: true });
     } catch (error) { return sendJson(response, 400, { error: error.message }); }
   }
-  if (request.method === 'POST' && url.pathname === '/test') {
-    const body = await readBody(request);
-    const name = 'Test viewer';
-    if (body.type === 'like') emit({ type: 'like', user: 'tester', name, likes: Math.max(1, Number(body.likes) || 10) });
-    else if (body.type === 'follow' || body.type === 'share') emit({ type: body.type, user: 'tester', name });
-    else emit({ type: 'gift', user: 'tester', name, gift: String(body.gift ?? 'Rose').slice(0, 40), coins: Math.max(1, Number(body.coins) || 1), count: Math.max(1, Math.min(100, Number(body.count) || 1)) });
-    return sendJson(response, 200, { ok: true });
-  }
+  // No pretend gifts: only real gifts from the LIVE reach the game (the
+  // game's own Y panel still has test gifts for trying things out).
   // three.js (MIT, vendor/three.LICENSE) for the control page's 3D shrine.
   if (request.method === 'GET' && url.pathname === '/vendor/three.module.min.js') {
     response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'max-age=86400' });

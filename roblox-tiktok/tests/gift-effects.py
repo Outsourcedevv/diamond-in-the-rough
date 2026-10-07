@@ -24,6 +24,7 @@ def module(path: str) -> str:
 harness = r'''
 -- A simulated clock: delayed calls, render steps and tweens run in order.
 local clock = 0
+local os = setmetatable({ clock = function() return clock end }, { __index = os })
 local scheduled: { { at: number, run: () -> () } } = {}
 local function schedule(delay: number, run: () -> ())
 	table.insert(scheduled, { at = clock + math.max(0, delay), run = run })
@@ -92,6 +93,8 @@ end
 -- Particle emitters record what they emit.
 local emitted = 0
 local textures: { [string]: boolean } = {}
+local soundsPlayed = 0
+local soundFiles: { [string]: boolean } = {}
 local makeInstance = newInstance
 newInstance = function(className: string): any
 	local object = makeInstance(className)
@@ -99,6 +102,13 @@ newInstance = function(className: string): any
 		object.Emit = function(self, count)
 			emitted += count
 			textures[self.Texture] = true
+		end
+	end
+	-- Sounds record what plays.
+	if className == "Sound" then
+		object.Play = function(self)
+			soundsPlayed += 1
+			soundFiles[self.SoundId] = true
 		end
 	end
 	return object
@@ -172,6 +182,7 @@ for tier, coins in TIERS do
 	local before = #instances
 	emitted = 0
 	maxShake = 0
+	local soundsBefore = soundsPlayed
 	GiftEffects.play({ position = Vector3.new(3, 12, -2), coins = coins, name = "Tester", gift = "Gift", adding = adding, blocks = if adding then -coins * 100 else coins * 100 })
 	local parts, lights, peakParts = 0, 0, 0
 	for step = 1, 14 * 30 do
@@ -200,11 +211,13 @@ for tier, coins in TIERS do
 	check(emitted >= 20 and emitted <= GiftEffects.PARTICLE_BUDGETS[tier], "tier " .. tier .. ": particle budget kept (" .. emitted .. ")")
 	check(liveParts() == 0 and live("ParticleEmitter") == 0 and live("Trail") == 0 and live("PointLight") == 0, "tier " .. tier .. ": nothing is left behind")
 	check(live("ColorCorrectionEffect") == 0, "tier " .. tier .. ": the colour grade is removed")
+	check(soundsPlayed - soundsBefore >= 2, "tier " .. tier .. ": the show has sound (" .. (soundsPlayed - soundsBefore) .. ")")
+	check(live("Sound") == 0, "tier " .. tier .. ": the sounds are tidied up")
 	check(next(renderConnections) == nil, "tier " .. tier .. ": every motion stops")
 	check(not GiftEffects.shaking() and next(bound) == nil, "tier " .. tier .. ": the camera shake ends")
 	check((maxShake > 0.05) == expectedShake[tier] and maxShake < 2.5, "tier " .. tier .. ": shake is gentle (" .. string.format("%.2f", maxShake) .. " degrees)")
-	print(string.format("%s tier %d %-17s %2d parts (peak %2d), %d lights, %3d particles, shake %.2f deg", if adding then "adding" else "breaking", tier,
-		(if adding then GiftEffects.ADD_TITLES else GiftEffects.TITLES)[tier], parts, peakParts, lights, emitted, maxShake))
+	print(string.format("%s tier %d %-17s %2d parts (peak %2d), %d lights, %3d particles, %2d sounds, shake %.2f deg", if adding then "adding" else "breaking", tier,
+		(if adding then GiftEffects.ADD_TITLES else GiftEffects.TITLES)[tier], parts, peakParts, lights, emitted, soundsPlayed - soundsBefore, maxShake))
 end
 end
 
@@ -256,13 +269,16 @@ end
 check(folders == 2, "a rose does not cut short two galaxies")
 run(14)
 
+for file in soundFiles do
+	check(string.sub(file, 1, 18) == "rbxasset://sounds/", "only Roblox's built-in sounds: " .. file)
+end
 print(string.format("PASS: %d gift effect checks", passed))
 '''
 
 generated = root / "tests/gift-effects.generated.luau"
 try:
     mock = (root / "tests/roblox-mock.luau").read_text(encoding="utf-8")
-    body = mock + "\n" + harness + "\nlocal CameraShake = " + module("src/client/CameraShake.luau") + "\nlocal GiftEffects = " + module("src/client/GiftEffects.luau") + "\n" + test
+    body = mock + "\n" + harness + "\nlocal CameraShake = " + module("src/client/CameraShake.luau") + "\nlocal Sounds = " + module("src/client/Sounds.luau") + "\nlocal GiftEffects = " + module("src/client/GiftEffects.luau") + "\n" + test
     generated.write_text(body, encoding="utf-8")
     subprocess.run([sys.argv[1] if len(sys.argv) > 1 else "luau", str(generated)], check=True)
 finally:

@@ -38,7 +38,7 @@ function ChalkBoard.standFrame(): CFrame
 	return CFrame.lookAt(at, at - Vector3.new(0, 0, 1))
 end
 
--- The classroom camera: in front of the board and off to one side, looking
+-- The view of the classroom: in front of the board and off to one side, looking
 -- at the writer and the board.
 function ChalkBoard.cameraFrame(): CFrame
 	local O = ChalkBoard.ORIGIN

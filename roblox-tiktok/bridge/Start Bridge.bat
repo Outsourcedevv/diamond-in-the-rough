@@ -18,6 +18,7 @@ if not exist node_modules\tiktok-live-connector (
     exit /b 1
   )
 )
-start "" http://localhost:8787
+rem Opens the control page once the bridge has had a moment to start.
+start "" /min powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 3; Start-Process 'http://localhost:8787'"
 node bridge.mjs
 pause

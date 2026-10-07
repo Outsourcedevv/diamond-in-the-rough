@@ -4,7 +4,10 @@
 -- climber lands on a platform (a bigger one every hundred), sending each new
 -- platform to the server as the checkpoint, putting the climber back on
 -- their checkpoint when they fall, the gift rides (one after another, see
--- ClimbEffects) and the win at the top. Also turns the climb's diamond.
+-- ClimbEffects), the hold at the top (stay there through a countdown from 10
+-- without being sent down) and the win. Also turns the climb's diamond, and
+-- keeps the whole tower out of sight from the other games (it is far off in
+-- the sky, but tall enough to see from the mountain).
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -15,11 +18,14 @@ local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
 local Format = require(Shared:WaitForChild("Format"))
 local ClimbEffects = require(script.Parent:WaitForChild("ClimbEffects"))
+local Sounds = require(script.Parent:WaitForChild("Sounds"))
+local HoldCountdown = require(script.Parent:WaitForChild("HoldCountdown"))
 
 local ClimbView = {}
 
 local WHITE = Color3.new(1, 1, 1)
 local GOLD = Color3.fromRGB(246, 200, 92)
+local RED = Color3.fromRGB(255, 84, 84)
 local MUTED = Color3.fromRGB(168, 174, 190)
 local PANEL = Color3.fromRGB(16, 18, 26)
 local SELECTED = Color3.fromRGB(64, 128, 236)
@@ -168,10 +174,14 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		end)
 	end
 
-	-- The speed and jump sliders, bottom right.
+	-- The hold at the top, under the display.
+	local hold = HoldCountdown.new(gui, 166, "HOLD THE TOP")
+
+	-- The speed and jump sliders, bottom right (Settings can hide them).
 	local moveCard = make("Frame", {
 		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -14, 1, -36),
+		-- Higher on touch screens, clear of Roblox's jump button.
+		Position = UDim2.new(1, -14, 1, if UserInputService.TouchEnabled then -190 else -36),
 		Size = UDim2.fromOffset(280, 136),
 	}, gui)
 	glass(moveCard, 14)
@@ -320,6 +330,11 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	state:GetAttributeChangedSignal("ClimbSpeed"):Connect(refreshMove)
 	state:GetAttributeChangedSignal("ClimbJump"):Connect(refreshMove)
 	refreshMove()
+	local function refreshCard()
+		moveCard.Visible = player:GetAttribute("HideClimbCard") ~= true
+	end
+	player:GetAttributeChangedSignal("HideClimbCard"):Connect(refreshCard)
+	refreshCard()
 
 	-- The display follows the checkpoint, or the ride while a gift carries the climber.
 	local shownPlatform = attr("ClimbCheckpoint", 0)
@@ -331,8 +346,16 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	state:GetAttributeChangedSignal("ClimbWins"):Connect(refreshStats)
 	refreshStats()
 	local lastWhole = -1
+	local wasHolding = false
 	RunService.RenderStepped:Connect(function(dt: number)
 		if not active then return end
+		-- The hold at the top: a gift that sends them down ends it.
+		local holdStart = attr("ClimbHoldStart", 0)
+		hold.update(holdStart, workspace:GetServerTimeNow())
+		if wasHolding and holdStart == 0 and attr("ClimbCheckpoint", 0) < ClimbPath.TOP then
+			showShout("SENT DOWN! THE HOLD IS LOST", RED, 3)
+		end
+		wasHolding = holdStart > 0
 		local target = ClimbEffects.shownIndex() or attr("ClimbCheckpoint", 0)
 		shownPlatform += (target - shownPlatform) * math.min(1, dt * 12)
 		if math.abs(target - shownPlatform) < 0.5 then shownPlatform = target end
@@ -354,7 +377,17 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	-- The tower's platforms by number, for the landing animation.
 	local platforms: { [number]: BasePart } = {}
 	local tower: Instance? = nil
-	task.spawn(function()
+	-- Out of sight (and not drawn) unless climbing: only this computer's copy
+	-- of the tower moves here; the server's stays where it is.
+	local hiddenTower = Instance.new("Folder")
+	hiddenTower.Name = "HiddenClimb"
+	hiddenTower.Parent = ReplicatedStorage
+	local function showTower()
+		if tower then tower.Parent = if active then workspace else hiddenTower end
+	end
+	local startDiamond: (Instance) -> ()
+	-- Started at the end (once everything it uses is ready).
+	local function findTower()
 		local model = workspace:WaitForChild("DiamondClimb", math.huge)
 		tower = model
 		local function add(item: Instance)
@@ -363,7 +396,9 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		end
 		for _, item in model:GetDescendants() do add(item) end
 		model.DescendantAdded:Connect(add)
-	end)
+		task.spawn(startDiamond, model)
+		showTower()
+	end
 
 	-- The landing animation: the platform bounces and flashes, a ring of light
 	-- races out, sparkles fly up and a chime rings, rising through each ten.
@@ -532,6 +567,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	-- Gift rides, one after another.
 	local winWaiting: any = nil
 	local function celebrate()
+		Sounds.play("cheer")
 		showShout("YOU REACHED THE DIAMOND!", GOLD, 6)
 		pop(1.4)
 		local finish = ClimbPath.top(ClimbPath.TOP)
@@ -603,6 +639,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		if on == active then return end
 		active = on
 		gui.Enabled = on
+		showTower()
 		if not on then
 			-- The server is moving the climber elsewhere: no putting them back on the tower.
 			ClimbEffects.stop(true)
@@ -617,8 +654,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	end
 
 	-- The diamond at the top turns slowly and bobs (only when near).
-	task.spawn(function()
-		local model = workspace:WaitForChild("DiamondClimb", math.huge)
+	function startDiamond(model: Instance)
 		local gem = model:WaitForChild("ClimbDiamond", math.huge)
 		local centre = gem:GetAttribute("Centre")
 		if typeof(centre) ~= "Vector3" then return end
@@ -638,9 +674,12 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 			local t = os.clock()
 			local turn = CFrame.new(centre + Vector3.new(0, math.sin(t * 1.3) * 0.6, 0)) * CFrame.Angles(0, t * 0.8, 0)
 			for i, offset in offsets do frames[i] = turn * offset end
+			if not active then return end
 			workspace:BulkMoveTo(parts, frames, Enum.BulkMoveMode.FireCFrameChanged)
 		end)
-	end)
+	end
+
+	task.spawn(findTower)
 
 	return {
 		setActive = setActive,

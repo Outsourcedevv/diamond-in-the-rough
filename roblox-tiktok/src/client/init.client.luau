@@ -15,6 +15,7 @@ local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
 local Skin = require(Shared:WaitForChild("Skin"))
 local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local FirstPerson = require(script:WaitForChild("FirstPerson"))
+local Sounds = require(script:WaitForChild("Sounds"))
 -- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
 FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
 FirstPerson.start()
@@ -119,6 +120,9 @@ end
 local gui = make("ScreenGui", {
 	Name = "DiamondRushHud",
 	ResetOnSpawn = false,
+	-- Above the climb's and chalkboard's own cards, so the Y panel and the
+	-- settings are never covered (the games menu, 5, stays above).
+	DisplayOrder = 2,
 	IgnoreGuiInset = false,
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, player:WaitForChild("PlayerGui"))
@@ -134,14 +138,14 @@ local roughHud = make("Frame", {
 -- Diamond Climb: its display, sliders, landings and gift rides.
 local ClimbView = require(script:WaitForChild("ClimbView"))
 local climb = ClimbView.start(Request, State)
--- Chalkboard Count: the classroom camera, chalk numbers and its display.
+-- Chalkboard Count: the view of the board, chalk numbers and its display.
 local ChalkView = require(script:WaitForChild("ChalkView"))
 local chalk = ChalkView.start(Request, State)
 
 -- The games menu: the game's display, first-person view and hands only show
 -- while playing Diamond in the Rough, not in the lobby; Diamond Climb has a
--- third-person camera and its own display, and Chalkboard Count films the
--- writer from a fixed classroom camera.
+-- third-person camera and its own display, and Chalkboard Count shows the
+-- writer and the board from a fixed view.
 local LobbyView = require(script:WaitForChild("LobbyView"))
 -- How to play: from the lobby board, the games menu or H.
 local HowToPlay = require(script:WaitForChild("HowToPlay"))
@@ -422,6 +426,7 @@ local winBest = winLine(174, 30, FONT_MEDIUM, 20, GOLD)
 local winNewBest = winLine(230, 32, FONT, 18, GREEN)
 
 local function showWin(data: { [string]: any })
+	if player:GetAttribute("InGame") == true then Sounds.play("cheer") end
 	local words = Skin.words(attr("Skin", "stone"))
 	winTitle.Text = string.upper(words.gem) .. " SECURED"
 	winWho.Text = tostring(data.winner or "") .. " wins!"
@@ -440,7 +445,8 @@ end
 local panel = make("ScrollingFrame", {
 	AnchorPoint = Vector2.new(1, 0),
 	Position = UDim2.new(1, -12, 0, 92),
-	Size = UDim2.fromOffset(340, 520),
+	-- As tall as the screen allows (Studio's play area can be short), up to 520.
+	Size = UDim2.new(0, 340, 1, -104),
 	CanvasSize = UDim2.fromOffset(0, 0),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ScrollBarThickness = 4,
@@ -449,6 +455,7 @@ local panel = make("ScrollingFrame", {
 	ZIndex = 10,
 }, gui)
 glass(panel, 14, 0.06)
+make("UISizeConstraint", { MaxSize = Vector2.new(340, 520) }, panel)
 make("UIPadding", {
 	PaddingLeft = UDim.new(0, 12),
 	PaddingRight = UDim.new(0, 14),
@@ -640,6 +647,7 @@ local function refreshRules()
 			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = WHITE,
+			TextTruncate = Enum.TextTruncate.AtEnd,
 			Text = string.format("%s: %s %s rocks", tostring(name), if (tonumber(rocks) or 0) < 0 then "adds" else "removes", Format.commas(math.abs(tonumber(rocks) or 0))),
 			ZIndex = 12,
 		}, row)
@@ -669,7 +677,9 @@ local testGifts = {
 	{ "Finger Heart · 5", "Finger Heart", 5, 1 },
 	{ "Rose x10", "Rose", 1, 10 },
 	{ "Doughnut · 30", "Doughnut", 30, 1 },
+	{ "Perfume · 20", "Perfume", 20, 1 },
 	{ "Hand Hearts · 100", "Hand Hearts", 100, 1 },
+	{ "Confetti · 100", "Confetti", 100, 1 },
 	{ "Money Gun · 500", "Money Gun", 500, 1 },
 	{ "Galaxy · 1,000", "Galaxy", 1000, 1 },
 	{ "Doughnut x40", "Doughnut", 30, 40 },
@@ -891,6 +901,19 @@ panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
 
+-- A published game that many streamers play: the code from the bridge's
+-- control page tells the relay which stream's gifts belong to this game.
+panelLabel("GAME CODE (published game: from localhost:8787)")
+local gameCodeBox = panelBox("", function(text)
+	send("setGameCode", text)
+end)
+gameCodeBox.PlaceholderText = "e.g. ABCD EFGH, or empty for none"
+panelLabel("RELAY ADDRESS (only if you run your own relay)")
+local relayBox = panelBox("", function(text)
+	send("setRelayUrl", text)
+end)
+relayBox.PlaceholderText = "https://my-relay.example.com"
+
 panelLabel("MAP THEME (changes for everyone straight away)")
 local THEME_BUTTONS = { { "Alpine", "default" }, { "Sakura", "sakura" }, { "Farm", "farm" }, { "Desert", "desert" }, { "Haunted", "haunted" } }
 local themeButtons: { TextButton } = {}
@@ -1078,6 +1101,9 @@ local function refreshPanelFields()
 	perLikeBox.Text = "Like: " .. tostring(attr("PerLike", Config.StonePerLike))
 	perFollowBox.Text = "Follow: " .. tostring(attr("PerFollow", Config.StonePerFollow))
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
+	local code = attr("GameCode", "")
+	gameCodeBox.Text = if #code == 8 then string.sub(code, 1, 4) .. " " .. string.sub(code, 5) else code
+	relayBox.Text = attr("RelayUrl", Config.RelayUrl)
 end
 
 -- Settings (every player): the field of view and hiding the buttons, from the
@@ -1098,7 +1124,7 @@ glass(settingsButton, 16)
 make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, settingsButton)
 local settingsCard = make("Frame", {
 	Position = UDim2.fromOffset(12, 50),
-	Size = UDim2.fromOffset(300, 214),
+	Size = UDim2.fromOffset(300, 306),
 	Visible = false,
 	ZIndex = 15,
 }, gui)
@@ -1144,7 +1170,7 @@ local fovKnob = make("Frame", {
 rounded(fovKnob, 9)
 local function settingsAction(text: string, x: number, colour: Color3): TextButton
 	local button = make("TextButton", {
-		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 160),
+		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 252),
 		Size = UDim2.new(0.5, -4, 0, 30),
 		BackgroundColor3 = colour,
 		Font = FONT,
@@ -1181,7 +1207,9 @@ local hideKnob = make("Frame", {
 }, hideSwitch)
 rounded(hideKnob, 10)
 local function refreshHidden()
-	local hidden = player:GetAttribute("HideButtons") == true
+	-- Phones and tablets have no G or P key to bring the buttons back, so
+	-- they always show there.
+	local hidden = player:GetAttribute("HideButtons") == true and UserInputService.KeyboardEnabled
 	hideSwitch.BackgroundColor3 = if hidden then SELECTED else BUTTON
 	hideKnob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
 	settingsButton.Visible = not hidden
@@ -1195,6 +1223,44 @@ hideSwitch.Activated:Connect(function()
 	player:SetAttribute("HideButtons", hidden)
 	Request:FireServer("setHideButtons", hidden)
 end)
+-- Switches that hide a game's own card: Diamond Climb's speed and jump
+-- sliders, Chalkboard Count's writing speed and themes. Remembered by the server.
+local function cardSwitch(y: number, title: string, card: string, attribute: string)
+	settingsText({ Position = UDim2.fromOffset(0, y), Size = UDim2.new(1, -60, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = title })
+	local switch = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, y + 2),
+		Size = UDim2.fromOffset(46, 26),
+		BackgroundColor3 = BUTTON,
+		AutoButtonColor = false,
+		Text = "",
+		ZIndex = 16,
+	}, settingsCard)
+	rounded(switch, 13)
+	local knob = make("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 3, 0.5, 0),
+		Size = UDim2.fromOffset(20, 20),
+		BackgroundColor3 = WHITE,
+		BorderSizePixel = 0,
+		ZIndex = 17,
+	}, switch)
+	rounded(knob, 10)
+	local function refresh()
+		local hidden = player:GetAttribute(attribute) == true
+		switch.BackgroundColor3 = if hidden then SELECTED else BUTTON
+		knob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
+	end
+	player:GetAttributeChangedSignal(attribute):Connect(refresh)
+	refresh()
+	switch.Activated:Connect(function()
+		local hidden = player:GetAttribute(attribute) ~= true
+		player:SetAttribute(attribute, hidden)
+		Request:FireServer("setHideCard", { card = card, hidden = hidden })
+	end)
+end
+cardSwitch(156, "Hide climb speed card", "climb", "HideClimbCard")
+cardSwitch(204, "Hide chalk writing card", "chalk", "HideChalkCard")
 local fovReset = settingsAction("Reset", 0, BUTTON)
 local settingsDone = settingsAction("Done", 0.5, SELECTED)
 
@@ -1239,6 +1305,8 @@ local function settingsOpen(): boolean
 end
 local function setSettingsOpen(show: boolean)
 	settingsCard.Visible = show
+	-- The games menu would cover the card.
+	if show then LobbyView.close() end
 	draggingFov = false
 	if show then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
 end
@@ -1266,6 +1334,13 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	end
 end)
 RunService.RenderStepped:Connect(function()
+	-- Back in the lobby the game's display is off: its panel and settings close
+	-- (Y and P can't reach them there) and the lobby's camera keeps the mouse.
+	if not gui.Enabled then
+		panel.Visible = false
+		settingsCard.Visible = false
+		return
+	end
 	-- First person locks the mouse; free it while the panel or settings are open.
 	if panel.Visible or settingsOpen() then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
@@ -1340,6 +1415,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 		setText(countHolder, string.upper(tostring(attr("Holder", ""))) .. " IS HOLDING IT")
 		setText(countNumber, tostring(shown))
 		if shown ~= lastCount then
+			if lastCount ~= -1 and roughHud.Visible then Sounds.play("tick") end
 			lastCount = shown
 			countNumber.TextColor3 = WHITE:Lerp(GOLD, 1 - shown / Config.HoldCountFrom)
 			countScale.Scale = 1.35
@@ -1359,6 +1435,11 @@ RunService.RenderStepped:Connect(function(dt: number)
 			banner.TextTransparency = 0.15 + 0.15 * math.sin(now * 5)
 		end
 	end
+end)
+
+-- A chime when the diamond (or needle) is uncovered.
+State:GetAttributeChangedSignal("Phase"):Connect(function()
+	if attr("Phase", "Digging") == "Revealed" and player:GetAttribute("InGame") == true then Sounds.play("chime") end
 end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
@@ -1530,11 +1611,19 @@ end
 RunService.Heartbeat:Connect(function()
 	player:SetAttribute("DiggingRock", digTarget() ~= nil)
 end)
+-- Each landed strike cracks the rock with a crunch; every fourth a bigger
+-- chunk breaks away.
+local strikes = 0
 FirstPerson.onStrike(function()
 	local key = digTarget()
 	local character = player.Character
 	if key ~= nil and (character == nil or character:FindFirstChildOfClass("Tool") == nil) then
 		Request:FireServer("mine", key)
+		local rock = aimTarget
+		local at = if rock then rock.Position else nil
+		strikes += 1
+		Sounds.play("dig", at)
+		if strikes % 4 == 0 then Sounds.play("crumble", at) end
 	end
 end)
 

@@ -160,6 +160,23 @@ check(nearRestore[1] == column[1].key and nearRestore[2] == column[2].key, "rebu
 check(not focused:isSolid(distant :: number), "small rebuild leaves distant excavations unfilled")
 check(#focused:restore(100, { x = 10000, z = 10000, radius = 1 }) == 1, "focus outside mountain still restores available rocks")
 check(#focused:restore(100, { x = 0, z = 0, radius = 1 }) == 0, "full mountain rebuild is a no-op")
+-- Digging a loose rock by hand takes only rock joined to it, never rock elsewhere.
+local loose = Grid.new(1234, 1, rand)
+local summit = loose.order[1]
+for _, key in loose.order do
+	if select(2, Grid.coords(key)) > select(2, Grid.coords(summit)) then summit = key end
+end
+local sx, sy, sz = Grid.coords(summit)
+for _, d in { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } } do
+	local neighbour = Grid.key(sx + d[1], sy + d[2], sz + d[3])
+	if loose:isSolid(neighbour) then loose:remove(neighbour) end
+end
+local before = 0
+for _ in loose.solid do before += 1 end
+check(#loose:blast(25, summit, nil, nil, true) == 1, "digging a lone rock breaks just that rock")
+local after = 0
+for _ in loose.solid do after += 1 end
+check(after == before - 1, "nothing else on the mountain went with it")
 local growth = Grid.new(5000, 2, rand)
 local gemCell = growth:carveHiddenCell()
 local original = growth.total
