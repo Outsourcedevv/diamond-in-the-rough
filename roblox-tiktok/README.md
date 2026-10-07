@@ -255,6 +255,8 @@ TikTok LIVE  ->  DiamondRushBridge.exe (the streamer's PC)  ->  Roblox Open Clou
 
 The key can only publish messages to this one game. It is hidden from casual snooping, but someone determined could still dig it out of the program and send pretend gifts to a game code they know. If that ever happens, delete the key, make a new one, paste it into your copy's **Game owner** box and share the new **For streamers** folder.
 
+**Updating the published game when Studio's publish gets stuck:** your own copy's page has **Game owner: update the published game**. Make a second Open Cloud key with **universe-places → write** for this game (keep it to yourself: it can replace your game, and it is never put in the streamers' copy). Paste your game's **Place ID** (the number in its roblox.com/games/… link) and that key, choose `DiamondRushTikTok.rbxlx` and press **Upload to Roblox**. Then restart the servers from the Creator Dashboard (**⋯ → Restart Servers for Updates**).
+
 **As a streamer, each time:** open DiamondRushBridge.exe and connect your TikTok username. The control page shows your **game code**, such as `ABCD EFGH`. In the game, press **Y**, scroll to **GAME CODE** and type it in. Your server then receives only your gifts, a second or two after they're sent. The code stays the same on that PC (it comes from a secret in `config.json`; deleting that file gives a new code). Keep it off your stream.
 
 Roblox lets one game code's topic receive about 30 messages a minute, so the connector sends one message every 2.5 seconds and packs gifts into it. In a gift storm it folds repeats together (a viewer's ten Roses become one gift of ten), so nothing is lost. Studio keeps working at the same time.

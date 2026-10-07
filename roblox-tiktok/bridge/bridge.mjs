@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createEventQueue, createGiftTracker, likeEvent, socialEvent, themeEvent, THEMES, skinEvent, SKINS } from './events.mjs';
-import { codeFor, topicFor, parseCloudFile, takeMessage, ruleId, SEND_EVERY_MS, readSlot, sealBinary } from './cloud.mjs';
+import { codeFor, topicFor, parseCloudFile, takeMessage, ruleId, SEND_EVERY_MS, readSlot, sealBinary, placeVersionUrl, placeFileType } from './cloud.mjs';
 import { SLOT } from './sealed-slot.mjs';
 import { randomBytes } from 'node:crypto';
 
@@ -325,6 +325,21 @@ function readBody(request) {
   });
 }
 
+// A place file sent by the control page (a few MB), as raw bytes.
+function readRaw(request, limit = 200 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    request.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) { reject(new Error('That file is too big.')); request.destroy(); return; }
+      chunks.push(chunk);
+    });
+    request.on('end', () => resolve(Buffer.concat(chunks)));
+    request.on('error', reject);
+  });
+}
+
 // Only the control page (on this PC) may change things: another website open
 // in the browser could otherwise send fake gifts or change the settings.
 function fromOtherSite(request) {
@@ -387,7 +402,47 @@ const server = http.createServer(async (request, response) => {
     return sendJson(response, 200, { session: queue.session, last: queue.last, tiktok: tiktokStatus, events });
   }
   if (request.method === 'GET' && url.pathname === '/status') {
-    return sendJson(response, 200, { ...statusLine(), username: config.tiktokUsername, recent, keySource: cloud.source, packaged });
+    return sendJson(response, 200, { ...statusLine(), username: config.tiktokUsername, recent, keySource: cloud.source, packaged, publisher: { placeId: config.publisher?.placeId ?? '', ready: Boolean(config.publisher?.apiKey) } });
+  }
+  if (request.method === 'POST' && url.pathname === '/publisher') {
+    // The owner's second key, which may publish the place. Kept on this PC only.
+    const body = await readBody(request);
+    const placeId = String(body.placeId ?? '').replace(/\D/g, '');
+    const apiKey = String(body.apiKey ?? '').trim();
+    if (placeId.length < 5) return sendJson(response, 400, { error: 'Paste the Place ID: the number in your game\'s Roblox link (roblox.com/games/NUMBER/...).' });
+    if (apiKey && (apiKey.length < 20 || /\s/.test(apiKey))) return sendJson(response, 400, { error: 'Paste the whole publishing key.' });
+    config.publisher = { placeId, apiKey: apiKey || config.publisher?.apiKey || '' };
+    saveConfig();
+    return sendJson(response, 200, { ok: true, ready: Boolean(config.publisher.apiKey) });
+  }
+  if (request.method === 'POST' && url.pathname === '/publish-place') {
+    // Uploads a place file to Roblox as the game's new published version.
+    const universeId = cloud.source === 'owner' ? cloud.universeId : '';
+    const { placeId, apiKey } = config.publisher ?? {};
+    if (!universeId) return sendJson(response, 400, { error: 'Save the Universe ID and Roblox key in the box above first.' });
+    if (!placeId || !apiKey) return sendJson(response, 400, { error: 'Save the Place ID and publishing key first.' });
+    let file;
+    try { file = await readRaw(request); } catch (error) { return sendJson(response, 400, { error: error.message }); }
+    const type = placeFileType(file);
+    if (!type) return sendJson(response, 400, { error: 'Choose the game file, DiamondRushTikTok.rbxlx.' });
+    try {
+      const reply = await fetch(placeVersionUrl(universeId, placeId), { method: 'POST', headers: { 'x-api-key': apiKey, 'content-type': type }, body: file });
+      const text = await reply.text();
+      if (!reply.ok) {
+        log(`Roblox refused the game upload: ${reply.status} ${text.slice(0, 300)}`);
+        const why = reply.status === 401 || reply.status === 403
+          ? 'Roblox refused the publishing key. Check it has universe-places write for this game, and that the Place ID and Universe ID are this game\'s.'
+          : reply.status === 404 ? 'Roblox couldn\'t find that place. Check the Place ID and Universe ID.'
+          : `Roblox said ${reply.status}: ${text.slice(0, 200)}`;
+        return sendJson(response, 400, { error: why });
+      }
+      let version = null;
+      try { version = JSON.parse(text).versionNumber ?? null; } catch {}
+      log(`Game updated on Roblox${version ? ` (version ${version})` : ''}.`);
+      return sendJson(response, 200, { ok: true, version });
+    } catch (error) {
+      return sendJson(response, 502, { error: `Couldn't reach Roblox: ${error.message}` });
+    }
   }
   if (request.method === 'POST' && url.pathname === '/owner-key') {
     // The game's owner pastes the Universe ID and Open Cloud key here once.
