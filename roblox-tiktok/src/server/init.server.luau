@@ -999,7 +999,11 @@ local function processTikTok(event: TikTokFeed.Event)
 		saveSettings()
 		return
 	end
-	local who = event.name or event.user or "Someone"
+	-- Names and gift names come from TikTok (or a typed keybind), so they go
+	-- through Roblox's text filter before anyone sees them.
+	local who = boardName(event.name or event.user or "Someone") or "Viewer"
+	local giftLabel = if event.gift then (boardName(event.gift) or "a gift") else nil;
+	(event :: any).giftLabel = giftLabel
 	local amount = 0
 	local text = ""
 	if event.type == "gift" then
@@ -1008,9 +1012,9 @@ local function processTikTok(event: TikTokFeed.Event)
 		local rule = if event.rocks ~= nil then event.rocks else settings.giftRules[string.lower(event.gift or "")]
 		amount = if rule ~= nil then rule * count else coins * count * settings.perCoin
 		text = if event.parts == nil
-			then string.format("%s sent %s x%d", who, event.gift or "a gift", count)
-			elseif count == 1 then string.format("%s sent %s (%d of %d)", who, event.gift or "a gift", event.part or 1, event.parts)
-			else string.format("%s sent %s x%d (%d of %d)", who, event.gift or "a gift", count, event.part or 1, event.parts)
+			then string.format("%s sent %s x%d", who, giftLabel or "a gift", count)
+			elseif count == 1 then string.format("%s sent %s (%d of %d)", who, giftLabel or "a gift", event.part or 1, event.parts)
+			else string.format("%s sent %s x%d (%d of %d)", who, giftLabel or "a gift", count, event.part or 1, event.parts)
 		recordGifter(event, amount, coins * count)
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
@@ -1046,7 +1050,7 @@ local function processTikTok(event: TikTokFeed.Event)
 			elseif amount > 0 then 1 else 0
 		local from, to = climbGame.gift(who, move, {
 			coins = if event.type == "gift" then coins else 1,
-			gift = (event.gift or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"))
+			gift = (giftLabel or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"))
 				.. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
 		})
 		local moved = to - from
@@ -1071,7 +1075,7 @@ local function processTikTok(event: TikTokFeed.Event)
 			coins = math.max(1, event.coins or 1),
 			position = preview,
 			name = who,
-			gift = (event.gift or "Gift") .. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
+			gift = (giftLabel or "Gift") .. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
 			adding = amount < 0,
 			blocks = if amount < 0 then nil else blocks,
 		})
@@ -1176,8 +1180,13 @@ function enqueue(event: TikTokFeed.Event)
 	end)
 end
 
+-- The status can carry the streamer's TikTok username, so it is filtered too.
+local function shownStatus(status: string): string
+	if not string.find(status, "@", 1, true) then return status end
+	return boardName(status) or "connected"
+end
 local function setTikTokStatus(status: string)
-	State:SetAttribute("TikTok", status)
+	State:SetAttribute("TikTok", shownStatus(status))
 end
 TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, setTikTokStatus)
 
@@ -1185,6 +1194,7 @@ TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, setTikTokSt
 -- from the relay, under the game code they typed in the Y panel.
 local function useRelay()
 	TikTokFeed.useRelay(settings.relayUrl, settings.gameCode, onTikTok, function(status: string)
+		status = shownStatus(status)
 		State:SetAttribute("TikTok", if settings.gameCode == "" then status else status .. " (code " .. settings.gameCode .. ")")
 	end)
 end
