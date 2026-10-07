@@ -208,7 +208,7 @@ function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (
 				failures += 1
 				urlIndex = urlIndex % #urls + 1
 				if RunService:IsStudio() or failures <= #urls then
-					onStatus("Bridge app not running (start \"Start Bridge\" on this PC)")
+					onStatus("connector not running (open DiamondRushBridge.exe on this PC)")
 				end
 				-- Published servers cannot reach a PC; stop polling and rely on
 				-- MessagingService after the first round of failures.
