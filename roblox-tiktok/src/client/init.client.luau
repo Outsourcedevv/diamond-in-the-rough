@@ -1632,6 +1632,7 @@ end)
 -- Each landed strike cracks the rock with a crunch; every fourth a bigger
 -- chunk breaks away. Hits in a row climb a little in pitch (eight steps, then
 -- round again), and a pause starts the climb over.
+Sounds.useDigSound(Config.DigSoundId, Config.DigSoundVolume)
 local strikes = 0
 local lastStrikeAt = -math.huge
 FirstPerson.onStrike(function()

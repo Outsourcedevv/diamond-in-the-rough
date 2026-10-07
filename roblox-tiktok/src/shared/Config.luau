@@ -56,6 +56,11 @@ local Config = {
 	-- Rocks -----------------------------------------------------------------------
 	BlockSize = 0.4, -- diggable cell size in studs; each visible rock fills one cell, sloped towards open air
 	DigPerSecond = 100, -- rocks dug per second while the dig button is held
+	-- The dig sound. Empty plays the built-in chip. To use any sound you like,
+	-- find one in Studio's Toolbox (Audio, e.g. "rock hit" or "pickaxe") or
+	-- your uploads, copy its asset id and put it here, e.g. "1234567890".
+	DigSoundId = "",
+	DigSoundVolume = 0.5,
 
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
