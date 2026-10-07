@@ -194,27 +194,33 @@ async function connectTikTok(username) {
 function gameCode() {
   return codeFor(config.secret);
 }
+// Writes "For streamers/DiamondRushBridge.exe" next to this program and
+// returns its path. Only the .exe can copy itself.
 function makeStreamersCopy(settings) {
-  try {
-    const folder = path.join(here, 'For streamers');
-    fs.mkdirSync(folder, { recursive: true });
-    fs.writeFileSync(path.join(folder, 'DiamondRushBridge.exe'), sealBinary(fs.readFileSync(process.execPath), settings));
-    log('Made the streamers\' copy, with the Roblox key hidden inside: share the "For streamers" folder, never roblox-cloud.txt.');
-  } catch (error) {
-    log(`Couldn't make the streamers' copy: ${error.message}`);
-  }
+  if (!packaged) throw new Error('Only DiamondRushBridge.exe can make the streamers\' copy.');
+  const folder = path.join(here, 'For streamers');
+  fs.mkdirSync(folder, { recursive: true });
+  const target = path.join(folder, 'DiamondRushBridge.exe');
+  fs.writeFileSync(target, sealBinary(fs.readFileSync(process.execPath), settings));
+  log('Made the streamers\' copy, with the Roblox key hidden inside: share the "For streamers" folder.');
+  return target;
 }
+// Where the key comes from: the owner's box on the control page (kept in this
+// PC's config.json), roblox-cloud.txt, or hidden inside a streamers' copy.
 function cloudSettings() {
+  const owner = config.ownerCloud;
+  if (owner?.apiKey && owner?.universeId) return { apiKey: String(owner.apiKey), universeId: String(owner.universeId), source: 'owner' };
   try {
     const found = parseCloudFile(fs.readFileSync(path.join(here, 'roblox-cloud.txt'), 'utf8'));
     if (found.apiKey && found.universeId) {
-      if (packaged) makeStreamersCopy(found);
-      return found;
+      if (packaged) { try { makeStreamersCopy(found); } catch (error) { log(`Couldn't make the streamers' copy: ${error.message}`); } }
+      return { ...found, source: 'owner' };
     }
   } catch {}
-  return readSlot(SLOT) ?? { apiKey: '', universeId: '' };
+  const sealed = readSlot(SLOT);
+  return sealed ? { ...sealed, source: 'built in' } : { apiKey: '', universeId: '', source: 'none' };
 }
-const cloud = cloudSettings();
+let cloud = cloudSettings();
 let cloudStatus = cloud.apiKey && cloud.universeId ? 'starting' : 'off';
 let cloudSending = false;
 let nextSendAt = 0;
@@ -281,7 +287,7 @@ async function flushCloud() {
   }
 }
 setInterval(flushCloud, 250);
-if (cloudStatus === 'off') log('No Roblox key found: gifts reach Roblox Studio only (see roblox-cloud.txt in the README).');
+if (cloudStatus === 'off') log('No Roblox key in this connector. Game owner: open the control page and use "Game owner: Roblox key".');
 
 // Local web server ------------------------------------------------------------------
 function statusLine() {
@@ -291,7 +297,7 @@ function statusLine() {
     roblox: robloxSeen ? 'connected (Roblox Studio)'
       : cloudStatus === 'sending' ? 'sending to the game'
       : cloudStatus === 'starting' ? 'ready: type your game code in the game'
-      : cloudStatus === 'off' ? 'not set up (this connector has no Roblox key)'
+      : cloudStatus === 'off' ? 'not set up (this connector has no Roblox key: get the newest download)'
       : cloudStatus,
     gameCode: gameCode(),
   };
@@ -381,7 +387,28 @@ const server = http.createServer(async (request, response) => {
     return sendJson(response, 200, { session: queue.session, last: queue.last, tiktok: tiktokStatus, events });
   }
   if (request.method === 'GET' && url.pathname === '/status') {
-    return sendJson(response, 200, { ...statusLine(), username: config.tiktokUsername, recent });
+    return sendJson(response, 200, { ...statusLine(), username: config.tiktokUsername, recent, keySource: cloud.source, packaged });
+  }
+  if (request.method === 'POST' && url.pathname === '/owner-key') {
+    // The game's owner pastes the Universe ID and Open Cloud key here once.
+    const body = await readBody(request);
+    const universeId = String(body.universeId ?? '').replace(/\D/g, '');
+    const apiKey = String(body.apiKey ?? '').trim();
+    if (universeId.length < 5) return sendJson(response, 400, { error: 'Paste the Universe ID: the long number from Copy Universe ID.' });
+    if (apiKey.length < 20 || /\s/.test(apiKey)) return sendJson(response, 400, { error: 'Paste the whole API key (Copy Key to Clipboard on the Open Cloud page).' });
+    config.ownerCloud = { universeId, apiKey };
+    saveConfig();
+    cloud = { universeId, apiKey, source: 'owner' };
+    cloudStatus = 'starting';
+    nextSendAt = 0;
+    lastRulesAt = 0;
+    log('Roblox key saved on this PC.');
+    try {
+      const made = makeStreamersCopy(cloud);
+      return sendJson(response, 200, { ok: true, made });
+    } catch (error) {
+      return sendJson(response, 200, { ok: true, made: null, note: error.message });
+    }
   }
   if (request.method === 'POST' && url.pathname === '/connect') {
     const body = await readBody(request);

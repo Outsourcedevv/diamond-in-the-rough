@@ -251,14 +251,9 @@ TikTok LIVE  ->  DiamondRushBridge.exe (the streamer's PC)  ->  Roblox Open Clou
    - Set **Accepted IP Addresses** to `0.0.0.0/0` (streamers are everywhere) and no expiration.
    - Copy the key.
 3. On the experience's page use **⋯ → Copy Universe ID**.
-4. Put both in a text file called `roblox-cloud.txt` next to **your own** DiamondRushBridge.exe (never share this file):
-   ```
-   universe: 1234567890
-   key: paste-the-key-here
-   ```
-5. Open DiamondRushBridge.exe. It connects as usual and also makes a **For streamers** folder with a copy of the connector that has the key hidden inside it (scrambled, with no text file). Zip that folder and share it. Run it again whenever you change the key.
+4. Open **your own** DiamondRushBridge.exe. On its page, open **Game owner: Roblox key**, paste the Universe ID and the key, and press **Save and make the streamers' copy**. Your PC keeps the key (in its `config.json`), and a **For streamers** folder appears next to the .exe with a copy that has the key hidden inside it (scrambled). Share only that folder, zipped or as a Drive folder. Do it again whenever you change the key. (A `roblox-cloud.txt` next to the .exe with `universe:` and `key:` lines also works.)
 
-The key can only publish messages to this one game. It is hidden from casual snooping, but someone determined could still dig it out of the program and send pretend gifts to a game code they know. If that ever happens, delete the key, make a new one, open your copy again and share the new **For streamers** folder.
+The key can only publish messages to this one game. It is hidden from casual snooping, but someone determined could still dig it out of the program and send pretend gifts to a game code they know. If that ever happens, delete the key, make a new one, paste it into your copy's **Game owner** box and share the new **For streamers** folder.
 
 **As a streamer, each time:** open DiamondRushBridge.exe and connect your TikTok username. The control page shows your **game code**, such as `ABCD EFGH`. In the game, press **Y**, scroll to **GAME CODE** and type it in. Your server then receives only your gifts, a second or two after they're sent. The code stays the same on that PC (it comes from a secret in `config.json`; deleting that file gives a new code). Keep it off your stream.
 
@@ -278,7 +273,7 @@ To show the Blender mountains and trees in the published game, also turn on **En
 - **Nothing happens on gifts but test gifts work**: make sure the control page says *connected to @yourname*.
 - **The game says "no game code set"**: press **Y**, scroll to **GAME CODE** and type the code from the control page.
 - **The game says "waiting for DiamondRushBridge.exe" or "connector not heard from"**: open the connector and check the code in the **Y** panel matches the one on its page. Its page should say Roblox: *ready* or *sending to the game*.
-- **The control page says "not set up (this connector has no Roblox key)"**: the .exe was built without the game's key. See [The published game](#the-published-game).
+- **The control page says "not set up (this connector has no Roblox key…)"**: this copy has no key. Streamers: get the newest download. Owner: use **Game owner: Roblox key** on your own copy's page.
 - **The control page says "Roblox refused the connector's key"**: the key was deleted or expired. Make a new one and share a new download.
 - **No mountain in Studio's Server view**: that is expected. Each player's client draws the rock; switch back to the Client view. Use **Play** (F5), not **Run** (F8), which has no client.
 - **No Blender mountains or trees in the published game**: Roblox only lets a published game build meshes once Mesh / Image APIs are turned on. See [Blender scenery](#blender-scenery) for that, or for importing the pack instead.

@@ -255,6 +255,19 @@
     <p><small>Keep it off your stream: anyone who knows it could try to send pretend gifts to your game.</small></p>
   </section>
 
+  <section id="ownerSection">
+    <details id="ownerBox">
+      <summary>Game owner: Roblox key</summary>
+      <p style="margin-top:12px">Only for the game's owner, once. Paste the <strong>Universe ID</strong> (Creator Dashboard, your game's <strong>⋯ → Copy Universe ID</strong>) and the <strong>Open Cloud API key</strong>, then press the button. This PC keeps the key, and a <strong>For streamers</strong> folder appears next to DiamondRushBridge.exe with a copy that has the key hidden inside. Share only that folder.</p>
+      <form class="row" id="ownerForm">
+        <input id="ownerUniverse" placeholder="Universe ID, e.g. 1234567890" autocomplete="off" inputmode="numeric" aria-label="Universe ID">
+        <input id="ownerKey" placeholder="Open Cloud API key" type="password" autocomplete="off" aria-label="Open Cloud API key">
+        <button>Save and make the streamers' copy</button>
+      </form>
+      <p id="ownerState" style="margin-top:10px" role="status"></p>
+    </details>
+  </section>
+
   <section>
     <h2>1 · Connect your TikTok LIVE</h2>
     <p>Go live on TikTok first, then enter your username (the part after @).</p>
@@ -371,6 +384,28 @@ document.getElementById('connect').onsubmit = (event) => {
   event.preventDefault();
   post('/connect', { username: document.getElementById('username').value }).then(refresh);
 };
+document.getElementById('ownerForm').onsubmit = async (event) => {
+  event.preventDefault();
+  const state = document.getElementById('ownerState');
+  state.className = 'wait';
+  state.textContent = 'Saving…';
+  try {
+    const response = await post('/owner-key', { universeId: document.getElementById('ownerUniverse').value, apiKey: document.getElementById('ownerKey').value });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    document.getElementById('ownerKey').value = '';
+    state.className = 'good';
+    state.textContent = data.made
+      ? `Done. The key is saved on this PC, and the streamers' copy is in the "For streamers" folder next to DiamondRushBridge.exe (${data.made}). Share only that folder.`
+      : `The key is saved on this PC. ${data.note || ''}`;
+    await refresh();
+  } catch (error) {
+    state.className = 'wait';
+    state.textContent = error.message;
+  }
+};
+
+let ownerOpened = false;
 let giftCatalogue = [], giftRules = {}, selectedGift = null, gameRules = { climb: {}, chalk: {} };
 const catalogueBox = document.getElementById('catalogue');
 function drawCatalogue() {
@@ -501,6 +536,9 @@ async function refresh() {
       document.getElementById('username').value = data.username || '';
       filled = true;
     }
+    // A streamers' copy already has the key: the owner's box isn't for them.
+    document.getElementById('ownerSection').hidden = data.keySource === 'built in';
+    if (data.keySource === 'none' && !ownerOpened) { document.getElementById('ownerBox').open = true; ownerOpened = true; }
     document.getElementById('gameCode').textContent = `${data.gameCode.slice(0, 4)} ${data.gameCode.slice(4)}`;
     const list = document.getElementById('recent');
     list.replaceChildren(...(data.recent.length ? data.recent : [null]).map((event) => {
