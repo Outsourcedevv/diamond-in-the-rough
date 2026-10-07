@@ -37,7 +37,7 @@ local function run(seconds)
 end
 -- Files and how long each lasts at normal speed; "broken.wav" never ends.
 local LENGTHS = { ["rbxasset://sounds/collide.wav"] = 0.35, ["rbxasset://sounds/snap.wav"] = 0.2, ["rbxasset://sounds/clickfast.wav"] = 0.1,
-	["rbxasset://sounds/impact_explosion_03.mp3"] = 2.5, ["rbxasset://sounds/action_jump_land.mp3"] = 0.5 }
+	["rbxasset://sounds/impact_explosion_03.mp3"] = 2.5, ["rbxasset://sounds/action_jump_land.mp3"] = 0.5, ["rbxassetid://1234567890"] = 0.4 }
 local started, live, destroyed = 0, 0, 0
 local speeds = {}
 local SoundService = { Name = "SoundService" }
@@ -77,7 +77,7 @@ local function layers(cue) return #Sounds.CUES[cue] end
 -- Digging never uses the explosion, and stays quiet.
 for _, cue in { "dig", "crumble" } do
 	for _, layer in Sounds.CUES[cue] do
-		check(layer.file ~= "boom" and layer.file ~= "glass" and layer.file ~= "rocket", cue .. " has no blast in it")
+		check(layer.file == "snap" or layer.file == "click", cue .. " is only small clicks and cracks")
 		check(layer.volume <= 0.25, cue .. " stays quiet")
 	end
 end
@@ -125,6 +125,16 @@ Sounds.play("brokenCue")
 check(Sounds.playingCount() == 1, "the broken sound holds a place")
 run(Sounds.LONGEST_SECONDS + 1)
 check(Sounds.playingCount() == 0, "and lets it go in the end")
+-- A dig sound of your own replaces the built-in one.
+Sounds.useDigSound("", 1)
+check(Sounds.CUES.dig[1].file == "snap", "an empty id keeps the built-in dig")
+Sounds.useDigSound("rbxassetid://1234567890", 0.6)
+speeds = {}
+local was = started
+Sounds.play("dig", Vector3, 1, 1)
+Sounds.play("crumble", Vector3)
+run(1)
+check(started - was == 1 and Sounds.FILES.customDig == "rbxassetid://1234567890", "your own dig sound plays, alone")
 print("sounds: " .. passed .. " checks passed")
 '''
 

@@ -42,24 +42,22 @@ Sounds.FILES = {
 export type Layer = { file: string, volume: number, pitch: { number }, delay: number? }
 
 Sounds.CUES = {
-	-- Digging: a light, crisp crunch as the hand bites into the rock, a
-	-- small crack and a tiny patter of pebbles. Quiet and short, with no
-	-- explosion in it, so holding dig never sounds like a blast.
+	-- Digging: a short, crisp chip, like a chisel flicking a flake off the
+	-- rock, and a few grains trickling away. Only small clicks and cracks,
+	-- with no thump, crunch or blast, so holding dig stays light. (A sound of
+	-- your own: Config.DigSoundId.)
 	dig = {
-		{ file = "crunch", volume = 0.2, pitch = { 1.0, 1.15 } },
-		{ file = "snap", volume = 0.13, pitch = { 1.45, 1.75 } },
-		{ file = "land", volume = 0.1, pitch = { 1.15, 1.3 } },
-		{ file = "click", volume = 0.06, pitch = { 1.5, 1.9 }, delay = 0.04 },
-		{ file = "click", volume = 0.045, pitch = { 1.15, 1.35 }, delay = 0.09 },
+		{ file = "snap", volume = 0.14, pitch = { 1.7, 2.0 } },
+		{ file = "click", volume = 0.1, pitch = { 1.9, 2.3 } },
+		{ file = "click", volume = 0.05, pitch = { 1.4, 1.7 }, delay = 0.05 },
+		{ file = "click", volume = 0.035, pitch = { 1.6, 2.0 }, delay = 0.1 },
 	},
-	-- Every fourth hit a chunk breaks away: a slightly deeper crunch and
-	-- pebbles tumbling down.
+	-- Every fourth hit a flake breaks off: a lower crack and grains trickling.
 	crumble = {
-		{ file = "crunch", volume = 0.24, pitch = { 0.8, 0.9 } },
-		{ file = "snap", volume = 0.1, pitch = { 1.05, 1.2 }, delay = 0.02 },
-		{ file = "click", volume = 0.06, pitch = { 1.2, 1.35 }, delay = 0.08 },
-		{ file = "click", volume = 0.05, pitch = { 1.4, 1.55 }, delay = 0.15 },
-		{ file = "click", volume = 0.04, pitch = { 1.6, 1.85 }, delay = 0.22 },
+		{ file = "snap", volume = 0.12, pitch = { 1.25, 1.4 } },
+		{ file = "click", volume = 0.05, pitch = { 1.3, 1.5 }, delay = 0.07 },
+		{ file = "click", volume = 0.04, pitch = { 1.5, 1.7 }, delay = 0.13 },
+		{ file = "click", volume = 0.03, pitch = { 1.7, 2.0 }, delay = 0.2 },
 	},
 	-- Gift shows.
 	pop = {
@@ -154,6 +152,17 @@ Sounds.LONGEST_SECONDS = 4 -- the longest file, at normal speed
 local playing = 0
 local lastPlayed: { [string]: number } = {}
 local muted = false
+
+-- Uses a sound of your own for digging (an audio id from the Creator Store or
+-- your uploads, as a number or "rbxassetid://..."), in place of the built-in
+-- chip. An empty id keeps the built-in one.
+function Sounds.useDigSound(id: string, volume: number?)
+	local digits = string.match(id or "", "(%d+)")
+	if digits == nil then return end
+	Sounds.FILES.customDig = "rbxassetid://" .. digits
+	Sounds.CUES.dig = { { file = "customDig", volume = math.clamp(volume or 0.5, 0, 2), pitch = { 0.95, 1.05 } } }
+	Sounds.CUES.crumble = {}
+end
 
 -- The pitch of the `streak`th hit in a row: up a small step each hit, eight
 -- steps, then round again.
