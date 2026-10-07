@@ -6,7 +6,34 @@ export async function fetchCatalogue(Client, username) {
  await client.fetchRoomId();
  return normalizeGifts(await client.fetchAvailableGifts());
 }
-export const STARTER = [['Rose',1],['Ice Cream Cone',1],['Finger Heart',5],['Perfume',20],['Doughnut',30],['Hand Hearts',100],['Confetti',100],['Money Gun',500],['Galaxy',1000],['Lion',29999],['TikTok Universe',34999]].map(([name,coins])=>({id:name,name,coins}));
+export const STARTER = [['Rose',1],['GG',1],['Heart Me',1],['Ice Cream Cone',1],['Finger Heart',5],['Rosa',10],['Perfume',20],['Doughnut',30],['Hand Hearts',100],['Confetti',100],['Sunglasses',199],['Corgi',299],['Money Gun',500],['Swan',699],['Train',899],['Galaxy',1000],['Interstellar',10000],['Lion',29999],['TikTok Universe',34999]].map(([name,coins])=>({id:name,name,coins}));
+// How the bridge connects to a LIVE. TikTok's gift list (enableExtendedGiftInfo)
+// is a paid Euler Stream feature, so it stays off: gift messages already carry
+// each gift's name and coins.
+export const CONNECT_OPTIONS = { processInitialData: false, enableExtendedGiftInfo: false };
+// Adds a gift seen on the LIVE to the catalogue, or corrects its coins.
+// Returns the new catalogue, or null when nothing changed.
+export function learnGift(list, gift, coins) {
+ const name = String(gift ?? '').trim().slice(0, 40);
+ coins = Math.floor(Number(coins));
+ if (!name || /^Gift \d*$/.test(name) || !Number.isFinite(coins) || coins < 1) return null;
+ const known = list.find(row => row.name.toLowerCase() === name.toLowerCase());
+ if (known && known.coins === coins) return null;
+ const rest = list.filter(row => row !== known);
+ return normalizeGifts([...rest, { id: known?.id ?? name, name: known?.name ?? name, coins }]);
+}
+// The starter gifts plus a saved list; a saved gift replaces a starter one of the same name.
+export function mergeGifts(base, saved) {
+ const byName = new Map();
+ for (const gift of [...normalizeGifts(base), ...normalizeGifts(saved)]) byName.set(gift.name.toLowerCase(), gift);
+ return normalizeGifts([...byName.values()]);
+}
+// What the page shows when TikTok's full gift list can't be loaded.
+export function catalogueError(error) {
+ const text = `${error?.name ?? ''} ${error?.message ?? error}`;
+ if (/premium|permission|402|403|paid|plan/i.test(text)) return 'TikTok\'s full gift list needs a paid sign-server plan, so the starter list is used. Every gift you receive on your LIVE is added here automatically.';
+ return `Couldn't load gifts from TikTok (${error?.message ?? error}). The starter list is used, and gifts you receive on your LIVE are added automatically.`;
+}
 export function normalizeGifts(raw) {
  const list = Array.isArray(raw) ? raw : raw?.gifts ?? raw?.data?.gifts ?? [];
  const unique = new Map();

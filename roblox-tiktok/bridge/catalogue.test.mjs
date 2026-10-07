@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeGifts, validateRule, fetchCatalogue, validateGameRule, defaultGameRules, coinsMove } from './catalogue.mjs';
+import { normalizeGifts, validateRule, fetchCatalogue, validateGameRule, defaultGameRules, coinsMove, CONNECT_OPTIONS, learnGift, catalogueError, mergeGifts, STARTER } from './catalogue.mjs';
 import fs from 'node:fs';
 
 test('catalogue resolves the LIVE room before retrieving every gift', async () => {
@@ -42,4 +42,30 @@ test('the default down gifts match the game\'s Config and the coins sum matches 
   assert.deepEqual(bridge,game);
  }
  assert.deepEqual([1,10,100,1000,10000].map(coinsMove),[2,6,20,63,200]);
+});
+
+test('connecting never asks for the paid gift list',()=>{
+ assert.equal(CONNECT_OPTIONS.enableExtendedGiftInfo,false);
+ const source=fs.readFileSync(new URL('./bridge.mjs',import.meta.url),'utf8');
+ assert.match(source,/new TikTokLiveConnection\(username, CONNECT_OPTIONS\)/);
+ assert.doesNotMatch(source,/enableExtendedGiftInfo:\s*true/);
+});
+test('gifts seen on the LIVE join the catalogue and fix its prices',()=>{
+ const start=normalizeGifts(STARTER);
+ const added=learnGift(start,'Hat and Mustache',99);
+ assert.equal(added.length,start.length+1);
+ assert.equal(added.find(g=>g.name==='Hat and Mustache').coins,99);
+ assert.equal(learnGift(added,'hat and mustache',99),null);
+ assert.equal(learnGift(added,'Rose',1),null);
+ assert.equal(learnGift(added,'Galaxy',1200).find(g=>g.name==='Galaxy').coins,1200);
+ assert.equal(learnGift(added,'Gift 123',5),null);
+ assert.equal(learnGift(added,'',5),null);
+});
+test('a saved list keeps the starter gifts and a failed refresh explains itself',()=>{
+ const merged=mergeGifts(STARTER,[{id:'5655',name:'Rose',coins:1},{id:'99',name:'Paper Crane',coins:99}]);
+ assert.equal(merged.filter(g=>g.name==='Rose').length,1);
+ assert.ok(merged.some(g=>g.name==='Paper Crane') && merged.some(g=>g.name==='Money Gun'));
+ const premium=Object.assign(new Error('You do not have permission from the signature provider to sign this URL.'),{name:'PremiumFeatureError'});
+ assert.match(catalogueError(premium),/paid sign-server plan/);
+ assert.match(catalogueError(new Error('timeout')),/timeout/);
 });

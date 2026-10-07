@@ -4,7 +4,7 @@
 // games can receive them through Roblox Open Cloud MessagingService.
 // Open http://localhost:8787 for the control page (connect + test gifts).
 import http from 'node:http';
-import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue, GAMES, defaultGameRules, validateGameRule } from './catalogue.mjs';
+import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue, GAMES, defaultGameRules, validateGameRule, CONNECT_OPTIONS, learnGift, catalogueError, mergeGifts } from './catalogue.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -67,8 +67,8 @@ function emit(event) {
 
 const cataloguePath = path.join(here, 'gift-catalogue.json');
 let catalogue = STARTER;
-let catalogueStatus = 'Starter gifts. Refresh to load all gifts available for your TikTok LIVE.';
-try { const cached=JSON.parse(fs.readFileSync(cataloguePath,'utf8')); const rows=normalizeGifts(cached); if(rows.length){catalogue=rows;catalogueStatus='Saved TikTok catalogue';} } catch {}
+let catalogueStatus = 'Starter gifts. Gifts you receive on your LIVE are added automatically.';
+try { const cached=JSON.parse(fs.readFileSync(cataloguePath,'utf8')); const rows=normalizeGifts(cached); if(rows.length){catalogue=mergeGifts(STARTER,rows);catalogueStatus='Saved gift list';} } catch {}
 let catalogueLoading = null;
 async function refreshCatalogue(username = config.tiktokUsername) {
  if(catalogueLoading) return catalogueLoading;
@@ -76,13 +76,23 @@ async function refreshCatalogue(username = config.tiktokUsername) {
   username = String(username ?? '').trim().replace(/^@/, '');
   if(!username) throw new Error('Enter your TikTok username first.');
   const { TikTokLiveConnection }=await import('tiktok-live-connector');
-  const gifts=await fetchCatalogue(TikTokLiveConnection, username);
+  let gifts;
+  try { gifts=await fetchCatalogue(TikTokLiveConnection, username); }
+  catch(error) { throw new Error(catalogueError(error)); }
   if(!gifts.length) throw new Error('TikTok returned no gifts. Try refreshing while your account is LIVE.');
   catalogue=gifts; catalogueStatus=`${gifts.length} gifts loaded from TikTok`;
   fs.writeFileSync(cataloguePath,JSON.stringify(gifts,null,2));
   config.tiktokUsername=username; saveConfig();
  })().finally(()=>{catalogueLoading=null;});
  return catalogueLoading;
+}
+// Gifts seen on the LIVE join the catalogue, so they can be given rules.
+function rememberGift(event) {
+  if (event?.type !== 'gift') return;
+  const updated = learnGift(catalogue, event.gift, event.coins);
+  if (!updated) return;
+  catalogue = updated;
+  try { fs.writeFileSync(cataloguePath, JSON.stringify(catalogue, null, 2)); } catch {}
 }
 function publishRule(rule) { emit({type:'giftRule',name:'Gift catalogue',...rule}); }
 for(const rule of Object.values(config.giftRules ?? {})) publishRule(rule);
@@ -113,10 +123,14 @@ async function connectTikTok(username) {
     return;
   }
   const { TikTokLiveConnection, WebcastEvent, ControlEvent } = await import('tiktok-live-connector');
-  const live = new TikTokLiveConnection(username, { processInitialData: false, enableExtendedGiftInfo: true });
+  const live = new TikTokLiveConnection(username, CONNECT_OPTIONS);
   connection = live;
   tiktokStatus = `connecting to @${username}…`;
-  live.on(WebcastEvent.GIFT, (data) => emit(handleGift(data)));
+  live.on(WebcastEvent.GIFT, (data) => {
+    const event = handleGift(data);
+    rememberGift(event);
+    emit(event);
+  });
   live.on(WebcastEvent.LIKE, (data) => emit(likeEvent(data)));
   live.on(WebcastEvent.FOLLOW, (data) => emit(socialEvent('follow', data)));
   live.on(WebcastEvent.SHARE, (data) => emit(socialEvent('share', data)));
@@ -135,7 +149,6 @@ async function connectTikTok(username) {
     if (connection === live) {
       tiktokStatus = `connected to @${username}`;
       log(`Connected to @${username}'s LIVE`);
-      refreshCatalogue().catch(error=>{catalogueStatus=error.message;});
     }
   } catch (error) {
     if (connection !== live) return;
