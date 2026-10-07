@@ -16,6 +16,8 @@ local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
+local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
+local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
 local Keybinds = require(Shared:WaitForChild("Keybinds"))
@@ -61,9 +63,17 @@ local settings = {
 	perFollow = Config.StonePerFollow,
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
+	-- Diamond Climb's and Chalkboard Count's own gift rules: platforms (or
+	-- numbers) per gift, negative to send them down (set on the control page).
+	climbRules = table.clone(Config.ClimbGiftRules) :: { [string]: number },
+	chalkRules = table.clone(Config.ChalkGiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
 	-- Players who hid the GAMES tab and SETTINGS button (by user id).
 	hiddenButtons = {} :: { [string]: boolean },
+	-- Players who hid Diamond Climb's movement card or Chalkboard Count's
+	-- writing card (in Settings), by user id.
+	hiddenClimbCard = {} :: { [string]: boolean },
+	hiddenChalkCard = {} :: { [string]: boolean },
 	-- Leaderboard totals per TikTok viewer, and gold statues placed by the streamer.
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
@@ -96,13 +106,18 @@ if saved then
 			settings[key] = value
 		end
 	end
-	local rules: { [string]: number } = {}
-	for name, rocks in settings.giftRules do
-		if type(name) == "string" and type(rocks) == "number" then
-			rules[string.lower(name)] = rocks
+	local function cleanRules(saved: { [any]: any }, limit: number): { [string]: number }
+		local rules: { [string]: number } = {}
+		for name, value in saved do
+			if type(name) == "string" and type(value) == "number" and value == value then
+				rules[string.lower(name)] = math.clamp(math.floor(value), -limit, limit)
+			end
 		end
+		return rules
 	end
-	settings.giftRules = rules
+	settings.giftRules = cleanRules(settings.giftRules, 1500000)
+	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
+	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
 		settings.leaderboards = { helpers = {}, griefers = {} }
@@ -131,6 +146,8 @@ local function publishSettings()
 	State:SetAttribute("PerFollow", settings.perFollow)
 	State:SetAttribute("PerShare", settings.perShare)
 	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
+	State:SetAttribute("ClimbRules", game:GetService("HttpService"):JSONEncode(settings.climbRules))
+	State:SetAttribute("ChalkRules", game:GetService("HttpService"):JSONEncode(settings.chalkRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
@@ -942,6 +959,20 @@ local doubledGifts: { [TikTokFeed.Event]: boolean } = setmetatable({}, { __mode 
 
 -- TikTok ------------------------------------------------------------------------
 local function processTikTok(event: TikTokFeed.Event)
+	if (event.type == "climbRule" or event.type == "chalkRule") and event.gift then
+		-- The control page's Diamond Climb or Chalkboard Count rule for one gift
+		-- (cleared to go back to the coins).
+		local rules = if event.type == "climbRule" then settings.climbRules else settings.chalkRules
+		local limit = if event.type == "climbRule" then ClimbPath.TOP else ChalkBoard.GOAL.max
+		local name = string.lower(event.gift)
+		if event.clear == true or event.amount == nil then
+			rules[name] = nil
+		else
+			rules[name] = math.clamp(math.floor(event.amount), -limit, limit)
+		end
+		saveSettings()
+		return
+	end
 	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
 		local name = string.lower(event.gift)
 		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
@@ -985,7 +1016,8 @@ local function processTikTok(event: TikTokFeed.Event)
 		-- In Chalkboard Count gifts move the count up or down, the reset gift
 		-- starts the countdown and a big enough gift saves it.
 		if event.type == "like" then return end
-		local ending = chalkGame.gift(who, event, amount, doubledGifts[event] == true)
+		local rule = if event.type == "gift" then settings.chalkRules[string.lower(event.gift or "")] else nil
+		local ending = chalkGame.gift(who, event, amount, doubledGifts[event] == true, rule)
 		if doubledGifts[event] then text = "2X " .. text end
 		Notify:FireAllClients("feed", { text = text .. ending, stone = 0, kind = event.type })
 		return
@@ -996,8 +1028,10 @@ local function processTikTok(event: TikTokFeed.Event)
 		-- shares lift them one platform. Likes leave the climb alone.
 		if event.type == "like" then return end
 		local coins = math.max(1, event.coins or 1)
-		local move = if event.type == "gift"
-			then ClimbGame.giftMove(amount, coins, event.count or 1, climbGame.progress.strength)
+		-- The streamer's own rule for this gift wins; otherwise its coins.
+		local rule = if event.type == "gift" then settings.climbRules[string.lower(event.gift or "")] else nil
+		local move = if rule ~= nil then math.floor(rule) * math.max(1, math.floor(event.count or 1))
+			elseif event.type == "gift" then ClimbGame.giftMove(amount, coins, event.count or 1, climbGame.progress.strength)
 			elseif amount > 0 then 1 else 0
 		local from, to = climbGame.gift(who, move, {
 			coins = if event.type == "gift" then coins else 1,
@@ -1539,6 +1573,27 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		chalkGame.hold(player, value)
 		return
 	end
+	if action == "setHideCard" and type(value) == "table" and type(value.hidden) == "boolean" then
+		-- Settings: hide Diamond Climb's speed and jump card, or Chalkboard
+		-- Count's writing speed card. Remembered for next time.
+		local cards = { climb = { "hiddenClimbCard", "HideClimbCard" }, chalk = { "hiddenChalkCard", "HideChalkCard" } }
+		local card = cards[value.card]
+		if card == nil then return end
+		local now = os.clock()
+		if now - (hideAt[player] or -math.huge) < 0.2 then return end
+		hideAt[player] = now
+		player:SetAttribute(card[2], value.hidden)
+		local list = settings[card[1]]
+		local id = tostring(player.UserId)
+		if (list[id] == true) ~= value.hidden then
+			local count = 0
+			for _ in list do count += 1 end
+			if value.hidden and count >= 500 then return end
+			list[id] = if value.hidden then true else nil
+			Store.save(settings)
+		end
+		return
+	end
 	if action == "setHideButtons" then
 		-- Any player can tuck away the GAMES tab and SETTINGS button (their
 		-- keys still work); it is remembered for next time.
@@ -1647,6 +1702,8 @@ local function onPlayer(player: Player)
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
 	player:SetAttribute("HideButtons", settings.hiddenButtons[tostring(player.UserId)] == true)
+	player:SetAttribute("HideClimbCard", settings.hiddenClimbCard[tostring(player.UserId)] == true)
+	player:SetAttribute("HideChalkCard", settings.hiddenChalkCard[tostring(player.UserId)] == true)
 	if not modernChat then
 		player.Chatted:Connect(function(message)
 			onChat(player, message)

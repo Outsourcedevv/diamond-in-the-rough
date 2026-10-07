@@ -12,6 +12,7 @@ vector.__index = function(v, k)
 	end
 	if k == "Dot" then return function(a, b) return a.X * b.X + a.Y * b.Y + a.Z * b.Z end end
 	if k == "Cross" then return function(a, b) return V(a.Y * b.Z - a.Z * b.Y, a.Z * b.X - a.X * b.Z, a.X * b.Y - a.Y * b.X) end end
+	if k == "Lerp" then return function(a, b, t) return V(a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t, a.Z + (b.Z - a.Z) * t) end end
 	return nil
 end
 vector.__add = function(a, b) return V(a.X + b.X, a.Y + b.Y, a.Z + b.Z) end
@@ -50,6 +51,15 @@ cframe.__index = function(c, k)
 	if k == "RightVector" then return V(c.r[1], c.r[4], c.r[7]) end
 	if k == "UpVector" then return V(c.r[2], c.r[5], c.r[8]) end
 	if k == "VectorToWorldSpace" then return function(self, v) return rotate(self.r, v) end end
+	if k == "Inverse" or k == "ToObjectSpace" then
+		local function inverse(self)
+			local r = self.r
+			local t = { r[1], r[4], r[7], r[2], r[5], r[8], r[3], r[6], r[9] }
+			return CF(rotate(t, self.p) * -1, t)
+		end
+		if k == "Inverse" then return inverse end
+		return function(self, other) return inverse(self) * other end
+	end
 	return nil
 end
 cframe.__mul = function(a, b)
@@ -108,7 +118,17 @@ local ColorSequence = { new = sequence }
 local NumberSequence = { new = sequence }
 local NumberSequenceKeypoint = { new = sequence }
 local NumberRange = { new = sequence }
-local Vector2 = { new = function(x: number, y: number) return { X = x, Y = y } end }
+local vector2 = {}
+local function V2(x: number?, y: number?): any return setmetatable({ X = x or 0, Y = y or 0 }, vector2) end
+vector2.__add = function(a, b) return V2(a.X + b.X, a.Y + b.Y) end
+vector2.__sub = function(a, b) return V2(a.X - b.X, a.Y - b.Y) end
+vector2.__mul = function(a, b)
+	if type(a) == "number" then a, b = b, a end
+	if type(b) == "number" then return V2(a.X * b, a.Y * b) end
+	return V2(a.X * b.X, a.Y * b.Y)
+end
+vector2.__eq = function(a, b) return a.X == b.X and a.Y == b.Y end
+local Vector2 = { new = V2, zero = V2(0, 0), one = V2(1, 1) }
 local UDim = { new = function(scale: number, offset: number) return { Scale = scale, Offset = offset } end }
 local Enum = setmetatable({}, { __index = function(_, group)
 	return setmetatable({}, { __index = function(_, item) return group .. "." .. item end })

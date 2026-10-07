@@ -1,17 +1,20 @@
 --!strict
 -- Chalkboard Count, the third game in the games menu: the writer stands at a
--- big green chalkboard, filmed by the classroom camera, and holds down to
+-- big green chalkboard in a classroom and holds down to
 -- write the next number, and the next, at their chosen writing speed, until
--- they reach the goal. TikTok gifts move the count up (gifts that would break
+-- they reach the goal and hold it for Config.HoldSeconds (15 real seconds,
+-- shown as a countdown from 10 that slows near the end) without a gift
+-- taking the count back down. TikTok gifts move the count up (gifts that would break
 -- the mountain) or down (gifts that add stone). The reset gift (a Galaxy) starts
 -- a 60 second countdown that wipes the board back to 0, unless someone sends
--- a gift worth 1,000 coins or more to save it. Reaching the goal wins.
+-- a gift worth 1,000 coins or more to save it. Holding the goal wins.
 --
 -- Everything is saved in settings.chalk and shown to every player through the
 -- State attributes ChalkCount, ChalkGoal, ChalkWins, ChalkBest, ChalkSpeed,
 -- ChalkTheme, ChalkResetGift, ChalkSaveCoins, ChalkResetSeconds,
 -- ChalkStrength, ChalkResetEnds (server time the board is wiped, 0 when no
--- countdown) and ChalkWriting. The game is single player, so there is one count.
+-- countdown), ChalkHoldStart (server time the count reached the goal, 0 when
+-- not holding) and ChalkWriting. The game is single player, so there is one count.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local StarterPlayer = game:GetService("StarterPlayer")
@@ -19,6 +22,7 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
+local Config = require(Shared:WaitForChild("Config"))
 local Classroom = require(script.Parent:WaitForChild("Classroom"))
 
 local ChalkGame = {}
@@ -83,7 +87,7 @@ export type Game = {
 	characterAdded: (player: Player, character: Model) -> (),
 	hold: (player: Player, value: any) -> (),
 	setting: (player: Player, action: string, value: any) -> boolean,
-	gift: (who: string, event: { [string]: any }, rocks: number, doubled: boolean) -> string,
+	gift: (who: string, event: { [string]: any }, rocks: number, doubled: boolean, rule: number?) -> string,
 	removing: (player: Player) -> (),
 }
 
@@ -99,6 +103,8 @@ function ChalkGame.start(options: Options): Game
 	local resetSerial = 0
 	local winning = false
 	local dirty = false
+	local holdStart = 0
+	local holdSerial = 0
 
 	local function publish()
 		state:SetAttribute("ChalkCount", progress.count)
@@ -112,6 +118,7 @@ function ChalkGame.start(options: Options): Game
 		state:SetAttribute("ChalkResetSeconds", progress.resetSeconds)
 		state:SetAttribute("ChalkStrength", progress.strength)
 		state:SetAttribute("ChalkResetEnds", resetEnds)
+		state:SetAttribute("ChalkHoldStart", holdStart)
 	end
 	publish()
 	state:SetAttribute("ChalkWriting", false)
@@ -161,10 +168,19 @@ function ChalkGame.start(options: Options): Game
 		state:SetAttribute("ChalkResetEnds", 0)
 	end
 
+	local function cancelHold()
+		holdSerial += 1
+		if holdStart ~= 0 then
+			holdStart = 0
+			state:SetAttribute("ChalkHoldStart", 0)
+		end
+	end
+
 	-- The goal: a win, then the board is wiped for the next count.
 	local function reachGoal()
 		if winning then return end
 		winning = true
+		cancelHold()
 		cancelReset()
 		progress.wins += 1
 		state:SetAttribute("ChalkWins", progress.wins)
@@ -180,10 +196,25 @@ function ChalkGame.start(options: Options): Game
 		end)
 	end
 
+	-- At the goal the hold starts: the count has to stay there for it to win.
+	local function startHold()
+		if winning or holdStart ~= 0 or progress.count < progress.goal or writer() == nil then return end
+		holdSerial += 1
+		local serial = holdSerial
+		holdStart = workspace:GetServerTimeNow()
+		state:SetAttribute("ChalkHoldStart", holdStart)
+		task.delay(Config.HoldSeconds, function()
+			if serial ~= holdSerial then return end
+			holdStart = 0
+			state:SetAttribute("ChalkHoldStart", 0)
+			if progress.count >= progress.goal and writer() ~= nil then reachGoal() end
+		end)
+	end
+
 	local function add(amount: number)
 		if winning then return end
 		setCount(progress.count + amount)
-		if progress.count >= progress.goal then reachGoal() end
+		if progress.count >= progress.goal then startHold() else cancelHold() end
 	end
 
 	-- Writing: while the writer holds, one number every 1/speed seconds.
@@ -193,10 +224,10 @@ function ChalkGame.start(options: Options): Game
 		for player, on in holding do
 			if on and writing(player) and player.Parent ~= nil then anyone = true end
 		end
-		-- The arm rests during the win's celebration.
-		local shown = anyone and not winning
+		-- The arm rests at the goal and during the win's celebration.
+		local shown = anyone and not winning and progress.count < progress.goal
 		if state:GetAttribute("ChalkWriting") ~= shown then state:SetAttribute("ChalkWriting", shown) end
-		if not anyone or winning then
+		if not anyone or winning or progress.count >= progress.goal then
 			carry = 0
 			return
 		end
@@ -227,9 +258,16 @@ function ChalkGame.start(options: Options): Game
 		return ChalkBoard.standFrame()
 	end
 
+	-- Back at the board with the goal reached, the hold starts again;
+	-- leaving the classroom stops it.
 	function self.entered(player: Player, isWriting: boolean)
 		if not isWriting then holding[player] = nil end
 		applyMove(player)
+		if isWriting then
+			startHold()
+		elseif writer() == nil then
+			cancelHold()
+		end
 	end
 
 	function self.characterAdded(player: Player, character: Model)
@@ -256,6 +294,7 @@ function ChalkGame.start(options: Options): Game
 		elseif action == "setChalkGoal" and type(value) == "number" and value == value then
 			progress.goal = math.clamp(math.floor(value), ChalkBoard.GOAL.min, ChalkBoard.GOAL.max)
 			if progress.count >= progress.goal then setCount(progress.goal - 1) end
+			cancelHold()
 		elseif action == "setChalkResetGift" and type(value) == "string" then
 			local name = string.gsub(string.sub(value, 1, 40), "^%s*(.-)%s*$", "%1")
 			local clean = if name == "" then "" elseif options.filter then options.filter(player, name) else name
@@ -270,6 +309,7 @@ function ChalkGame.start(options: Options): Game
 		elseif action == "chalkRestart" then
 			if winning then return true end
 			cancelReset()
+			cancelHold()
 			notify:FireAllClients("chalkWipe", { reason = "restart" })
 			setCount(0)
 		elseif action == "chalkTestReset" then
@@ -286,9 +326,11 @@ function ChalkGame.start(options: Options): Game
 		return true
 	end
 
-	-- A gift (or a follow or share) for the count. `rocks` is what it would do
-	-- to the mountain: its sign decides up or down. Returns the feed's ending.
-	function self.gift(who: string, event: { [string]: any }, rocks: number, doubled: boolean): string
+	-- A gift (or a follow or share) for the count. `rule` is the streamer's
+	-- own number for this gift (up if positive, down if negative, per gift);
+	-- without one, `rocks` (what it would do to the mountain) decides: its
+	-- sign up or down, the coins how far. Returns the feed's ending.
+	function self.gift(who: string, event: { [string]: any }, rocks: number, doubled: boolean, rule: number?): string
 		if winning then return "" end
 		local coins = math.max(1, event.coins or 1)
 		local count = math.max(1, math.floor(event.count or 1))
@@ -305,6 +347,7 @@ function ChalkGame.start(options: Options): Game
 					resetEnds = 0
 					state:SetAttribute("ChalkResetEnds", 0)
 					local lost = progress.count
+					cancelHold()
 					notify:FireAllClients("chalkReset", { state = "wiped", lost = lost })
 					notify:FireAllClients("chalkWipe", { reason = "reset" })
 					setCount(0)
@@ -319,7 +362,8 @@ function ChalkGame.start(options: Options): Game
 			notify:FireAllClients("chalkReset", { state = "saved", name = who })
 			ending = "  SAVED THE BOARD"
 		end
-		local amount = if event.type == "gift" then ChalkBoard.giftAmount(rocks, coins, count, progress.strength)
+		local amount = if event.type == "gift" and rule ~= nil then math.floor(rule) * count
+			elseif event.type == "gift" then ChalkBoard.giftAmount(rocks, coins, count, progress.strength)
 			elseif rocks > 0 then 1 else 0
 		if amount ~= 0 then
 			-- The show goes out before the count changes (the eraser rubs out the old number).

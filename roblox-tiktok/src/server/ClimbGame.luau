@@ -5,18 +5,22 @@
 -- climber picks their own walk speed and jump height. TikTok gifts send the
 -- climber up the tower (gifts that would break the mountain) or down it
 -- (gifts that would add stone), more platforms for bigger gifts, each with
--- its own animation (see ClimbEffects). Reaching the top wins a climb and
--- starts the next one from the bottom.
+-- its own animation (see ClimbEffects). Reaching the top starts the hold: the
+-- climber must stay there for Config.HoldSeconds (15 real seconds, shown as a
+-- countdown from 10 that slows near the end) without a gift sending them back
+-- down. Then the climb is won and the next one starts from the bottom.
 --
 -- The climb's progress is part of the saved settings (settings.climb) and is
 -- shown to every player through the State attributes ClimbCheckpoint,
--- ClimbBest, ClimbWins, ClimbSpeed, ClimbJump and ClimbStrength. The game is
+-- ClimbBest, ClimbWins, ClimbSpeed, ClimbJump and ClimbStrength, and
+-- ClimbHoldStart (the server time the hold at the top began, 0 when none). The game is
 -- single player, so there is one climb: the streamer's.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterPlayer = game:GetService("StarterPlayer")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
+local Config = require(Shared:WaitForChild("Config"))
 local Climb = require(script.Parent:WaitForChild("Climb"))
 
 local ClimbGame = {}
@@ -99,6 +103,8 @@ function ClimbGame.start(options: Options): Game
 	local notify = options.notify
 	local built = Climb.build(options.parent)
 	local winning = false
+	local holdStart = 0
+	local holdSerial = 0
 	local landAt: { [Player]: number } = {}
 	local moveAt: { [Player]: number } = {}
 
@@ -109,6 +115,7 @@ function ClimbGame.start(options: Options): Game
 		state:SetAttribute("ClimbSpeed", progress.speed)
 		state:SetAttribute("ClimbJump", progress.jump)
 		state:SetAttribute("ClimbStrength", progress.strength)
+		state:SetAttribute("ClimbHoldStart", holdStart)
 	end
 	publish()
 
@@ -157,9 +164,32 @@ function ClimbGame.start(options: Options): Game
 	end
 
 	-- The top: a win, then the next climb starts from the bottom.
-	local function reachTop(player: Player?)
+	local reachTop: (Player?) -> ()
+	local function cancelHold()
+		holdSerial += 1
+		if holdStart ~= 0 then
+			holdStart = 0
+			state:SetAttribute("ClimbHoldStart", 0)
+		end
+	end
+	-- At the top: the climber has to stay there for the hold to win.
+	local function startHold()
+		if winning or holdStart ~= 0 or progress.checkpoint < ClimbPath.TOP or climber() == nil then return end
+		holdSerial += 1
+		local serial = holdSerial
+		holdStart = workspace:GetServerTimeNow()
+		state:SetAttribute("ClimbHoldStart", holdStart)
+		task.delay(Config.HoldSeconds, function()
+			if serial ~= holdSerial then return end
+			holdStart = 0
+			state:SetAttribute("ClimbHoldStart", 0)
+			if progress.checkpoint >= ClimbPath.TOP and climber() ~= nil then reachTop(climber()) end
+		end)
+	end
+	function reachTop(player: Player?)
 		if winning then return end
 		winning = true
+		cancelHold()
 		progress.wins += 1
 		setCheckpoint(ClimbPath.TOP)
 		notify:FireAllClients("climbWin", { wins = progress.wins, name = if player then player.DisplayName else "" })
@@ -183,9 +213,15 @@ function ClimbGame.start(options: Options): Game
 		return ClimbPath.standFrame(progress.checkpoint)
 	end
 
-	-- Called when a player joins the climb (true) or leaves it (false).
+	-- Called when a player joins the climb (true) or leaves it (false). Back
+	-- at the top, the hold starts again; leaving the climb stops it.
 	function self.entered(player: Player, isClimbing: boolean)
 		applyMove(player)
+		if isClimbing then
+			startHold()
+		elseif climber() == nil then
+			cancelHold()
+		end
 	end
 
 	function self.characterAdded(player: Player, character: Model)
@@ -211,7 +247,7 @@ function ClimbGame.start(options: Options): Game
 		local feet = root.Position - Vector3.new(0, humanoid.HipHeight + root.Size.Y / 2, 0)
 		if not ClimbPath.isOn(index, feet, 4) then return end
 		setCheckpoint(index)
-		if index == ClimbPath.TOP then reachTop(player) end
+		if index == ClimbPath.TOP then startHold() end
 	end
 
 	-- The climb's sliders: { speed = studs a second, jump = studs high }.
@@ -259,6 +295,7 @@ function ClimbGame.start(options: Options): Game
 	-- From the streamer panel: back to the bottom (wins and best stay).
 	function self.restart()
 		if winning then return end
+		cancelHold()
 		setCheckpoint(0)
 		notify:FireAllClients("climbRestart", {})
 		for _, player in game:GetService("Players"):GetPlayers() do
@@ -275,6 +312,8 @@ function ClimbGame.start(options: Options): Game
 		local to = math.clamp(from + move, 0, ClimbPath.TOP)
 		-- Already at the bottom (or top): no ride that goes nowhere.
 		if to == from then return from, from end
+		-- Sent down from the top: the hold is lost.
+		if to < ClimbPath.TOP then cancelHold() end
 		setCheckpoint(to)
 		local data = table.clone(info)
 		data.up = move > 0
@@ -284,12 +323,9 @@ function ClimbGame.start(options: Options): Game
 		data.name = who
 		notify:FireAllClients("climbGift", data)
 		if to == ClimbPath.TOP and from ~= to then
-			-- The win waits for the ride up to finish.
-			winning = true
-			task.delay(ClimbPath.giftSeconds(info.coins or 1), function()
-				winning = false
-				reachTop(climber())
-			end)
+			-- The hold starts once the ride up has finished (unless another
+			-- gift has sent them down meanwhile).
+			task.delay(ClimbPath.giftSeconds(info.coins or 1), startHold)
 		end
 		return from, to
 	end

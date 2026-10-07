@@ -10,7 +10,7 @@ local RunService = game:GetService("RunService")
 
 export type Event = {
 	id: string,
-	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "theme" | "skin"
+	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "climbRule" | "chalkRule" | "theme" | "skin"
 	user: string?,
 	name: string?,
 	gift: string?,
@@ -21,6 +21,8 @@ export type Event = {
 	likes: number?,
 	rocks: number?,
 	keybind: string?,
+	amount: number?, -- "climbRule" and "chalkRule" events: platforms or numbers per gift, negative for down
+	clear: boolean?, -- and true when the rule is removed
 	theme: string?, -- "theme" events: the map theme the control page chose
 	skin: string?, -- "skin" events: stone and diamond, or hay and needle
 }
@@ -45,6 +47,8 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 	local event: Event = {
 		rocks = if type(raw.rocks) == "number" and raw.rocks == raw.rocks then math.clamp(raw.rocks, -1500000, 1500000) else nil,
 		keybind = if type(raw.keybind) == "string" then string.sub(raw.keybind, 1, 16) else nil,
+		amount = if type(raw.amount) == "number" and raw.amount == raw.amount then math.clamp(raw.amount, -100000, 100000) else nil,
+		clear = if raw.clear == true then true else nil,
 		theme = if type(raw.theme) == "string" then string.sub(raw.theme, 1, 16) else nil,
 		skin = if type(raw.skin) == "string" then string.sub(raw.skin, 1, 16) else nil,
 		id = raw.id,
@@ -107,7 +111,8 @@ function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (
 			if decoded and type(data) == "table" then
 				failures = 0
 				-- The game just started: the bridge's older events were already
-				-- played (or sent before Play), so only its gift rules apply.
+				-- played (or sent before Play), so only its gift rules apply
+				-- (the mountain's, the climb's and the chalkboard's).
 				local fresh = session == ""
 				if data.session ~= session then
 					-- The bridge restarted: start again from its first event.
@@ -116,7 +121,7 @@ function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (
 				end
 				if type(data.events) == "table" then
 					for _, raw in data.events do
-						if not fresh or (type(raw) == "table" and raw.type == "giftRule") then
+						if not fresh or (type(raw) == "table" and (raw.type == "giftRule" or raw.type == "climbRule" or raw.type == "chalkRule")) then
 							deliver(raw, onEvent)
 						end
 					end

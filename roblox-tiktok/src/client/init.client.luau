@@ -15,6 +15,7 @@ local HoldTimer = require(Shared:WaitForChild("HoldTimer"))
 local Skin = require(Shared:WaitForChild("Skin"))
 local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local FirstPerson = require(script:WaitForChild("FirstPerson"))
+local Sounds = require(script:WaitForChild("Sounds"))
 -- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
 FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
 FirstPerson.start()
@@ -137,14 +138,14 @@ local roughHud = make("Frame", {
 -- Diamond Climb: its display, sliders, landings and gift rides.
 local ClimbView = require(script:WaitForChild("ClimbView"))
 local climb = ClimbView.start(Request, State)
--- Chalkboard Count: the classroom camera, chalk numbers and its display.
+-- Chalkboard Count: the view of the board, chalk numbers and its display.
 local ChalkView = require(script:WaitForChild("ChalkView"))
 local chalk = ChalkView.start(Request, State)
 
 -- The games menu: the game's display, first-person view and hands only show
 -- while playing Diamond in the Rough, not in the lobby; Diamond Climb has a
--- third-person camera and its own display, and Chalkboard Count films the
--- writer from a fixed classroom camera.
+-- third-person camera and its own display, and Chalkboard Count shows the
+-- writer and the board from a fixed view.
 local LobbyView = require(script:WaitForChild("LobbyView"))
 -- How to play: from the lobby board, the games menu or H.
 local HowToPlay = require(script:WaitForChild("HowToPlay"))
@@ -425,6 +426,7 @@ local winBest = winLine(174, 30, FONT_MEDIUM, 20, GOLD)
 local winNewBest = winLine(230, 32, FONT, 18, GREEN)
 
 local function showWin(data: { [string]: any })
+	if player:GetAttribute("InGame") == true then Sounds.play("cheer") end
 	local words = Skin.words(attr("Skin", "stone"))
 	winTitle.Text = string.upper(words.gem) .. " SECURED"
 	winWho.Text = tostring(data.winner or "") .. " wins!"
@@ -675,7 +677,9 @@ local testGifts = {
 	{ "Finger Heart · 5", "Finger Heart", 5, 1 },
 	{ "Rose x10", "Rose", 1, 10 },
 	{ "Doughnut · 30", "Doughnut", 30, 1 },
+	{ "Perfume · 20", "Perfume", 20, 1 },
 	{ "Hand Hearts · 100", "Hand Hearts", 100, 1 },
+	{ "Confetti · 100", "Confetti", 100, 1 },
 	{ "Money Gun · 500", "Money Gun", 500, 1 },
 	{ "Galaxy · 1,000", "Galaxy", 1000, 1 },
 	{ "Doughnut x40", "Doughnut", 30, 40 },
@@ -1104,7 +1108,7 @@ glass(settingsButton, 16)
 make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, settingsButton)
 local settingsCard = make("Frame", {
 	Position = UDim2.fromOffset(12, 50),
-	Size = UDim2.fromOffset(300, 214),
+	Size = UDim2.fromOffset(300, 306),
 	Visible = false,
 	ZIndex = 15,
 }, gui)
@@ -1150,7 +1154,7 @@ local fovKnob = make("Frame", {
 rounded(fovKnob, 9)
 local function settingsAction(text: string, x: number, colour: Color3): TextButton
 	local button = make("TextButton", {
-		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 160),
+		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 252),
 		Size = UDim2.new(0.5, -4, 0, 30),
 		BackgroundColor3 = colour,
 		Font = FONT,
@@ -1203,6 +1207,44 @@ hideSwitch.Activated:Connect(function()
 	player:SetAttribute("HideButtons", hidden)
 	Request:FireServer("setHideButtons", hidden)
 end)
+-- Switches that hide a game's own card: Diamond Climb's speed and jump
+-- sliders, Chalkboard Count's writing speed and themes. Remembered by the server.
+local function cardSwitch(y: number, title: string, card: string, attribute: string)
+	settingsText({ Position = UDim2.fromOffset(0, y), Size = UDim2.new(1, -60, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = title })
+	local switch = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, y + 2),
+		Size = UDim2.fromOffset(46, 26),
+		BackgroundColor3 = BUTTON,
+		AutoButtonColor = false,
+		Text = "",
+		ZIndex = 16,
+	}, settingsCard)
+	rounded(switch, 13)
+	local knob = make("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 3, 0.5, 0),
+		Size = UDim2.fromOffset(20, 20),
+		BackgroundColor3 = WHITE,
+		BorderSizePixel = 0,
+		ZIndex = 17,
+	}, switch)
+	rounded(knob, 10)
+	local function refresh()
+		local hidden = player:GetAttribute(attribute) == true
+		switch.BackgroundColor3 = if hidden then SELECTED else BUTTON
+		knob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
+	end
+	player:GetAttributeChangedSignal(attribute):Connect(refresh)
+	refresh()
+	switch.Activated:Connect(function()
+		local hidden = player:GetAttribute(attribute) ~= true
+		player:SetAttribute(attribute, hidden)
+		Request:FireServer("setHideCard", { card = card, hidden = hidden })
+	end)
+end
+cardSwitch(156, "Hide climb speed card", "climb", "HideClimbCard")
+cardSwitch(204, "Hide chalk writing card", "chalk", "HideChalkCard")
 local fovReset = settingsAction("Reset", 0, BUTTON)
 local settingsDone = settingsAction("Done", 0.5, SELECTED)
 
@@ -1357,6 +1399,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 		setText(countHolder, string.upper(tostring(attr("Holder", ""))) .. " IS HOLDING IT")
 		setText(countNumber, tostring(shown))
 		if shown ~= lastCount then
+			if lastCount ~= -1 and roughHud.Visible then Sounds.play("tick") end
 			lastCount = shown
 			countNumber.TextColor3 = WHITE:Lerp(GOLD, 1 - shown / Config.HoldCountFrom)
 			countScale.Scale = 1.35
@@ -1376,6 +1419,11 @@ RunService.RenderStepped:Connect(function(dt: number)
 			banner.TextTransparency = 0.15 + 0.15 * math.sin(now * 5)
 		end
 	end
+end)
+
+-- A chime when the diamond (or needle) is uncovered.
+State:GetAttributeChangedSignal("Phase"):Connect(function()
+	if attr("Phase", "Digging") == "Revealed" and player:GetAttribute("InGame") == true then Sounds.play("chime") end
 end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
@@ -1547,11 +1595,19 @@ end
 RunService.Heartbeat:Connect(function()
 	player:SetAttribute("DiggingRock", digTarget() ~= nil)
 end)
+-- Each landed strike cracks the rock with a crunch; every fourth a bigger
+-- chunk breaks away.
+local strikes = 0
 FirstPerson.onStrike(function()
 	local key = digTarget()
 	local character = player.Character
 	if key ~= nil and (character == nil or character:FindFirstChildOfClass("Tool") == nil) then
 		Request:FireServer("mine", key)
+		local rock = aimTarget
+		local at = if rock then rock.Position else nil
+		strikes += 1
+		Sounds.play("dig", at)
+		if strikes % 4 == 0 then Sounds.play("crumble", at) end
 	end
 end)
 

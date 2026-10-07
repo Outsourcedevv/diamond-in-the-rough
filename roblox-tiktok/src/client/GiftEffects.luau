@@ -36,6 +36,7 @@ local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Format = require(Shared:WaitForChild("Format"))
 local CameraShake = require(script.Parent:WaitForChild("CameraShake"))
+local Sounds = require(script.Parent:WaitForChild("Sounds"))
 
 local GiftEffects = {}
 
@@ -227,6 +228,11 @@ function GiftEffects.play(data: any)
 	local function alive(): boolean
 		return folder.Parent ~= nil
 	end
+	-- Sounds grow deeper and louder with the tier.
+	local loudness = 1 + (tier - 1) * 0.15
+	local function noise(name: string, at: Vector3?)
+		if alive() then Sounds.play(name, at, loudness) end
+	end
 	local function after(delay: number, callback: () -> ())
 		task.delay(delay, function()
 			if alive() then callback() end
@@ -323,6 +329,7 @@ function GiftEffects.play(data: any)
 	end
 	-- A shockwave ring that races out flat across the ground.
 	local function shockwave(at: Vector3, radius: number, tint: Color3, seconds: number)
+		noise(if radius >= 18 then "bigBoom" elseif radius >= 6 then "boom" else "thud", at)
 		burst(at + Vector3.new(0, 0.4, 0), {
 			texture = TEXTURES.ring, count = 1, colour = sequence(WHITE, tint),
 			size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.35, radius * 1.5), NumberSequenceKeypoint.new(1, radius * 2) }),
@@ -330,12 +337,14 @@ function GiftEffects.play(data: any)
 		})
 	end
 	local function flash(at: Vector3, size: number, tint: Color3, seconds: number)
+		if size < 6 then noise("pop", at) end
 		local orb = part(Enum.PartType.Ball, Vector3.one * 0.4, CFrame.new(at), WHITE)
 		if orb == nil then return end
 		orb.Transparency = 0.05
 		fade(orb, seconds, { Size = Vector3.one * size, Transparency = 1, Color = tint })
 	end
 	local function sparks(at: Vector3, count: number, tint: Color3, power: number)
+		noise("sparkle", at)
 		burst(at, {
 			texture = TEXTURES.spark, count = count, colour = sequence(WHITE, tint), size = curve(0.55, 0.35, 0),
 			lifetime = { 0.45, 1 }, speed = { 6 * power, 14 * power }, drag = 3.5, acceleration = Vector3.new(0, -14, 0), spin = 200,
@@ -370,6 +379,7 @@ function GiftEffects.play(data: any)
 	end
 	-- Chunks of rock (or hay) thrown out of the crater, tumbling as they fall.
 	local function chunks(at: Vector3, count: number, power: number)
+		noise("rubble", at)
 		for _ = 1, count do
 			local size = random:NextNumber(0.35, 0.75) * math.sqrt(power)
 			local chunk = part(Enum.PartType.Block, Vector3.new(size, size * random:NextNumber(0.6, 1), size), CFrame.new(at), rock.colour:Lerp(rock.dust, random:NextNumber(0, 0.5)), rock.material)
@@ -388,6 +398,7 @@ function GiftEffects.play(data: any)
 	end
 	-- A vertical column of light from `top` down to `bottom`.
 	local function column(bottom: Vector3, height: number, width: number, tint: Color3, seconds: number, material: Enum.Material?): Part?
+		noise("beam", bottom)
 		local beam = part(Enum.PartType.Cylinder, Vector3.new(height, width * 0.2, width * 0.2), CFrame.new(bottom + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, 0, math.pi / 2), tint, material)
 		if beam == nil then return nil end
 		animate(beam, 0.08, { Size = Vector3.new(height, width, width) })
@@ -399,6 +410,7 @@ function GiftEffects.play(data: any)
 	-- A glowing ball streaking along a curve from the sky to `target`, with a
 	-- trail and fire behind it. `land` runs when it hits.
 	local function streak(from: Vector3, target: Vector3, size: number, seconds: number, tint: Color3, withLight: boolean, land: () -> ())
+		noise("whoosh", target)
 		local ball = part(Enum.PartType.Ball, Vector3.one * size, CFrame.new(from), tint:Lerp(WHITE, 0.6))
 		if ball == nil then return end
 		local a = Instance.new("Attachment")
@@ -489,6 +501,7 @@ function GiftEffects.play(data: any)
 	-- Glowing veins along the rock from `radius` out, racing in to the centre
 	-- (inward) or out from it.
 	local function veins(origin: Vector3, branches: number, radius: number, inward: boolean, width: number, seconds: number)
+		noise("zap", origin)
 		local rotation = random:NextNumber(0, math.pi * 2)
 		for branch = 1, branches do
 			local angle = rotation + branch * math.pi * 2 / branches
@@ -625,6 +638,7 @@ function GiftEffects.play(data: any)
 					local apex = towards(from, landing, 0.5) + Vector3.new(0, random:NextNumber(28, 42), 0)
 					local rocks = lump(random:NextNumber(1.6, 2.3), CFrame.new(from))
 					if rocks == nil then return end
+					noise("whoosh", landing)
 					local trail = Instance.new("Attachment")
 					trail.Parent = rocks.parts[1]
 					local dustTrail = emitter({
@@ -739,6 +753,9 @@ function GiftEffects.play(data: any)
 			-- up from all round, lands on the peak with a blast of light, and a
 			-- ring of green pillars erupts round the mountain.
 			local descent = 2.8
+			noise("rumble", summit)
+			after(1.2, function() noise("rumble", summit) end)
+			after(descent - 0.5, function() noise("deepWhoosh", summit) end)
 			grade({ Brightness = -0.12, Contrast = 0.2, Saturation = -0.05, TintColor = Color3.fromRGB(205, 255, 220) }, 0.6, 3.4, 1.4)
 			for i = 0, 9 do
 				after(i * 0.3, function() addShake(0.45) end)
@@ -896,6 +913,7 @@ function GiftEffects.play(data: any)
 			end
 			-- Then they shatter.
 			after(0.42, function()
+				noise("shatter", origin)
 				flash(origin + Vector3.new(0, 1.5, 0), radius * 0.9, colour, 0.35)
 				shockwave(origin, radius * 1.4, colour, 0.6)
 				sparks(origin + Vector3.new(0, 1.5, 0), 45, colour, 1.3)
@@ -1010,6 +1028,8 @@ function GiftEffects.play(data: any)
 		-- pulse, and a beam of starlight drives into the mountain.
 		local core = centre + Vector3.new(0, 11, 0)
 		local gather = 1.8
+		noise("deepWhoosh", core)
+		after(0.9, function() noise("deepWhoosh", core) end)
 		local hole = part(Enum.PartType.Ball, Vector3.one * 0.2, CFrame.new(core), Color3.new(0, 0, 0), Enum.Material.SmoothPlastic)
 		local halo = part(Enum.PartType.Ball, Vector3.one * 0.3, CFrame.new(core), colour)
 		if hole then animate(hole, 0.8, { Size = Vector3.one * 3.8 }, Enum.EasingStyle.Back) end
@@ -1151,6 +1171,7 @@ function GiftEffects.play(data: any)
 		-- fire geysers erupt in a ring, more meteors fall, and a final cosmic
 		-- shock rolls out across the whole valley.
 		grade({ Brightness = -0.15, Contrast = 0.22, Saturation = 0.1, TintColor = Color3.fromRGB(255, 205, 190) }, 0.5, 5.6, 1.5)
+		noise("rumble", centre)
 		local function meteor(delay: number, spread: number, size: number)
 			after(delay, function()
 				local target = centre + Vector3.new(random:NextNumber(-spread, spread), 0, random:NextNumber(-spread, spread))

@@ -4,7 +4,7 @@
 // games can receive them through Roblox Open Cloud MessagingService.
 // Open http://localhost:8787 for the control page (connect + test gifts).
 import http from 'node:http';
-import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue } from './catalogue.mjs';
+import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue, GAMES, defaultGameRules, validateGameRule } from './catalogue.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,9 @@ const defaults = {
   tiktokUsername: '',
   port: 8787,
   giftRules: {},
+  // Diamond Climb's and Chalkboard Count's own rules (see defaultGameRules).
+  climbRules: defaultGameRules(),
+  chalkRules: defaultGameRules(),
   openCloud: { apiKey: '', universeId: '', topic: 'DiamondRushTikTok' },
 };
 
@@ -55,7 +58,7 @@ function emit(event) {
   }
   const stamped = queue.push(event);
   outbox.push(stamped);
-  if (event.type === 'giftRule') return;
+  if (event.type === 'giftRule' || event.type === 'climbRule' || event.type === 'chalkRule') return;
   recent.unshift({ at: Date.now(), ...stamped });
   recent.length = Math.min(recent.length, 30);
   const what = event.type === 'gift' ? `${event.gift} x${event.count} (${event.coins} coins each)` : event.type === 'like' ? `${event.likes} likes` : event.type === 'theme' ? `map theme ${THEMES[event.theme]}` : event.type === 'skin' ? `mountain skin ${SKINS[event.skin]}` : event.type;
@@ -83,6 +86,18 @@ async function refreshCatalogue(username = config.tiktokUsername) {
 }
 function publishRule(rule) { emit({type:'giftRule',name:'Gift catalogue',...rule}); }
 for(const rule of Object.values(config.giftRules ?? {})) publishRule(rule);
+// The climb's and chalkboard's rules, as events for the game: one per rule,
+// and a "clear" for each of the game's own defaults the streamer removed (a
+// new save starts with them).
+function gameRuleEvents(game) {
+  const rules = config[`${game}Rules`] ?? {};
+  const events = Object.values(rules).map((rule) => ({ type: `${game}Rule`, name: 'Gift catalogue', gift: rule.gift, coins: rule.coins, amount: rule.amount }));
+  for (const [key, rule] of Object.entries(defaultGameRules())) {
+    if (!rules[key]) events.push({ type: `${game}Rule`, name: 'Gift catalogue', gift: rule.gift, clear: true });
+  }
+  return events;
+}
+for (const game of Object.keys(GAMES)) for (const event of gameRuleEvents(game)) emit(event);
 
 // TikTok ----------------------------------------------------------------------
 async function connectTikTok(username) {
@@ -226,7 +241,7 @@ const server = http.createServer(async (request, response) => {
     return sendJson(response, 403, { error: 'Only the control page on this PC can do that.' });
   }
   if (request.method === 'GET' && url.pathname === '/catalogue') {
-    return sendJson(response,200,{gifts:catalogue,status:catalogueStatus,rules:config.giftRules ?? {},keys:KEYS});
+    return sendJson(response,200,{gifts:catalogue,status:catalogueStatus,rules:config.giftRules ?? {},keys:KEYS,climbRules:config.climbRules ?? {},chalkRules:config.chalkRules ?? {}});
   }
   if (request.method === 'POST' && url.pathname === '/catalogue/refresh') {
     try { const body=await readBody(request); await refreshCatalogue(body.username || config.tiktokUsername); return sendJson(response,200,{ok:true}); }
@@ -243,12 +258,29 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response,200,{ok:true});
     } catch(error) {return sendJson(response,400,{error:error.message});}
   }
+  if (request.method === 'POST' && url.pathname === '/game-rule') {
+    try {
+      const rule = validateGameRule(await readBody(request));
+      const rules = (config[`${rule.game}Rules`] ??= {});
+      const key = rule.gift.toLowerCase();
+      if (rule.remove) {
+        delete rules[key];
+        emit({ type: `${rule.game}Rule`, name: 'Gift catalogue', gift: rule.gift, clear: true });
+      } else {
+        rules[key] = { gift: rule.gift, coins: rule.coins, amount: rule.amount };
+        emit({ type: `${rule.game}Rule`, name: 'Gift catalogue', gift: rule.gift, coins: rule.coins, amount: rule.amount });
+      }
+      saveConfig();
+      return sendJson(response, 200, { ok: true });
+    } catch (error) { return sendJson(response, 400, { error: error.message }); }
+  }
   if (request.method === 'GET' && url.pathname === '/events') {
     lastRobloxPoll = Date.now();
     const session = url.searchParams.get('session');
     const since = session === queue.session ? Number(url.searchParams.get('since')) || 0 : 0;
     const events = queue.since(since).map(({ seq, ...event }) => event);
     if(!since) for(const [key,rule] of Object.entries(config.giftRules ?? {})) events.unshift({id:`rules:${queue.session}:${key}:${JSON.stringify(rule)}`,type:'giftRule',...rule});
+    if(!since) for(const game of Object.keys(GAMES)) for(const rule of gameRuleEvents(game)) events.unshift({id:`${game}Rules:${queue.session}:${JSON.stringify(rule)}`,...rule});
     return sendJson(response, 200, { session: queue.session, last: queue.last, tiktok: tiktokStatus, events });
   }
   if (request.method === 'GET' && url.pathname === '/status') {

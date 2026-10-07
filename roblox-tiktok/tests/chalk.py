@@ -172,11 +172,13 @@ typeof = function(value)
 	if type(value) == "table" and getmetatable(value) == vector then return "Vector3" end
 	return type(value)
 end
+ColorSequenceKeypoint = { new = function(...) return { ... } end }
 '''
 
 run("chalk", mock + mock_extras + modules(
     "src/shared/GiftTier.luau", "src/shared/Format.luau", "src/shared/DiamondShape.luau",
-    "src/shared/ChalkBoard.luau", "src/server/Classroom.luau", "src/server/ChalkGame.luau",
+    "src/shared/ChalkBoard.luau", "src/shared/Config.luau", "src/shared/HoldTimer.luau", "src/server/Classroom.luau",
+    "src/server/ChalkGame.luau", "src/client/Sounds.luau", "src/client/HoldCountdown.luau", "src/client/ChalkEffects.luau",
     "src/client/ChalkView.luau") + "\n" + board_test)
 
 # The game on a simulated clock: Heartbeat and task.delay run on it.
@@ -336,7 +338,21 @@ check(chalk.setting(streamer, "setChalkGoal", 5) and chalk.progress.goal == 10, 
 check(chalk.setting(streamer, "setChalkGoal", 50) and state:GetAttribute("ChalkGoal") == 50, "the goal can be changed")
 chalk.gift("Eve", { type = "gift", gift = "Galaxy", coins = 1000 }, 1000, false)
 chalk.gift("Ivy", { type = "gift", gift = "Universe", coins = 34999 }, 1, false)
-check(chalk.progress.count == 50 and chalk.progress.wins == 1 and state:GetAttribute("ChalkWins") == 1, "a big gift reaches the goal and wins")
+check(chalk.progress.count == 50 and chalk.progress.wins == 0 and state:GetAttribute("ChalkHoldStart") == clock, "reaching the goal starts the hold")
+chalk.hold(streamer, true)
+advance(0.5)
+check(chalk.progress.count == 50 and state:GetAttribute("ChalkWriting") == false, "nothing more to write at the goal: the arm rests")
+chalk.hold(streamer, false)
+check(chalk.gift("Bo", { type = "gift", gift = "Perfume", coins = 100 }, -500, false) == "  -20" and chalk.progress.count == 30, "a gift down during the hold")
+check(state:GetAttribute("ChalkHoldStart") == 0, "ends the hold")
+advance(Config.HoldSeconds)
+check(chalk.progress.wins == 0, "a lost hold does not win")
+chalk.gift("Ivy", { type = "gift", gift = "Universe", coins = 34999 }, 1, false)
+check(chalk.progress.count == 50 and state:GetAttribute("ChalkHoldStart") == clock, "back at the goal, the hold starts again")
+advance(Config.HoldSeconds - 0.5)
+check(chalk.progress.wins == 0, "not won before the hold is over")
+advance(0.6)
+check(chalk.progress.count == 50 and chalk.progress.wins == 1 and state:GetAttribute("ChalkWins") == 1 and state:GetAttribute("ChalkHoldStart") == 0, "holding the goal for the whole hold wins")
 check(last("chalkWin").wins == 1 and last("chalkWin").goal == 50 and last("chalkWin").name == "Niamh", "the win is celebrated")
 check(chalk.gift("Bo", { type = "gift", gift = "Perfume", coins = 100 }, -500, false) == "" and chalk.progress.count == 50, "gifts wait during the celebration")
 chalk.hold(streamer, true)
@@ -360,6 +376,8 @@ check(chalk.setting(streamer, "setChalkStrength", 2) and chalk.progress.strength
 local before = chalk.progress.count
 chalk.gift("Ann", { type = "gift", gift = "Rose", coins = 1 }, 100, false)
 check(chalk.progress.count == before + 4, "double strength doubles the numbers")
+chalk.gift("Cy", { type = "gift", gift = "Rose", coins = 1, count = 2 }, 100, false, -3)
+check(chalk.progress.count == before - 2, "the streamer's own rule for a gift wins over its coins (and the strength), per gift")
 check(chalk.setting(streamer, "chalkTestReset", nil) and state:GetAttribute("ChalkResetEnds") > 0 and last("chalkReset").seconds == 30, "Test reset starts the countdown")
 chalk.gift("Bea", { type = "gift", gift = "Money Gun", coins = 1000 }, 1, false)
 check(state:GetAttribute("ChalkResetEnds") > 0, "1,000 coins no longer saves it at 5,000")
@@ -381,7 +399,7 @@ print(string.format("PASS: %d chalkboard game checks", passed))
 
 run("chalk-game", mock + mock_extras + game_harness + modules(
     "src/shared/GiftTier.luau", "src/shared/Format.luau", "src/shared/DiamondShape.luau",
-    "src/shared/ChalkBoard.luau", "src/server/Classroom.luau", "src/server/ChalkGame.luau") + "\n" + game_test)
+    "src/shared/ChalkBoard.luau", "src/shared/Config.luau", "src/server/Classroom.luau", "src/server/ChalkGame.luau") + "\n" + game_test)
 
 # The client view on a simulated clock: it films the board, draws the count,
 # plays every show and tidies up after leaving, without errors.
@@ -472,7 +490,9 @@ local workspace = newInstance("Workspace")
 workspace.CurrentCamera = camera
 workspace.Terrain = newInstance("Terrain")
 workspace.GetServerTimeNow = function() return clock end
+local Lighting = newInstance("Lighting")
 local game = { GetService = function(_, name)
+	if name == "Lighting" then return Lighting end
 	if name == "RunService" then return RunService end
 	if name == "TweenService" then return TweenService end
 	if name == "Debris" then return Debris end
@@ -613,6 +633,74 @@ end
 for _, s in sent do if s.action == "setChalkTheme" and s.value == "royal" then themeSent = true end end
 check(themeSent, "the theme buttons choose a theme")
 
+-- No camera look: no REC light or viewfinder corners.
+for _, object in instances do
+	if object.ClassName == "TextLabel" and type(object.Text) == "string" then
+		check(not string.find(object.Text, "REC"), "no REC label: " .. object.Text)
+	end
+end
+
+-- The hold at the goal counts down from 10 over 15 seconds, slower at the end.
+local countdown
+for _, object in instances do
+	if object.Name == "HoldCountdown" and not object.destroyed then countdown = object end
+end
+check(countdown ~= nil and countdown.Visible == false, "the hold countdown waits for the goal")
+state:SetAttribute("ChalkHoldStart", clock)
+step(0.1)
+local number
+for _, child in countdown:GetChildren() do
+	if child.ClassName == "TextLabel" and child.TextSize == 88 then number = child end
+end
+check(countdown.Visible and number.Text == "10", "the countdown starts at 10: " .. tostring(number and number.Text))
+local seen, firstHalf = {}, 0
+for t = 1, 149 do
+	step(0.1)
+	local n = tonumber(number.Text)
+	if not seen[n] then seen[n] = clock end
+	if t == 75 then firstHalf = n end
+end
+check(seen[1] ~= nil and 10 - firstHalf > 5, "past halfway in time the count is past halfway: " .. firstHalf)
+state:SetAttribute("ChalkHoldStart", 0)
+step(0.1)
+check(countdown.Visible == false, "losing the hold hides the countdown")
+
+-- Every gift show plays, keeps to its part limit and tidies up.
+local function digits(): { BasePart }
+	local list = {}
+	for _, object in instances do
+		if object.Name == "Chalk" and not object.destroyed and object.Parent ~= nil then table.insert(list, object) end
+	end
+	return list
+end
+for _, up in { true, false } do
+	for tier = 1, 6 do
+		local most = 0
+		local impact = ChalkEffects.play(tier, up, {
+			chalk = Color3.new(1, 1, 1), glow = false, digits = digits,
+			drawStroke = function(a, b, width)
+				local stroke = newInstance("Part")
+				stroke.Name, stroke.Size, stroke.Parent = "TestStroke", Vector3.new(width, width, 1), workspace
+				return stroke
+			end,
+			shake = function() end,
+		})
+		check(impact == (if up then ChalkEffects.UP_IMPACT else ChalkEffects.DOWN_IMPACT)[tier], "the show says when the number changes")
+		for _ = 1, ChalkEffects.LIFETIMES[tier] * 10 + 10 do
+			step(0.1)
+			local parts = 0
+			for _, object in instances do
+				if object.ClassName == "Part" and not object.destroyed and object.Parent ~= nil and object.Parent.Name == "ChalkGiftShow" then parts += 1 end
+			end
+			most = math.max(most, parts)
+		end
+		local title = (if up then ChalkEffects.UP_TITLES else ChalkEffects.DOWN_TITLES)[tier]
+		check(most > 0 and most <= ChalkEffects.PART_LIMITS[tier], title .. " keeps to its part limit: " .. most)
+		check(live("ChalkGiftShow") == 0, title .. " tidies up")
+		check(Lighting:FindFirstChild("ChalkGrade") == nil, title .. " puts the colour back")
+	end
+end
+
 -- Leaving: the camera is handed back and the board's chalk is cleared.
 view.setActive(false)
 step(0.5)
@@ -623,5 +711,6 @@ print(string.format("PASS: %d chalkboard view checks", passed))
 '''
 
 run("chalk-view", mock + client_harness + mock_extras + modules(
-    "src/shared/GiftTier.luau", "src/shared/Format.luau", "src/shared/ChalkBoard.luau",
+    "src/shared/GiftTier.luau", "src/shared/Format.luau", "src/shared/ChalkBoard.luau", "src/shared/Config.luau",
+    "src/shared/HoldTimer.luau", "src/client/Sounds.luau", "src/client/HoldCountdown.luau", "src/client/ChalkEffects.luau",
     "src/client/ChalkView.luau") + "\n" + client_test)
