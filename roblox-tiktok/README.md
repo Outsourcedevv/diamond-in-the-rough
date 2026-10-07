@@ -284,6 +284,12 @@ One relay serves any number of streamers: it keeps only a few hundred recent eve
 - **No Blender mountains or trees in the published game**: Roblox only lets a published game build meshes once Mesh / Image APIs are turned on. See [Blender scenery](#blender-scenery) for that, or for importing the pack instead.
 - **The world looks flat or old-fashioned**: open the place file from this folder. It sets Future lighting and the 2022 material pack, which scripts cannot change. In an older copy, set **Lighting → LightingStyle** to Realistic and **MaterialService → Use2022Materials** on.
 
+## The connector as one .exe
+
+Streamers don't need Node.js if you give them `DiamondRushBridge.exe`. It holds the bridge, its packages, the control page and Node.js itself, and opens the control page when started. Settings (`config.json`, the gift list) are saved next to the .exe.
+
+To build it (from `bridge/`, with Node 22): download the matching Windows Node.js ZIP from nodejs.org (the same version as `node -v`), extract it, then run `node tools/build-exe.mjs path\to\node-v22.x.x-win-x64\node.exe`. The .exe lands in `bridge/build/` (about 86 MB, about 33 MB zipped). It is not code-signed, so Windows shows "Windows protected your PC" the first time: **More info → Run anyway**. Share it as a link (Discord's free upload limit is 10 MB).
+
 ## For developers
 
 The source is a [Rojo](https://rojo.space) project:

@@ -12,7 +12,13 @@ import { createEventQueue, createGiftTracker, likeEvent, socialEvent, packMessag
 import { codeFor } from '../relay/relay.mjs';
 import { randomBytes } from 'node:crypto';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
+// Packaged as DiamondRushBridge.exe (see tools/build-exe.mjs): settings sit next
+// to the .exe and the control page comes from inside it.
+const packaged = typeof globalThis.__DIAMOND_RUSH_SEA__ === 'object';
+const here = packaged ? path.dirname(process.execPath) : path.dirname(fileURLToPath(import.meta.url));
+function asset(name) {
+  return packaged ? globalThis.__DIAMOND_RUSH_SEA__.asset(name) : fs.readFileSync(path.join(here, name));
+}
 const configPath = path.join(here, 'config.json');
 const defaults = {
   tiktokUsername: '',
@@ -430,11 +436,11 @@ const server = http.createServer(async (request, response) => {
   // three.js (MIT, vendor/three.LICENSE) for the control page's 3D shrine.
   if (request.method === 'GET' && url.pathname === '/vendor/three.module.min.js') {
     response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'max-age=86400' });
-    return response.end(fs.readFileSync(path.join(here, 'vendor', 'three.module.min.js')));
+    return response.end(asset('vendor/three.module.min.js'));
   }
   if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    return response.end(fs.readFileSync(path.join(here, 'control.html')));
+    return response.end(asset('control.html'));
   }
   sendJson(response, 404, { error: 'not found' });
 });
@@ -455,6 +461,10 @@ ipv6.on('error', () => {});
 ipv6.listen(config.port, '::1');
 server.listen(config.port, '127.0.0.1', () => {
   log(`DIAMOND RUSH bridge running · control page: http://localhost:${config.port}`);
+  // The .exe has no Start Bridge.bat to open the page, so it opens it itself.
+  if (packaged && process.platform === 'win32') {
+    import('node:child_process').then(({ spawn }) => spawn('cmd', ['/c', 'start', '""', `http://localhost:${config.port}`], { stdio: 'ignore', detached: true }).unref()).catch(() => {});
+  }
   if (config.tiktokUsername) connectTikTok(config.tiktokUsername);
   else log('Open the control page and enter your TikTok username to connect.');
 });
