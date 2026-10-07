@@ -455,7 +455,7 @@ document.getElementById('refreshCatalogue').onclick=async event=>{
  finally {event.target.disabled=false;}
 };
 document.addEventListener('keydown',event=>{
- if(event.repeat||event.ctrlKey||event.altKey||event.metaKey||['INPUT','TEXTAREA','SELECT','BUTTON'].includes(document.activeElement?.tagName))return;
+ if(event.repeat||event.ctrlKey||event.altKey||event.metaKey||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;
  const key=event.code.startsWith('Key')?event.code.slice(3):event.code;
  const rule=Object.values(giftRules).find(rule=>rule.keybind && rule.keybind===key);
  if(rule){event.preventDefault();post('/test',{gift:rule.gift,coins:rule.coins});}

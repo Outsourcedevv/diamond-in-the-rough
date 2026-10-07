@@ -432,6 +432,11 @@ local UserInputService = {
 	InputBegan = signal(), InputEnded = signal(), InputChanged = signal(), WindowFocusReleased = signal(),
 	GetFocusedTextBox = function() return nil end,
 }
+local actions = {}
+local ContextActionService = {
+	BindActionAtPriority = function(_, name, callback) actions[name] = callback end,
+	UnbindAction = function(_, name) actions[name] = nil end,
+}
 local makeInstance = newInstance
 local attributeSignals = {}
 newInstance = function(className: string): any
@@ -472,6 +477,7 @@ local game = { GetService = function(_, name)
 	if name == "TweenService" then return TweenService end
 	if name == "Debris" then return Debris end
 	if name == "UserInputService" then return UserInputService end
+	if name == "ContextActionService" then return ContextActionService end
 	if name == "Players" then return Players end
 	return { WaitForChild = function() return Shared end }
 end }
@@ -553,10 +559,11 @@ state:SetAttribute("ChalkWriting", false)
 step(0.2)
 check(live("HeldChalk") == 0, "the chalk is put down")
 local twelve = live("Chalk")
--- Space is the jump key, so it arrives already used by the controls: it still writes.
-UserInputService.InputBegan:Fire({ UserInputType = "UserInputType.Keyboard", KeyCode = "KeyCode.Space" }, true)
-check(sent[#sent].action == "chalkHold" and sent[#sent].value == true, "Space writes even though the controls saw it")
-UserInputService.InputEnded:Fire({ UserInputType = "UserInputType.Keyboard", KeyCode = "KeyCode.Space" })
+-- Space is the jump key: the classroom takes it first while writing.
+check(actions.ChalkboardWrite ~= nil, "Space is bound at the board")
+check(actions.ChalkboardWrite("ChalkboardWrite", "UserInputState.Begin", {}) == "ContextActionResult.Sink", "Space is kept from the jump")
+check(sent[#sent].action == "chalkHold" and sent[#sent].value == true, "Space writes")
+actions.ChalkboardWrite("ChalkboardWrite", "UserInputState.End", {})
 check(sent[#sent].value == false, "letting go of Space stops")
 local clicks = #sent
 UserInputService.InputBegan:Fire({ UserInputType = "UserInputType.MouseButton1", KeyCode = "KeyCode.Unknown" }, true)
@@ -610,6 +617,7 @@ check(themeSent, "the theme buttons choose a theme")
 view.setActive(false)
 step(0.5)
 check(hud.Enabled == false and camera.CameraType == "CameraType.Custom", "the camera is handed back")
+check(actions.ChalkboardWrite == nil, "Space is the jump key again")
 check(live("Chalk") == 0, "no chalk is left behind")
 print(string.format("PASS: %d chalkboard view checks", passed))
 '''

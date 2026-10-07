@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local Debris = game:GetService("Debris")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
@@ -171,7 +172,9 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		Font = FONT, TextSize = 16, TextColor3 = WHITE, TextStrokeTransparency = 0.4, Text = "Hold the left mouse button, Space or the screen to write" }, gui)
 
 	-- The writing card: speed and theme.
-	local settingsCard = make("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -14, 1, -36), Size = UDim2.fromOffset(290, 178) }, gui)
+	-- Higher on touch screens, clear of Roblox's jump button.
+	local settingsCard = make("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -14, 1, if UserInputService.TouchEnabled then -190 else -36),
+		Size = UDim2.fromOffset(290, 178) }, gui)
 	glass(settingsCard, 14)
 	make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), PaddingTop = UDim.new(0, 10) }, settingsCard)
 	make("TextLabel", { Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = FONT, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
@@ -510,12 +513,22 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	local function isWriteInput(input: InputObject): boolean
 		return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch or input.KeyCode == Enum.KeyCode.Space
 	end
+	-- The mouse and the screen (clicks on buttons don't write).
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-		-- Space is the jump key, so Roblox's controls mark it as used: it still writes
-		-- (the writer can't jump), but never while typing. Clicks on buttons don't write.
-		local space = input.KeyCode == Enum.KeyCode.Space
-		if active and (space or not processed) and isWriteInput(input) and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
+		if active and not processed and isWriteInput(input) and input.KeyCode ~= Enum.KeyCode.Space and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
 	end)
+	-- Space is the jump key, which Roblox's controls take, so in the classroom
+	-- it is taken first (bound while writing); bound keys never fire while
+	-- typing in chat.
+	local WRITE_ACTION = "ChalkboardWrite"
+	local function onWriteKey(_name: string, inputState: Enum.UserInputState, _input: InputObject): Enum.ContextActionResult
+		if inputState == Enum.UserInputState.Begin then
+			setHeld(true)
+		elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
+			setHeld(false)
+		end
+		return Enum.ContextActionResult.Sink
+	end
 	UserInputService.InputEnded:Connect(function(input: InputObject)
 		if isWriteInput(input) then setHeld(false) end
 	end)
@@ -630,8 +643,10 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		active = on
 		gui.Enabled = on
 		if on then
+			ContextActionService:BindActionAtPriority(WRITE_ACTION, onWriteKey, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Space)
 			redrawAll()
 		else
+			ContextActionService:UnbindAction(WRITE_ACTION)
 			setHeld(false)
 			releaseArm()
 			clearSlots()

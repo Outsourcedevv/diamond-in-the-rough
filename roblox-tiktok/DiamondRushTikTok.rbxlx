@@ -6240,6 +6240,18 @@ local function setPlace(player: Player, place: string)
 	local now = os.clock()
 	if now - (lastMove[player] or -math.huge) < 1 then return end
 	lastMove[player] = now
+	if from == "rough" and holder == player then
+		-- The winner leaves during the win screen: the diamond stays behind
+		-- (anchored and hidden until the next round) and their arm comes down.
+		diamond.Anchored = true
+		if holdWeld ~= nil then
+			holdWeld:Destroy()
+			holdWeld = nil
+		end
+		showDiamond(false)
+		lowerArms()
+		holder = nil
+	end
 	-- The attribute turning on goes first, so the player is never seen in neither game on the way.
 	if place == "chalk" then player:SetAttribute("InChalk", true) end
 	if place == "climb" then player:SetAttribute("InClimb", true) end
@@ -6575,9 +6587,14 @@ local function onPlayer(player: Player)
 	player.CharacterAdded:Connect(function(character)
 		placeCharacter(player, character)
 	end)
-	if player.Character then
-		task.spawn(placeCharacter, player, player.Character)
-	else
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if character and not (humanoid and humanoid.Health <= 0) then
+		task.spawn(placeCharacter, player, character)
+	elseif not Players.CharacterAutoLoads then
+		-- Joined while the world was being built (or died in the empty sky
+		-- then): Roblox won't spawn them, so they spawn now, in the lobby.
+		-- Later joiners are spawned by Roblox itself.
 		task.spawn(function() if player.Parent then player:LoadCharacter() end end)
 	end
 	admins[player] = isAdmin(player)
@@ -6791,8 +6808,10 @@ function ChalkGame.start(options: Options): Game
 		notify:FireAllClients("chalkWin", { wins = progress.wins, goal = progress.goal, name = if who then who.DisplayName else "" })
 		task.delay(ChalkGame.WIN_SECONDS, function()
 			winning = false
-			setCount(0)
+			-- The show first, then the count: the board keeps the old number
+			-- until the eraser passes over it.
 			notify:FireAllClients("chalkWipe", { reason = "win" })
+			setCount(0)
 		end)
 	end
 
@@ -6886,8 +6905,8 @@ function ChalkGame.start(options: Options): Game
 		elseif action == "chalkRestart" then
 			if winning then return true end
 			cancelReset()
-			setCount(0)
 			notify:FireAllClients("chalkWipe", { reason = "restart" })
+			setCount(0)
 		elseif action == "chalkTestReset" then
 			self.gift("Test", { type = "gift", gift = progress.resetGift ~= "" and progress.resetGift or ChalkBoard.RESET_GIFT, coins = 1000, id = "test-reset" }, 1, false)
 			return true
@@ -6921,9 +6940,9 @@ function ChalkGame.start(options: Options): Game
 					resetEnds = 0
 					state:SetAttribute("ChalkResetEnds", 0)
 					local lost = progress.count
-					setCount(0)
 					notify:FireAllClients("chalkReset", { state = "wiped", lost = lost })
 					notify:FireAllClients("chalkWipe", { reason = "reset" })
+					setCount(0)
 				end)
 				return string.format("  RESET IN %d", progress.resetSeconds)
 			end
@@ -6938,11 +6957,13 @@ function ChalkGame.start(options: Options): Game
 		local amount = if event.type == "gift" then ChalkBoard.giftAmount(rocks, coins, count, progress.strength)
 			elseif rocks > 0 then 1 else 0
 		if amount ~= 0 then
+			-- The show goes out before the count changes (the eraser rubs out the old number).
 			local from = progress.count
-			add(amount)
-			local moved = progress.count - from
-			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = progress.count, amount = moved, coins = coins, name = who,
+			local to = math.clamp(from + amount, 0, progress.goal)
+			local moved = to - from
+			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = to, amount = moved, coins = coins, name = who,
 				gift = event.gift or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"), doubled = doubled })
+			add(amount)
 			if moved ~= 0 then
 				ending = (if moved > 0 then string.format("  +%d", moved) else string.format("  %d", moved)) .. ending
 			end
@@ -11904,6 +11925,7 @@ return Statue
 -- Access to API Services"). Without them everything still works; it just is
 -- not remembered between sessions.
 local DataStoreService = game:GetService("DataStoreService")
+local RunService = game:GetService("RunService")
 
 local Store = {}
 
@@ -11939,7 +11961,9 @@ function Store.load(key: string?): ({ [string]: any }?, boolean)
 		return nil, false
 	end
 	local ok, data = pcall(target.GetAsync, target, key or KEY)
-	for _ = 1, 2 do
+	-- A passing DataStore hiccup gets two more tries; Studio without API
+	-- access fails the same way every time, so it doesn't wait for nothing.
+	for _ = 1, if RunService:IsStudio() then 0 else 2 do
 		if ok then break end
 		task.wait(2)
 		ok, data = pcall(target.GetAsync, target, key or KEY)
@@ -12101,6 +12125,9 @@ function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (
 			end
 			if decoded and type(data) == "table" then
 				failures = 0
+				-- The game just started: the bridge's older events were already
+				-- played (or sent before Play), so only its gift rules apply.
+				local fresh = session == ""
 				if data.session ~= session then
 					-- The bridge restarted: start again from its first event.
 					session = tostring(data.session)
@@ -12108,7 +12135,9 @@ function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (
 				end
 				if type(data.events) == "table" then
 					for _, raw in data.events do
-						deliver(raw, onEvent)
+						if not fresh or (type(raw) == "table" and raw.type == "giftRule") then
+							deliver(raw, onEvent)
+						end
 					end
 				end
 				if type(data.last) == "number" then
@@ -12468,6 +12497,9 @@ end
 local gui = make("ScreenGui", {
 	Name = "DiamondRushHud",
 	ResetOnSpawn = false,
+	-- Above the climb's and chalkboard's own cards, so the Y panel and the
+	-- settings are never covered (the games menu, 5, stays above).
+	DisplayOrder = 2,
 	IgnoreGuiInset = false,
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, player:WaitForChild("PlayerGui"))
@@ -12789,7 +12821,8 @@ end
 local panel = make("ScrollingFrame", {
 	AnchorPoint = Vector2.new(1, 0),
 	Position = UDim2.new(1, -12, 0, 92),
-	Size = UDim2.fromOffset(340, 520),
+	-- As tall as the screen allows (Studio's play area can be short), up to 520.
+	Size = UDim2.new(0, 340, 1, -104),
 	CanvasSize = UDim2.fromOffset(0, 0),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ScrollBarThickness = 4,
@@ -12798,6 +12831,7 @@ local panel = make("ScrollingFrame", {
 	ZIndex = 10,
 }, gui)
 glass(panel, 14, 0.06)
+make("UISizeConstraint", { MaxSize = Vector2.new(340, 520) }, panel)
 make("UIPadding", {
 	PaddingLeft = UDim.new(0, 12),
 	PaddingRight = UDim.new(0, 14),
@@ -12989,6 +13023,7 @@ local function refreshRules()
 			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = WHITE,
+			TextTruncate = Enum.TextTruncate.AtEnd,
 			Text = string.format("%s: %s %s rocks", tostring(name), if (tonumber(rocks) or 0) < 0 then "adds" else "removes", Format.commas(math.abs(tonumber(rocks) or 0))),
 			ZIndex = 12,
 		}, row)
@@ -13530,7 +13565,9 @@ local hideKnob = make("Frame", {
 }, hideSwitch)
 rounded(hideKnob, 10)
 local function refreshHidden()
-	local hidden = player:GetAttribute("HideButtons") == true
+	-- Phones and tablets have no G or P key to bring the buttons back, so
+	-- they always show there.
+	local hidden = player:GetAttribute("HideButtons") == true and UserInputService.KeyboardEnabled
 	hideSwitch.BackgroundColor3 = if hidden then SELECTED else BUTTON
 	hideKnob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
 	settingsButton.Visible = not hidden
@@ -13588,6 +13625,8 @@ local function settingsOpen(): boolean
 end
 local function setSettingsOpen(show: boolean)
 	settingsCard.Visible = show
+	-- The games menu would cover the card.
+	if show then LobbyView.close() end
 	draggingFov = false
 	if show then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
 end
@@ -13615,6 +13654,13 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	end
 end)
 RunService.RenderStepped:Connect(function()
+	-- Back in the lobby the game's display is off: its panel and settings close
+	-- (Y and P can't reach them there) and the lobby's camera keeps the mouse.
+	if not gui.Enabled then
+		panel.Visible = false
+		settingsCard.Visible = false
+		return
+	end
 	-- First person locks the mouse; free it while the panel or settings are open.
 	if panel.Visible or settingsOpen() then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
@@ -14101,6 +14147,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local Debris = game:GetService("Debris")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
@@ -14262,7 +14309,9 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		Font = FONT, TextSize = 16, TextColor3 = WHITE, TextStrokeTransparency = 0.4, Text = "Hold the left mouse button, Space or the screen to write" }, gui)
 
 	-- The writing card: speed and theme.
-	local settingsCard = make("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -14, 1, -36), Size = UDim2.fromOffset(290, 178) }, gui)
+	-- Higher on touch screens, clear of Roblox's jump button.
+	local settingsCard = make("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -14, 1, if UserInputService.TouchEnabled then -190 else -36),
+		Size = UDim2.fromOffset(290, 178) }, gui)
 	glass(settingsCard, 14)
 	make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), PaddingTop = UDim.new(0, 10) }, settingsCard)
 	make("TextLabel", { Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = FONT, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
@@ -14601,12 +14650,22 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	local function isWriteInput(input: InputObject): boolean
 		return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch or input.KeyCode == Enum.KeyCode.Space
 	end
+	-- The mouse and the screen (clicks on buttons don't write).
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-		-- Space is the jump key, so Roblox's controls mark it as used: it still writes
-		-- (the writer can't jump), but never while typing. Clicks on buttons don't write.
-		local space = input.KeyCode == Enum.KeyCode.Space
-		if active and (space or not processed) and isWriteInput(input) and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
+		if active and not processed and isWriteInput(input) and input.KeyCode ~= Enum.KeyCode.Space and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
 	end)
+	-- Space is the jump key, which Roblox's controls take, so in the classroom
+	-- it is taken first (bound while writing); bound keys never fire while
+	-- typing in chat.
+	local WRITE_ACTION = "ChalkboardWrite"
+	local function onWriteKey(_name: string, inputState: Enum.UserInputState, _input: InputObject): Enum.ContextActionResult
+		if inputState == Enum.UserInputState.Begin then
+			setHeld(true)
+		elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
+			setHeld(false)
+		end
+		return Enum.ContextActionResult.Sink
+	end
 	UserInputService.InputEnded:Connect(function(input: InputObject)
 		if isWriteInput(input) then setHeld(false) end
 	end)
@@ -14721,8 +14780,10 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		active = on
 		gui.Enabled = on
 		if on then
+			ContextActionService:BindActionAtPriority(WRITE_ACTION, onWriteKey, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Space)
 			redrawAll()
 		else
+			ContextActionService:UnbindAction(WRITE_ACTION)
 			setHeld(false)
 			releaseArm()
 			clearSlots()
@@ -16297,7 +16358,8 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	-- The speed and jump sliders, bottom right.
 	local moveCard = make("Frame", {
 		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -14, 1, -36),
+		-- Higher on touch screens, clear of Roblox's jump button.
+		Position = UDim2.new(1, -14, 1, if UserInputService.TouchEnabled then -190 else -36),
 		Size = UDim2.fromOffset(280, 136),
 	}, gui)
 	glass(moveCard, 14)
@@ -18876,6 +18938,12 @@ function LobbyView.isOpen(): boolean
 	return open
 end
 
+-- Closes the menu (the settings card opens where it would cover it).
+local closeHandler: () -> () = function() end
+function LobbyView.close()
+	closeHandler()
+end
+
 -- Hides the GAMES tab (the settings' "Hide buttons"); G still opens the menu.
 function LobbyView.setTabHidden(hidden: boolean)
 	tabHidden = hidden
@@ -19004,6 +19072,15 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	}, gui)
 	rounded(panel, 18)
 	stroke(panel, GOLD, 3)
+	-- Shrinks to fit short screens (Studio's play area, phones).
+	local fit = make("UIScale", { Scale = 1 }, panel)
+	local function refit()
+		local camera = workspace.CurrentCamera
+		local height = if camera then camera.ViewportSize.Y else 768
+		fit.Scale = math.clamp((height - 60) / 620, 0.5, 1)
+	end
+	refit()
+	if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit) end
 	make("UIGradient", {
 		Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(240, 235, 222)),
 		Rotation = 90,
@@ -19265,6 +19342,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 		end)
 		tween:Play()
 	end
+	closeHandler = function() setOpen(false) end
 	refreshTab = function()
 		tab.Visible = not open and not tabHidden
 	end

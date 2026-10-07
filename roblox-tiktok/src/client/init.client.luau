@@ -119,6 +119,9 @@ end
 local gui = make("ScreenGui", {
 	Name = "DiamondRushHud",
 	ResetOnSpawn = false,
+	-- Above the climb's and chalkboard's own cards, so the Y panel and the
+	-- settings are never covered (the games menu, 5, stays above).
+	DisplayOrder = 2,
 	IgnoreGuiInset = false,
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, player:WaitForChild("PlayerGui"))
@@ -440,7 +443,8 @@ end
 local panel = make("ScrollingFrame", {
 	AnchorPoint = Vector2.new(1, 0),
 	Position = UDim2.new(1, -12, 0, 92),
-	Size = UDim2.fromOffset(340, 520),
+	-- As tall as the screen allows (Studio's play area can be short), up to 520.
+	Size = UDim2.new(0, 340, 1, -104),
 	CanvasSize = UDim2.fromOffset(0, 0),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ScrollBarThickness = 4,
@@ -449,6 +453,7 @@ local panel = make("ScrollingFrame", {
 	ZIndex = 10,
 }, gui)
 glass(panel, 14, 0.06)
+make("UISizeConstraint", { MaxSize = Vector2.new(340, 520) }, panel)
 make("UIPadding", {
 	PaddingLeft = UDim.new(0, 12),
 	PaddingRight = UDim.new(0, 14),
@@ -640,6 +645,7 @@ local function refreshRules()
 			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = WHITE,
+			TextTruncate = Enum.TextTruncate.AtEnd,
 			Text = string.format("%s: %s %s rocks", tostring(name), if (tonumber(rocks) or 0) < 0 then "adds" else "removes", Format.commas(math.abs(tonumber(rocks) or 0))),
 			ZIndex = 12,
 		}, row)
@@ -1181,7 +1187,9 @@ local hideKnob = make("Frame", {
 }, hideSwitch)
 rounded(hideKnob, 10)
 local function refreshHidden()
-	local hidden = player:GetAttribute("HideButtons") == true
+	-- Phones and tablets have no G or P key to bring the buttons back, so
+	-- they always show there.
+	local hidden = player:GetAttribute("HideButtons") == true and UserInputService.KeyboardEnabled
 	hideSwitch.BackgroundColor3 = if hidden then SELECTED else BUTTON
 	hideKnob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
 	settingsButton.Visible = not hidden
@@ -1239,6 +1247,8 @@ local function settingsOpen(): boolean
 end
 local function setSettingsOpen(show: boolean)
 	settingsCard.Visible = show
+	-- The games menu would cover the card.
+	if show then LobbyView.close() end
 	draggingFov = false
 	if show then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
 end
@@ -1266,6 +1276,13 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	end
 end)
 RunService.RenderStepped:Connect(function()
+	-- Back in the lobby the game's display is off: its panel and settings close
+	-- (Y and P can't reach them there) and the lobby's camera keeps the mouse.
+	if not gui.Enabled then
+		panel.Visible = false
+		settingsCard.Visible = false
+		return
+	end
 	-- First person locks the mouse; free it while the panel or settings are open.
 	if panel.Visible or settingsOpen() then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default

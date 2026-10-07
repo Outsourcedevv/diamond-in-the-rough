@@ -132,24 +132,49 @@ async function connectTikTok(username) {
 }
 
 // Roblox Open Cloud (published games) --------------------------------------------
+let flushing = false;
+let retryAt = 0;
 async function flushOpenCloud() {
   const { apiKey, universeId, topic } = config.openCloud;
   if (!apiKey || !universeId || outbox.length === 0) {
     outbox.length = 0;
     return;
   }
+  if (flushing || Date.now() < retryAt) return;
+  flushing = true;
   const batch = outbox.splice(0, outbox.length);
-  for (const message of packMessages(batch)) {
-    try {
-      const response = await fetch(`https://apis.roblox.com/messaging-service/v1/universes/${encodeURIComponent(universeId)}/topics/${encodeURIComponent(topic)}`, {
-        method: 'POST',
-        headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
-        body: JSON.stringify({ message }),
-      });
-      if (!response.ok) log(`Open Cloud refused a message: ${response.status} ${await response.text()}`);
-    } catch (error) {
-      log(`Open Cloud unreachable: ${error.message}`);
+  const messages = packMessages(batch);
+  try {
+    for (let i = 0; i < messages.length; i += 1) {
+      let retry = false;
+      try {
+        const response = await fetch(`https://apis.roblox.com/messaging-service/v1/universes/${encodeURIComponent(universeId)}/topics/${encodeURIComponent(topic)}`, {
+          method: 'POST',
+          headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
+          body: JSON.stringify({ message: messages[i] }),
+        });
+        if (!response.ok) {
+          log(`Open Cloud refused a message: ${response.status} ${await response.text()}`);
+          // Too many messages or Roblox busy: try again shortly. Anything else
+          // (a wrong key or universe) would fail every time, so it is dropped.
+          retry = response.status === 429 || response.status >= 500;
+        }
+      } catch (error) {
+        log(`Open Cloud unreachable: ${error.message}`);
+        retry = true;
+      }
+      if (retry) {
+        // Put this message and the rest back, in order, ahead of newer events.
+        const unsent = messages.slice(i).flatMap((message) => JSON.parse(message));
+        outbox.unshift(...unsent);
+        // A long Roblox outage keeps only the newest events.
+        if (outbox.length > 2000) outbox.splice(0, outbox.length - 2000);
+        retryAt = Date.now() + 3000;
+        return;
+      }
     }
+  } finally {
+    flushing = false;
   }
 }
 setInterval(flushOpenCloud, 1000);
@@ -182,8 +207,24 @@ function readBody(request) {
   });
 }
 
+// Only the control page (on this PC) may change things: another website open
+// in the browser could otherwise send fake gifts or change the settings.
+function fromOtherSite(request) {
+  const origin = request.headers.origin;
+  if (!origin) return false;
+  try {
+    const { hostname } = new URL(origin);
+    return !['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname);
+  } catch {
+    return true;
+  }
+}
+
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
+  if (request.method !== 'GET' && fromOtherSite(request)) {
+    return sendJson(response, 403, { error: 'Only the control page on this PC can do that.' });
+  }
   if (request.method === 'GET' && url.pathname === '/catalogue') {
     return sendJson(response,200,{gifts:catalogue,status:catalogueStatus,rules:config.giftRules ?? {},keys:KEYS});
   }

@@ -173,8 +173,10 @@ function ChalkGame.start(options: Options): Game
 		notify:FireAllClients("chalkWin", { wins = progress.wins, goal = progress.goal, name = if who then who.DisplayName else "" })
 		task.delay(ChalkGame.WIN_SECONDS, function()
 			winning = false
-			setCount(0)
+			-- The show first, then the count: the board keeps the old number
+			-- until the eraser passes over it.
 			notify:FireAllClients("chalkWipe", { reason = "win" })
+			setCount(0)
 		end)
 	end
 
@@ -268,8 +270,8 @@ function ChalkGame.start(options: Options): Game
 		elseif action == "chalkRestart" then
 			if winning then return true end
 			cancelReset()
-			setCount(0)
 			notify:FireAllClients("chalkWipe", { reason = "restart" })
+			setCount(0)
 		elseif action == "chalkTestReset" then
 			self.gift("Test", { type = "gift", gift = progress.resetGift ~= "" and progress.resetGift or ChalkBoard.RESET_GIFT, coins = 1000, id = "test-reset" }, 1, false)
 			return true
@@ -303,9 +305,9 @@ function ChalkGame.start(options: Options): Game
 					resetEnds = 0
 					state:SetAttribute("ChalkResetEnds", 0)
 					local lost = progress.count
-					setCount(0)
 					notify:FireAllClients("chalkReset", { state = "wiped", lost = lost })
 					notify:FireAllClients("chalkWipe", { reason = "reset" })
+					setCount(0)
 				end)
 				return string.format("  RESET IN %d", progress.resetSeconds)
 			end
@@ -320,11 +322,13 @@ function ChalkGame.start(options: Options): Game
 		local amount = if event.type == "gift" then ChalkBoard.giftAmount(rocks, coins, count, progress.strength)
 			elseif rocks > 0 then 1 else 0
 		if amount ~= 0 then
+			-- The show goes out before the count changes (the eraser rubs out the old number).
 			local from = progress.count
-			add(amount)
-			local moved = progress.count - from
-			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = progress.count, amount = moved, coins = coins, name = who,
+			local to = math.clamp(from + amount, 0, progress.goal)
+			local moved = to - from
+			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = to, amount = moved, coins = coins, name = who,
 				gift = event.gift or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"), doubled = doubled })
+			add(amount)
 			if moved ~= 0 then
 				ending = (if moved > 0 then string.format("  +%d", moved) else string.format("  %d", moved)) .. ending
 			end

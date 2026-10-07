@@ -106,6 +106,9 @@ function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (
 			end
 			if decoded and type(data) == "table" then
 				failures = 0
+				-- The game just started: the bridge's older events were already
+				-- played (or sent before Play), so only its gift rules apply.
+				local fresh = session == ""
 				if data.session ~= session then
 					-- The bridge restarted: start again from its first event.
 					session = tostring(data.session)
@@ -113,7 +116,9 @@ function TikTokFeed.start(urls: { string }, topic: string, onEvent: (Event) -> (
 				end
 				if type(data.events) == "table" then
 					for _, raw in data.events do
-						deliver(raw, onEvent)
+						if not fresh or (type(raw) == "table" and raw.type == "giftRule") then
+							deliver(raw, onEvent)
+						end
 					end
 				end
 				if type(data.last) == "number" then

@@ -1280,6 +1280,18 @@ local function setPlace(player: Player, place: string)
 	local now = os.clock()
 	if now - (lastMove[player] or -math.huge) < 1 then return end
 	lastMove[player] = now
+	if from == "rough" and holder == player then
+		-- The winner leaves during the win screen: the diamond stays behind
+		-- (anchored and hidden until the next round) and their arm comes down.
+		diamond.Anchored = true
+		if holdWeld ~= nil then
+			holdWeld:Destroy()
+			holdWeld = nil
+		end
+		showDiamond(false)
+		lowerArms()
+		holder = nil
+	end
 	-- The attribute turning on goes first, so the player is never seen in neither game on the way.
 	if place == "chalk" then player:SetAttribute("InChalk", true) end
 	if place == "climb" then player:SetAttribute("InClimb", true) end
@@ -1615,9 +1627,14 @@ local function onPlayer(player: Player)
 	player.CharacterAdded:Connect(function(character)
 		placeCharacter(player, character)
 	end)
-	if player.Character then
-		task.spawn(placeCharacter, player, player.Character)
-	else
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if character and not (humanoid and humanoid.Health <= 0) then
+		task.spawn(placeCharacter, player, character)
+	elseif not Players.CharacterAutoLoads then
+		-- Joined while the world was being built (or died in the empty sky
+		-- then): Roblox won't spawn them, so they spawn now, in the lobby.
+		-- Later joiners are spawned by Roblox itself.
 		task.spawn(function() if player.Parent then player:LoadCharacter() end end)
 	end
 	admins[player] = isAdmin(player)

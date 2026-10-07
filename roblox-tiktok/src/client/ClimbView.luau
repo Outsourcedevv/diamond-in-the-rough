@@ -171,7 +171,8 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	-- The speed and jump sliders, bottom right.
 	local moveCard = make("Frame", {
 		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -14, 1, -36),
+		-- Higher on touch screens, clear of Roblox's jump button.
+		Position = UDim2.new(1, -14, 1, if UserInputService.TouchEnabled then -190 else -36),
 		Size = UDim2.fromOffset(280, 136),
 	}, gui)
 	glass(moveCard, 14)
