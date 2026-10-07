@@ -19933,7 +19933,7 @@ HowToPlay.PAGES = {
 			"",
 			"<b>GIFT KEYBINDS</b>: type a gift name and its coins, press <b>Key</b>, then press the key you want, and press <b>Save keybind</b>. Pressing that key in the game now sends that gift, with or without the bridge.",
 			"",
-			"The control page at localhost:8787 has the same test buttons.",
+			"The control page at localhost:8787 can't send pretend gifts: only real gifts from your LIVE come through it.",
 		}, "\n"),
 	},
 	{

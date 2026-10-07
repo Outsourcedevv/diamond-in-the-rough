@@ -95,3 +95,11 @@ test('the signed route is only a fallback, and a paid-plan refusal is reported a
  }
  await assert.rejects(fetchCatalogue(Blocked,'a'), /permission/);
 });
+test('the control page and bridge cannot send pretend gifts',()=>{
+ const bridge=fs.readFileSync(new URL('./bridge.mjs',import.meta.url),'utf8');
+ const page=fs.readFileSync(new URL('./control.html',import.meta.url),'utf8');
+ assert.doesNotMatch(bridge,/pathname === '\/test/);
+ assert.doesNotMatch(page,/['"`]\/test/);
+ assert.doesNotMatch(page,/Save &amp; test|giftKey|addEventListener\('keydown'/);
+ assert.match(bridge,/keybind:''/);
+});

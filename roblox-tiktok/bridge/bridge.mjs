@@ -8,7 +8,7 @@ import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue, GAMES, def
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createEventQueue, createGiftTracker, likeEvent, socialEvent, packMessages, rebuildTestEvent, themeEvent, THEMES, skinEvent, SKINS } from './events.mjs';
+import { createEventQueue, createGiftTracker, likeEvent, socialEvent, packMessages, themeEvent, THEMES, skinEvent, SKINS } from './events.mjs';
 import { codeFor } from '../relay/relay.mjs';
 import { randomBytes } from 'node:crypto';
 
@@ -36,6 +36,9 @@ function loadConfig() {
   } catch {
     config = structuredClone(defaults);
   }
+  // Keybinds used to be set on this page; pressing them sent pretend gifts.
+  // They are gone, so older saves lose theirs (the game's own keybinds stay).
+  for (const rule of Object.values(config.giftRules ?? {})) if (rule && typeof rule === 'object') rule.keybind = '';
   // This PC's relay secret, made once. The game code is worked out from it.
   if (typeof config.relay.secret !== 'string' || config.relay.secret.length < 32) config.relay.secret = randomBytes(24).toString('hex');
   return config;
@@ -347,7 +350,7 @@ const server = http.createServer(async (request, response) => {
   }
   if (request.method === 'POST' && url.pathname === '/catalogue/rule') {
     try {
-      const rule=validateRule(await readBody(request));
+      const rule={...validateRule(await readBody(request)),keybind:''};
       const conflict=Object.values(config.giftRules ?? {}).find(other=>other.keybind && other.keybind===rule.keybind && other.gift.toLowerCase()!==rule.gift.toLowerCase());
       if(conflict) throw new Error(`${rule.keybind} is already assigned to ${conflict.gift}. Clear that binding first.`);
       config.giftRules ??= {};
@@ -410,12 +413,6 @@ const server = http.createServer(async (request, response) => {
     saveConfig();
     return sendJson(response, 200, { ok: true });
   }
-  if (request.method === 'POST' && url.pathname === '/test/rebuild') {
-    try {
-      emit(rebuildTestEvent((await readBody(request)).blocks));
-      return sendJson(response, 200, { ok: true });
-    } catch (error) { return sendJson(response, 400, { error: error.message }); }
-  }
   if (request.method === 'POST' && url.pathname === '/theme') {
     try {
       emit(themeEvent((await readBody(request)).theme));
@@ -428,14 +425,8 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { ok: true });
     } catch (error) { return sendJson(response, 400, { error: error.message }); }
   }
-  if (request.method === 'POST' && url.pathname === '/test') {
-    const body = await readBody(request);
-    const name = 'Test viewer';
-    if (body.type === 'like') emit({ type: 'like', user: 'tester', name, likes: Math.max(1, Number(body.likes) || 10) });
-    else if (body.type === 'follow' || body.type === 'share') emit({ type: body.type, user: 'tester', name });
-    else emit({ type: 'gift', user: 'tester', name, gift: String(body.gift ?? 'Rose').slice(0, 40), coins: Math.max(1, Number(body.coins) || 1), count: Math.max(1, Math.min(100, Number(body.count) || 1)) });
-    return sendJson(response, 200, { ok: true });
-  }
+  // No pretend gifts: only real gifts from the LIVE reach the game (the
+  // game's own Y panel still has test gifts for trying things out).
   // three.js (MIT, vendor/three.LICENSE) for the control page's 3D shrine.
   if (request.method === 'GET' && url.pathname === '/vendor/three.module.min.js') {
     response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'max-age=86400' });
