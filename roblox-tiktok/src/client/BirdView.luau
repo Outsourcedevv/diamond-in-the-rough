@@ -77,7 +77,7 @@ local function fly(flyer: Flyer, now: number)
 	workspace:BulkMoveTo(flyer.parts, flyer.frames, Enum.BulkMoveMode.FireCFrameChanged)
 end
 
-function BirdView.start(gui: ScreenGui, State: Instance)
+function BirdView.start(gui: Instance, State: Instance)
 	local call = Instance.new("TextLabel")
 	call.Name = "DiamondBird"
 	call.AnchorPoint = Vector2.new(0.5, 0)

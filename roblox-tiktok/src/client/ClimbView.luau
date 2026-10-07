@@ -501,7 +501,10 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		end
 		if walker.FloorMaterial == Enum.Material.Air or tower == nil then return end
 		rayParams.FilterDescendantsInstances = { tower :: Instance }
-		local hit = workspace:Raycast(root.Position, Vector3.new(0, -(walker.HipHeight + root.Size.Y / 2 + 1.5), 0), rayParams)
+		-- Down to the feet and a little more (an R6 rig's HipHeight is 0, its legs
+		-- are under the root); a sphere catches landings on a platform's edge.
+		local down = Vector3.new(0, -(walker.HipHeight + root.Size.Y / 2 + (if walker.RigType == Enum.HumanoidRigType.R6 then 2 else 0) + 1.5), 0)
+		local hit = workspace:Raycast(root.Position, down, rayParams) or workspace:Spherecast(root.Position, 1, down, rayParams)
 		local index = if hit then hit.Instance:GetAttribute("ClimbIndex") else nil
 		if type(index) ~= "number" then return end
 		if index ~= lastLanded then
@@ -591,6 +594,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	local function onRestart()
 		if not active then return end
 		table.clear(rides)
+		winWaiting = nil
 		ClimbEffects.stop()
 		task.delay(0.2, backToCheckpoint)
 	end
@@ -600,7 +604,8 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		active = on
 		gui.Enabled = on
 		if not on then
-			ClimbEffects.stop()
+			-- The server is moving the climber elsewhere: no putting them back on the tower.
+			ClimbEffects.stop(true)
 			riding = false
 		else
 			lastLanded = attr("ClimbCheckpoint", 0)

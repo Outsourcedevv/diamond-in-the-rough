@@ -97,6 +97,16 @@ check(math.abs(BirdBonus.flap(0.2, false)) <= 0.7 and BirdBonus.flap(0, false) ~
 local State = Instance.new("Configuration")
 local feed = {}
 local Notify = { FireAllClients = function(_, kind, data) if kind == "feed" then table.insert(feed, data.text) end end }
+-- The arrival is told only to players at the mountain.
+local told = {}
+Notify.FireClient = function(_, player, kind, data) if kind == "feed" then table.insert(feed, data.text); table.insert(told, player) end end
+local atMountain = { GetAttribute = function(_, key) return key == "InGame" end }
+local inLobby = { GetAttribute = function() return false end }
+local getService = game.GetService
+game.GetService = function(self, name)
+	if name == "Players" then return { GetPlayers = function() return { atMountain, inLobby } end } end
+	return getService(self, name)
+end
 local bird = DiamondBird.start({ state = State, notify = Notify, radius = 38, height = function() return 34 end, random = Random.new(7) })
 check(looped == 1, "the arrival timer starts with the server")
 check(bird.multiplier() == 1, "no bonus before a bird is caught")
@@ -111,6 +121,7 @@ bird.spawn()
 local model = birds()[1]
 check(#birds() == 1 and model ~= nil, "a bird appears")
 check(string.find(feed[#feed], "diamond bird appeared") ~= nil, "the feed announces it")
+check(#told == 1 and told[1] == atMountain, "only players at the mountain hear about it")
 check(model:GetAttribute("LeaveAt") == 0 and model:GetAttribute("Start") == clock, "the clients are told when it arrived")
 check(model:GetAttribute("Height") == 34 and model:GetAttribute("Radius") == 38, "the clients are told its circuit")
 

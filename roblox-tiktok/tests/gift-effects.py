@@ -17,6 +17,7 @@ def module(path: str) -> str:
     source = (root / path).read_text(encoding="utf-8")
     source = re.sub(r'local Shared = [^\n]*\n', "", source)
     source = re.sub(r'require\(Shared:WaitForChild\("(\w+)"\)\)', r'require("../src/shared/\1")', source)
+    source = re.sub(r'require\(script\.Parent:WaitForChild\("(\w+)"\)\)', r'\1', source)
     return "(function()\n" + source + "\nend)()"
 
 
@@ -38,6 +39,17 @@ task = {
 }
 local renderConnections: { [any]: (number) -> () } = {}
 local bound: { [string]: (number) -> () } = {}
+local boundPriority: { [string]: number } = {}
+-- Bound render steps run lowest priority first, as in Roblox.
+local function runBound(dt: number)
+	local names = {}
+	for name in bound do table.insert(names, name) end
+	table.sort(names, function(a, b) return (boundPriority[a] or 0) < (boundPriority[b] or 0) end)
+	for _, name in names do
+		local callback = bound[name]
+		if callback then callback(dt) end
+	end
+end
 RunService = {
 	RenderStepped = { Connect = function(_, callback)
 		local handle = {}
@@ -45,7 +57,7 @@ RunService = {
 		renderConnections[handle] = callback
 		return handle
 	end },
-	BindToRenderStep = function(_, name, _priority, callback) bound[name] = callback end,
+	BindToRenderStep = function(_, name, priority, callback) bound[name] = callback; boundPriority[name] = priority end,
 	UnbindFromRenderStep = function(_, name) bound[name] = nil end,
 }
 local TweenService = { Create = function(_, object, info, goal)
@@ -143,7 +155,7 @@ local function run(seconds: number)
 			table.remove(scheduled, 1).run()
 		end
 		camera.CFrame = CFrame.new(0, 20, 60)
-		for _, callback in bound do callback(1 / 60) end
+		runBound(1 / 60)
 		local look = camera.CFrame.LookVector
 		maxShake = math.max(maxShake, math.deg(math.acos(math.clamp(-look.Z, -1, 1))))
 		local callbacks = {}
@@ -250,7 +262,7 @@ print(string.format("PASS: %d gift effect checks", passed))
 generated = root / "tests/gift-effects.generated.luau"
 try:
     mock = (root / "tests/roblox-mock.luau").read_text(encoding="utf-8")
-    body = mock + "\n" + harness + "\nlocal GiftEffects = " + module("src/client/GiftEffects.luau") + "\n" + test
+    body = mock + "\n" + harness + "\nlocal CameraShake = " + module("src/client/CameraShake.luau") + "\nlocal GiftEffects = " + module("src/client/GiftEffects.luau") + "\n" + test
     generated.write_text(body, encoding="utf-8")
     subprocess.run([sys.argv[1] if len(sys.argv) > 1 else "luau", str(generated)], check=True)
 finally:

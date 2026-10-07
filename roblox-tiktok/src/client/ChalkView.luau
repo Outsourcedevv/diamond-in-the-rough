@@ -377,7 +377,10 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		ring(countdownParts, left, top, 1, colour, true, ChalkView.SMALL_STROKE)
 		table.insert(countdownParts, stroke(drawing, ChalkBoard.onBoard(left, top), ChalkBoard.onBoard(left, top + 0.7), ChalkView.SMALL_STROKE, colour, true))
 		table.insert(countdownParts, stroke(drawing, ChalkBoard.onBoard(left, top), ChalkBoard.onBoard(left + 0.5, top), ChalkView.SMALL_STROKE, colour, true))
-		smallNumber(countdownParts, seconds, left + 3.4, top, 2, colour, true)
+		-- The seconds start just right of the clock (smallNumber lines up their right edge).
+		local count = #ChalkBoard.digits(seconds)
+		local total = 2 * (count * ChalkBoard.DIGIT_WIDTH + (count - 1) * ChalkBoard.DIGIT_GAP) / ChalkBoard.NUMBER_HEIGHT
+		smallNumber(countdownParts, seconds, left + 1.6 + total, top, 2, colour, true)
 	end
 	local function redrawAll()
 		clearSlots()
@@ -389,10 +392,13 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	end
 
 	-- The eraser sweeps across the board (a wipe), or over the number (a gift down).
+	local holdDrawUntil = 0
 	local function sweep(full: boolean, seconds: number)
 		local look = theme()
 		local eraser = make("Part", { Name = "SweepEraser", Size = Vector3.new(2.6, 1.2, 0.8), Color = Color3.fromRGB(96, 66, 42), Material = Enum.Material.Wood,
 			Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false }, effects)
+		-- The board shows the old count until the eraser has passed over it.
+		holdDrawUntil = math.max(holdDrawUntil, os.clock() + seconds * 0.6)
 		local passes = if full then 4 else 2
 		local half = if full then ChalkBoard.BOARD_WIDTH / 2 - 2 else 9
 		local lowY = if full then ChalkBoard.BOARD_BOTTOM + 1.5 else ChalkBoard.NUMBER_Y - 2.4
@@ -417,19 +423,13 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	end
 
 	-- A gift: chalk bursts at the number (more for bigger gifts), or the eraser for gifts down.
+	-- The shake is added by the classroom camera each frame (below), so it is never overwritten.
+	local shakeDegrees, shakeStart, shakeSeconds = 0, 0, 1
 	local function camShake(degrees: number, seconds: number)
-		local start = os.clock()
-		local name = "ChalkShake" .. tostring(start)
-		RunService:BindToRenderStep(name, Enum.RenderPriority.Camera.Value + 2, function()
-			local t = os.clock() - start
-			local camera = workspace.CurrentCamera
-			if t > seconds or camera == nil then
-				RunService:UnbindFromRenderStep(name)
-				return
-			end
-			local a = math.rad(degrees) * (1 - t / seconds)
-			camera.CFrame *= CFrame.Angles(math.noise(t * 18, 1) * a, math.noise(t * 18, 5) * a, 0)
-		end)
+		local now = os.clock()
+		local left = shakeDegrees * math.max(0, 1 - (now - shakeStart) / shakeSeconds)
+		if degrees < left then return end
+		shakeDegrees, shakeStart, shakeSeconds = degrees, now, seconds
 	end
 	local function burst(at: Vector3, colour: Color3, count: number)
 		local spot = make("Attachment", { Position = at }, workspace.Terrain)
@@ -511,7 +511,10 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch or input.KeyCode == Enum.KeyCode.Space
 	end
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-		if active and not processed and isWriteInput(input) and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
+		-- Space is the jump key, so Roblox's controls mark it as used: it still writes
+		-- (the writer can't jump), but never while typing. Clicks on buttons don't write.
+		local space = input.KeyCode == Enum.KeyCode.Space
+		if active and (space or not processed) and isWriteInput(input) and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
 	end)
 	UserInputService.InputEnded:Connect(function(input: InputObject)
 		if isWriteInput(input) then setHeld(false) end
@@ -557,8 +560,18 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		if camera then
 			if camera.CameraType ~= Enum.CameraType.Scriptable then camera.CameraType = Enum.CameraType.Scriptable end
 			local t = os.clock()
-			camera.CFrame = ChalkBoard.cameraFrame() * CFrame.Angles(math.sin(t * 0.7) * 0.004, math.sin(t * 0.5) * 0.006, 0)
+			local frame = ChalkBoard.cameraFrame() * CFrame.Angles(math.sin(t * 0.7) * 0.004, math.sin(t * 0.5) * 0.006, 0)
+			local shook = t - shakeStart
+			if shook < shakeSeconds then
+				local a = math.rad(shakeDegrees) * (1 - shook / shakeSeconds)
+				frame *= CFrame.Angles(math.noise(shook * 18, 1) * a, math.noise(shook * 18, 5) * a, 0)
+			end
+			camera.CFrame = frame
+			-- Roblox draws the most detail round the camera's focus: the board.
+			camera.Focus = CFrame.new(ChalkBoard.centre())
 		end
+		-- The mouse stays free in the classroom.
+		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
 		-- The REC light blinks and the camera's clock runs.
 		recBlink += dt
 		recDot.BackgroundTransparency = if recBlink % 1.2 < 0.7 then 0 else 1
@@ -580,7 +593,7 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		hint.Visible = not writingNow and attr("ChalkCount", 0) < 3
 		-- The count, goal, progress and countdown on the board.
 		local count = attr("ChalkCount", 0)
-		if count ~= shownCount then
+		if count ~= shownCount and os.clock() >= holdDrawUntil then
 			local stepUp = count == shownCount + 1
 			drawCount(count, if stepUp then ChalkView.writeSeconds(speed) else 0)
 			drawProgress(count)

@@ -115,6 +115,8 @@ function ChalkBoard.segments(d: number, left: number, bottom: number, height: nu
 	for _, stroke in ChalkBoard.DIGITS[d] do
 		for i = 1, #stroke - 1 do
 			local a, b = stroke[i], stroke[i + 1]
+			-- Where two strokes join at the same point there is nothing to draw.
+			if math.abs(a.X - b.X) + math.abs(a.Y - b.Y) < 1e-3 then continue end
 			table.insert(out, {
 				ChalkBoard.onBoard(left + a.X * width, bottom + a.Y * height),
 				ChalkBoard.onBoard(left + b.X * width, bottom + b.Y * height),

@@ -156,7 +156,8 @@ end, function()
 	HowToPlay.setOpen(true)
 end)
 -- The diamond bird flies round the mountain; catching it doubles gifts.
-require(script:WaitForChild("BirdView")).start(gui, State)
+-- Its "click it" label shows only at the mountain, where it can be caught.
+require(script:WaitForChild("BirdView")).start(roughHud, State)
 -- Cherry petals fall round the camera when the map shows the sakura theme.
 require(script:WaitForChild("PetalView")).start(State)
 
@@ -1254,7 +1255,8 @@ end)
 -- The settings panel is hidden: the owner presses Y to open or close it.
 local isAdmin = false
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-	if processed or input.KeyCode ~= Enum.KeyCode.Y or not isAdmin then
+	-- The panel lives in the game's display, which is off in the lobby.
+	if processed or input.KeyCode ~= Enum.KeyCode.Y or not isAdmin or not gui.Enabled then
 		return
 	end
 	panel.Visible = not panel.Visible
@@ -1361,7 +1363,8 @@ end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	if kind == "giftEffect" and type(data) == "table" then
-		GiftEffects.play(data)
+		-- The mountain's gift shows play at the mountain only.
+		if player:GetAttribute("InGame") == true then GiftEffects.play(data) end
 	elseif kind == "feed" and type(data) == "table" then
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
 	elseif kind == "win" and type(data) == "table" then

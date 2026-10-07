@@ -162,7 +162,7 @@ end
 run("climb", mock + mock_extras + modules(
     "src/shared/GiftTier.luau", "src/shared/Format.luau", "src/shared/DiamondShape.luau",
     "src/shared/ClimbPath.luau", "src/server/Climb.luau", "src/server/ClimbGame.luau",
-    "src/client/ClimbEffects.luau", "src/client/ClimbView.luau") + "\n" + path_test)
+    "src/client/CameraShake.luau", "src/client/ClimbEffects.luau", "src/client/ClimbView.luau") + "\n" + path_test)
 
 # The gift rides, on the gift effects test's simulated clock.
 effects_source = (root / "tests/gift-effects.py").read_text(encoding="utf-8")
@@ -205,7 +205,7 @@ local function run(seconds: number)
 		while scheduled[1] and scheduled[1].at <= clock do
 			table.remove(scheduled, 1).run()
 		end
-		for _, callback in bound do callback(1 / 60) end
+		runBound(1 / 60)
 		local callbacks = {}
 		for _, callback in renderConnections do table.insert(callbacks, callback) end
 		for _, callback in callbacks do callback(1 / 60) end
@@ -307,4 +307,4 @@ print(string.format("PASS: %d climb ride checks", passed))
 
 run("climb-rides", mock + "\n" + harness + modules(
     "src/shared/GiftTier.luau", "src/shared/Format.luau", "src/shared/ClimbPath.luau",
-    "src/client/ClimbEffects.luau") + "\n" + rides_test)
+    "src/client/CameraShake.luau", "src/client/ClimbEffects.luau") + "\n" + rides_test)

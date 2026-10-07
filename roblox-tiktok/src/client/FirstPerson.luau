@@ -134,7 +134,9 @@ end
 -- The player's field of view in the game (the lobby keeps the default).
 function FirstPerson.setFieldOfView(fov: number)
 	fieldOfView = math.clamp(math.floor(fov + 0.5), FirstPerson.FOV_MIN, FirstPerson.FOV_MAX)
-	applyCamera()
+	-- Only the field of view: the zoom limits belong to whichever game is on.
+	local camera = workspace.CurrentCamera
+	if camera then camera.FieldOfView = if enabled then fieldOfView else BASE_FOV end
 end
 
 function FirstPerson.fieldOfView(): number

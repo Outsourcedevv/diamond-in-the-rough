@@ -95,7 +95,6 @@ function ChalkGame.start(options: Options): Game
 	local notify = options.notify
 	local built = Classroom.build(options.parent, ServerStorage, progress.theme)
 	local holding: { [Player]: boolean } = {}
-	local holdAt: { [Player]: number } = {}
 	local resetEnds = 0
 	local resetSerial = 0
 	local winning = false
@@ -136,7 +135,10 @@ function ChalkGame.start(options: Options): Game
 			humanoid.WalkSpeed = 0
 			humanoid.UseJumpPower = false
 			humanoid.JumpHeight = 0
+			-- Or the movement keys still turn the writer away from the board.
+			humanoid.AutoRotate = false
 		else
+			humanoid.AutoRotate = true
 			humanoid.UseJumpPower = StarterPlayer.CharacterUseJumpPower
 			humanoid.WalkSpeed = StarterPlayer.CharacterWalkSpeed
 			humanoid.JumpHeight = StarterPlayer.CharacterJumpHeight
@@ -189,7 +191,9 @@ function ChalkGame.start(options: Options): Game
 		for player, on in holding do
 			if on and writing(player) and player.Parent ~= nil then anyone = true end
 		end
-		if state:GetAttribute("ChalkWriting") ~= anyone then state:SetAttribute("ChalkWriting", anyone) end
+		-- The arm rests during the win's celebration.
+		local shown = anyone and not winning
+		if state:GetAttribute("ChalkWriting") ~= shown then state:SetAttribute("ChalkWriting", shown) end
 		if not anyone or winning then
 			carry = 0
 			return
@@ -228,6 +232,8 @@ function ChalkGame.start(options: Options): Game
 
 	function self.characterAdded(player: Player, character: Model)
 		holding[player] = nil
+		-- A new character already moves the usual way; only the writer changes.
+		if not writing(player) then return end
 		local humanoid = character:WaitForChild("Humanoid", 10)
 		if humanoid and character.Parent ~= nil then applyMove(player) end
 	end
@@ -235,9 +241,6 @@ function ChalkGame.start(options: Options): Game
 	-- The writer's game says they pressed (true) or let go (false).
 	function self.hold(player: Player, value: any)
 		if type(value) ~= "boolean" then return end
-		local now = os.clock()
-		if value and now - (holdAt[player] or -math.huge) < 0.05 then return end
-		holdAt[player] = now
 		holding[player] = value and writing(player) or nil
 	end
 
@@ -331,7 +334,6 @@ function ChalkGame.start(options: Options): Game
 
 	function self.removing(player: Player)
 		holding[player] = nil
-		holdAt[player] = nil
 	end
 
 	return self

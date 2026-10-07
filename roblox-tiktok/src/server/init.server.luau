@@ -3,6 +3,9 @@
 -- stone out of the mountain; whoever grabs the hidden diamond and holds it for
 -- 15 seconds wins the round.
 local Players = game:GetService("Players")
+-- Characters wait until the lobby is built (onPlayer loads them), so nobody
+-- spawns into an empty sky and falls while the save loads.
+Players.CharacterAutoLoads = false
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local StarterPack = game:GetService("StarterPack")
@@ -611,6 +614,12 @@ local function newRound(animated: boolean?)
 	end
 	stoneWork = nil
 	stoneBusy = false
+	-- A new round asked for while the carried gifts ran starts now.
+	if requestedRound ~= nil then
+		local again = requestedRound
+		requestedRound = nil
+		task.spawn(newRound, again)
+	end
 end
 
 -- Holding the diamond -----------------------------------------------------------
@@ -937,7 +946,8 @@ local function processTikTok(event: TikTokFeed.Event)
 		for key, binding in settings.giftBindings do
 			if string.lower(binding.gift) == name and binding.game ~= true then settings.giftBindings[key] = nil end
 		end
-		if event.keybind and event.keybind ~= "" then
+		-- Only the free keys (G, H, P, Y and movement are the game's own).
+		if event.keybind and Keybinds.allowed(event.keybind) then
 			settings.giftBindings[event.keybind] = { gift = event.gift, coins = event.coins or 1 }
 		end
 		saveSettings()
@@ -1263,7 +1273,7 @@ end
 local function setPlace(player: Player, place: string)
 	local from = placeOf(player)
 	if from == place then return end
-	if from == "rough" and holder == player then
+	if from == "rough" and holder == player and phase == "Holding" then
 		notice(player, "You're holding the " .. Skin.words(settings.skin).gem .. "! Win or lose it first, then leave the game.")
 		return
 	end
@@ -1277,8 +1287,12 @@ local function setPlace(player: Player, place: string)
 	if place ~= "chalk" then player:SetAttribute("InChalk", false) end
 	if place ~= "climb" then player:SetAttribute("InClimb", false) end
 	if place ~= "rough" then player:SetAttribute("InGame", false) end
-	if from == "climb" or place == "climb" then climbGame.entered(player, place == "climb") end
-	if from == "chalk" or place == "chalk" then chalkGame.entered(player, place == "chalk") end
+	-- The game being left gives back the usual movement first, then the game
+	-- being joined sets its own (going straight from one to the other).
+	if from == "climb" and place ~= "climb" then climbGame.entered(player, false) end
+	if from == "chalk" and place ~= "chalk" then chalkGame.entered(player, false) end
+	if place == "climb" then climbGame.entered(player, true) end
+	if place == "chalk" then chalkGame.entered(player, true) end
 	local frame, target = placeFor(player)
 	player.RespawnLocation = target
 	local character = player.Character
@@ -1603,6 +1617,8 @@ local function onPlayer(player: Player)
 	end)
 	if player.Character then
 		task.spawn(placeCharacter, player, player.Character)
+	else
+		task.spawn(function() if player.Parent then player:LoadCharacter() end end)
 	end
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
@@ -1618,6 +1634,8 @@ Players.PlayerAdded:Connect(onPlayer)
 for _, player in Players:GetPlayers() do
 	task.spawn(onPlayer, player)
 end
+-- From now on Roblox respawns characters as usual.
+Players.CharacterAutoLoads = true
 Players.PlayerRemoving:Connect(function(player)
 	admins[player] = nil
 	lastMove[player] = nil

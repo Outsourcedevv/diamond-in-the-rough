@@ -187,6 +187,7 @@ local game = { GetService = function(_, name)
 end }
 local workspace = {
 	Raycast = function() return nil end,
+	Spherecast = function() return nil end,
 	GetServerTimeNow = function() return os.clock() end,
 	BulkMoveTo = function() end,
 }

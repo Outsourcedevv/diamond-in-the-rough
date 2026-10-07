@@ -211,6 +211,8 @@ function ChalkBoard.segments(d: number, left: number, bottom: number, height: nu
 	for _, stroke in ChalkBoard.DIGITS[d] do
 		for i = 1, #stroke - 1 do
 			local a, b = stroke[i], stroke[i + 1]
+			-- Where two strokes join at the same point there is nothing to draw.
+			if math.abs(a.X - b.X) + math.abs(a.Y - b.Y) < 1e-3 then continue end
 			table.insert(out, {
 				ChalkBoard.onBoard(left + a.X * width, bottom + a.Y * height),
 				ChalkBoard.onBoard(left + b.X * width, bottom + b.Y * height),
@@ -4961,6 +4963,9 @@ return Skin
 -- stone out of the mountain; whoever grabs the hidden diamond and holds it for
 -- 15 seconds wins the round.
 local Players = game:GetService("Players")
+-- Characters wait until the lobby is built (onPlayer loads them), so nobody
+-- spawns into an empty sky and falls while the save loads.
+Players.CharacterAutoLoads = false
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local StarterPack = game:GetService("StarterPack")
@@ -5569,6 +5574,12 @@ local function newRound(animated: boolean?)
 	end
 	stoneWork = nil
 	stoneBusy = false
+	-- A new round asked for while the carried gifts ran starts now.
+	if requestedRound ~= nil then
+		local again = requestedRound
+		requestedRound = nil
+		task.spawn(newRound, again)
+	end
 end
 
 -- Holding the diamond -----------------------------------------------------------
@@ -5895,7 +5906,8 @@ local function processTikTok(event: TikTokFeed.Event)
 		for key, binding in settings.giftBindings do
 			if string.lower(binding.gift) == name and binding.game ~= true then settings.giftBindings[key] = nil end
 		end
-		if event.keybind and event.keybind ~= "" then
+		-- Only the free keys (G, H, P, Y and movement are the game's own).
+		if event.keybind and Keybinds.allowed(event.keybind) then
 			settings.giftBindings[event.keybind] = { gift = event.gift, coins = event.coins or 1 }
 		end
 		saveSettings()
@@ -6221,7 +6233,7 @@ end
 local function setPlace(player: Player, place: string)
 	local from = placeOf(player)
 	if from == place then return end
-	if from == "rough" and holder == player then
+	if from == "rough" and holder == player and phase == "Holding" then
 		notice(player, "You're holding the " .. Skin.words(settings.skin).gem .. "! Win or lose it first, then leave the game.")
 		return
 	end
@@ -6235,8 +6247,12 @@ local function setPlace(player: Player, place: string)
 	if place ~= "chalk" then player:SetAttribute("InChalk", false) end
 	if place ~= "climb" then player:SetAttribute("InClimb", false) end
 	if place ~= "rough" then player:SetAttribute("InGame", false) end
-	if from == "climb" or place == "climb" then climbGame.entered(player, place == "climb") end
-	if from == "chalk" or place == "chalk" then chalkGame.entered(player, place == "chalk") end
+	-- The game being left gives back the usual movement first, then the game
+	-- being joined sets its own (going straight from one to the other).
+	if from == "climb" and place ~= "climb" then climbGame.entered(player, false) end
+	if from == "chalk" and place ~= "chalk" then chalkGame.entered(player, false) end
+	if place == "climb" then climbGame.entered(player, true) end
+	if place == "chalk" then chalkGame.entered(player, true) end
 	local frame, target = placeFor(player)
 	player.RespawnLocation = target
 	local character = player.Character
@@ -6561,6 +6577,8 @@ local function onPlayer(player: Player)
 	end)
 	if player.Character then
 		task.spawn(placeCharacter, player, player.Character)
+	else
+		task.spawn(function() if player.Parent then player:LoadCharacter() end end)
 	end
 	admins[player] = isAdmin(player)
 	player:SetAttribute("DiamondRushAdmin", admins[player])
@@ -6576,6 +6594,8 @@ Players.PlayerAdded:Connect(onPlayer)
 for _, player in Players:GetPlayers() do
 	task.spawn(onPlayer, player)
 end
+-- From now on Roblox respawns characters as usual.
+Players.CharacterAutoLoads = true
 Players.PlayerRemoving:Connect(function(player)
 	admins[player] = nil
 	lastMove[player] = nil
@@ -6693,7 +6713,6 @@ function ChalkGame.start(options: Options): Game
 	local notify = options.notify
 	local built = Classroom.build(options.parent, ServerStorage, progress.theme)
 	local holding: { [Player]: boolean } = {}
-	local holdAt: { [Player]: number } = {}
 	local resetEnds = 0
 	local resetSerial = 0
 	local winning = false
@@ -6734,7 +6753,10 @@ function ChalkGame.start(options: Options): Game
 			humanoid.WalkSpeed = 0
 			humanoid.UseJumpPower = false
 			humanoid.JumpHeight = 0
+			-- Or the movement keys still turn the writer away from the board.
+			humanoid.AutoRotate = false
 		else
+			humanoid.AutoRotate = true
 			humanoid.UseJumpPower = StarterPlayer.CharacterUseJumpPower
 			humanoid.WalkSpeed = StarterPlayer.CharacterWalkSpeed
 			humanoid.JumpHeight = StarterPlayer.CharacterJumpHeight
@@ -6787,7 +6809,9 @@ function ChalkGame.start(options: Options): Game
 		for player, on in holding do
 			if on and writing(player) and player.Parent ~= nil then anyone = true end
 		end
-		if state:GetAttribute("ChalkWriting") ~= anyone then state:SetAttribute("ChalkWriting", anyone) end
+		-- The arm rests during the win's celebration.
+		local shown = anyone and not winning
+		if state:GetAttribute("ChalkWriting") ~= shown then state:SetAttribute("ChalkWriting", shown) end
 		if not anyone or winning then
 			carry = 0
 			return
@@ -6826,6 +6850,8 @@ function ChalkGame.start(options: Options): Game
 
 	function self.characterAdded(player: Player, character: Model)
 		holding[player] = nil
+		-- A new character already moves the usual way; only the writer changes.
+		if not writing(player) then return end
 		local humanoid = character:WaitForChild("Humanoid", 10)
 		if humanoid and character.Parent ~= nil then applyMove(player) end
 	end
@@ -6833,9 +6859,6 @@ function ChalkGame.start(options: Options): Game
 	-- The writer's game says they pressed (true) or let go (false).
 	function self.hold(player: Player, value: any)
 		if type(value) ~= "boolean" then return end
-		local now = os.clock()
-		if value and now - (holdAt[player] or -math.huge) < 0.05 then return end
-		holdAt[player] = now
 		holding[player] = value and writing(player) or nil
 	end
 
@@ -6929,7 +6952,6 @@ function ChalkGame.start(options: Options): Game
 
 	function self.removing(player: Player)
 		holding[player] = nil
-		holdAt[player] = nil
 	end
 
 	return self
@@ -7575,6 +7597,8 @@ function ClimbGame.start(options: Options): Game
 	end
 
 	function self.characterAdded(player: Player, character: Model)
+		-- A new character already moves the usual way; only climbers change.
+		if not climbing(player) then return end
 		local humanoid = character:WaitForChild("Humanoid", 10)
 		if humanoid and character.Parent ~= nil then applyMove(player) end
 	end
@@ -7599,10 +7623,25 @@ function ClimbGame.start(options: Options): Game
 	end
 
 	-- The climb's sliders: { speed = studs a second, jump = studs high }.
+	local laterMove: { [Player]: any } = {}
 	function self.setMove(player: Player, value: any)
 		if type(value) ~= "table" then return end
 		local now = os.clock()
-		if now - (moveAt[player] or -math.huge) < 0.1 then return end
+		local wait = 0.1 - (now - (moveAt[player] or -math.huge))
+		if wait > 0 then
+			-- Too soon after the last one: the newest value is applied once the
+			-- wait is over, so letting go of a slider is never lost.
+			local first = laterMove[player] == nil
+			laterMove[player] = value
+			if first then
+				task.delay(wait, function()
+					local latest = laterMove[player]
+					laterMove[player] = nil
+					if latest ~= nil and player.Parent ~= nil then self.setMove(player, latest) end
+				end)
+			end
+			return
+		end
 		moveAt[player] = now
 		if type(value.speed) == "number" and value.speed == value.speed then
 			progress.speed = math.clamp(math.floor(value.speed * 2 + 0.5) / 2, ClimbPath.SPEED.min, ClimbPath.SPEED.max)
@@ -7642,6 +7681,8 @@ function ClimbGame.start(options: Options): Game
 		local from = progress.checkpoint
 		if winning or move == 0 then return from, from end
 		local to = math.clamp(from + move, 0, ClimbPath.TOP)
+		-- Already at the bottom (or top): no ride that goes nowhere.
+		if to == from then return from, from end
 		setCheckpoint(to)
 		local data = table.clone(info)
 		data.up = move > 0
@@ -7664,6 +7705,7 @@ function ClimbGame.start(options: Options): Game
 	function self.removing(player: Player)
 		landAt[player] = nil
 		moveAt[player] = nil
+		laterMove[player] = nil
 	end
 
 	return self
@@ -8289,7 +8331,12 @@ function DiamondBird.start(options: Options): Bird
 		click.MouseClick:Connect(function(player: Player) caught(player, bird) end)
 		bird.Parent = workspace
 		current = bird
-		options.notify:FireAllClients("feed", { text = "A diamond bird appeared! Click it for double gifts", stone = 0, kind = "notice" })
+		-- Only players at the mountain can catch it, so only they hear about it.
+		for _, player in game:GetService("Players"):GetPlayers() do
+			if player:GetAttribute("InGame") == true then
+				options.notify:FireClient(player, "feed", { text = "A diamond bird appeared! Click it for double gifts", stone = 0, kind = "notice" })
+			end
+		end
 	end
 
 	task.spawn(function()
@@ -11865,6 +11912,9 @@ local KEY = Store.SHARED_KEY
 local store: DataStore? = nil
 local pending: { [string]: any }? = nil
 local saving = false
+-- True when the save could not be read: saving then stays off, so a passing
+-- DataStore problem never replaces the real save with the defaults.
+local blocked = false
 
 local function open(): DataStore?
 	if store == nil then
@@ -11889,17 +11939,24 @@ function Store.load(key: string?): ({ [string]: any }?, boolean)
 		return nil, false
 	end
 	local ok, data = pcall(target.GetAsync, target, key or KEY)
+	for _ = 1, 2 do
+		if ok then break end
+		task.wait(2)
+		ok, data = pcall(target.GetAsync, target, key or KEY)
+	end
 	if ok and type(data) == "table" then
 		return data, true
 	end
 	if not ok then
-		warn("[DiamondRush] Settings are not saved between sessions: " .. tostring(data))
+		warn("[DiamondRush] Could not read the save, so nothing is saved this session (your old save is kept): " .. tostring(data))
+		if key == nil or key == KEY then blocked = true end
 	end
 	return nil, ok
 end
 
 -- Saves a few seconds after the last change, so quick edits make one write.
 function Store.save(data: { [string]: any })
+	if blocked then return end
 	pending = table.clone(data)
 	if saving then
 		return
@@ -11922,6 +11979,7 @@ end
 -- Writes immediately (used when the server shuts down).
 function Store.flush(data: { [string]: any })
 	pending = nil
+	if blocked then return end
 	local target = open()
 	if target ~= nil then
 		pcall(target.SetAsync, target, KEY, data)
@@ -12447,7 +12505,8 @@ end, function()
 	HowToPlay.setOpen(true)
 end)
 -- The diamond bird flies round the mountain; catching it doubles gifts.
-require(script:WaitForChild("BirdView")).start(gui, State)
+-- Its "click it" label shows only at the mountain, where it can be caught.
+require(script:WaitForChild("BirdView")).start(roughHud, State)
 -- Cherry petals fall round the camera when the map shows the sakura theme.
 require(script:WaitForChild("PetalView")).start(State)
 
@@ -13545,7 +13604,8 @@ end)
 -- The settings panel is hidden: the owner presses Y to open or close it.
 local isAdmin = false
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-	if processed or input.KeyCode ~= Enum.KeyCode.Y or not isAdmin then
+	-- The panel lives in the game's display, which is off in the lobby.
+	if processed or input.KeyCode ~= Enum.KeyCode.Y or not isAdmin or not gui.Enabled then
 		return
 	end
 	panel.Visible = not panel.Visible
@@ -13652,7 +13712,8 @@ end)
 
 Notify.OnClientEvent:Connect(function(kind: string, data: any)
 	if kind == "giftEffect" and type(data) == "table" then
-		GiftEffects.play(data)
+		-- The mountain's gift shows play at the mountain only.
+		if player:GetAttribute("InGame") == true then GiftEffects.play(data) end
 	elseif kind == "feed" and type(data) == "table" then
 		addFeed(tostring(data.text), tonumber(data.stone) or 0, tostring(data.kind))
 	elseif kind == "win" and type(data) == "table" then
@@ -13918,7 +13979,7 @@ local function fly(flyer: Flyer, now: number)
 	workspace:BulkMoveTo(flyer.parts, flyer.frames, Enum.BulkMoveMode.FireCFrameChanged)
 end
 
-function BirdView.start(gui: ScreenGui, State: Instance)
+function BirdView.start(gui: Instance, State: Instance)
 	local call = Instance.new("TextLabel")
 	call.Name = "DiamondBird"
 	call.AnchorPoint = Vector2.new(0.5, 0)
@@ -13984,6 +14045,48 @@ return BirdView
           </Properties>
         </Item>
         <Item class="ModuleScript" referent="47">
+          <Properties>
+            <string name="Name">CameraShake</string>
+            <string name="Source"><![CDATA[--!strict
+-- Camera shake that never builds up. Roblox's camera works out each frame's
+-- view from the last frame's camera.CFrame, so a shake added on top would
+-- leak into where the player looks. `apply` shakes this frame's view, and
+-- just before the camera's next update the view is put back as it was.
+local RunService = game:GetService("RunService")
+
+local CameraShake = {}
+
+local before: CFrame? = nil
+local shaken: CFrame? = nil
+local bound = false
+
+-- Turns this frame's view by `offset` (call it after the camera has moved).
+function CameraShake.apply(camera: Camera, offset: CFrame)
+	if not bound then
+		bound = true
+		RunService:BindToRenderStep("CameraShakeUndo", Enum.RenderPriority.Camera.Value - 1, function()
+			local current = workspace.CurrentCamera
+			if shaken == nil then
+				-- Nothing shook last frame: done until the next shake.
+				bound = false
+				RunService:UnbindFromRenderStep("CameraShakeUndo")
+				return
+			end
+			if current and before and current.CFrame == shaken then current.CFrame = before end
+			before, shaken = nil, nil
+		end)
+	end
+	-- Two shakes in one frame stack on the same unshaken view.
+	if shaken == nil or camera.CFrame ~= shaken then before = camera.CFrame end
+	camera.CFrame = camera.CFrame * offset
+	shaken = camera.CFrame
+end
+
+return CameraShake
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="48">
           <Properties>
             <string name="Name">ChalkView</string>
             <string name="Source"><![CDATA[--!strict
@@ -14365,7 +14468,10 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		ring(countdownParts, left, top, 1, colour, true, ChalkView.SMALL_STROKE)
 		table.insert(countdownParts, stroke(drawing, ChalkBoard.onBoard(left, top), ChalkBoard.onBoard(left, top + 0.7), ChalkView.SMALL_STROKE, colour, true))
 		table.insert(countdownParts, stroke(drawing, ChalkBoard.onBoard(left, top), ChalkBoard.onBoard(left + 0.5, top), ChalkView.SMALL_STROKE, colour, true))
-		smallNumber(countdownParts, seconds, left + 3.4, top, 2, colour, true)
+		-- The seconds start just right of the clock (smallNumber lines up their right edge).
+		local count = #ChalkBoard.digits(seconds)
+		local total = 2 * (count * ChalkBoard.DIGIT_WIDTH + (count - 1) * ChalkBoard.DIGIT_GAP) / ChalkBoard.NUMBER_HEIGHT
+		smallNumber(countdownParts, seconds, left + 1.6 + total, top, 2, colour, true)
 	end
 	local function redrawAll()
 		clearSlots()
@@ -14377,10 +14483,13 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	end
 
 	-- The eraser sweeps across the board (a wipe), or over the number (a gift down).
+	local holdDrawUntil = 0
 	local function sweep(full: boolean, seconds: number)
 		local look = theme()
 		local eraser = make("Part", { Name = "SweepEraser", Size = Vector3.new(2.6, 1.2, 0.8), Color = Color3.fromRGB(96, 66, 42), Material = Enum.Material.Wood,
 			Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false }, effects)
+		-- The board shows the old count until the eraser has passed over it.
+		holdDrawUntil = math.max(holdDrawUntil, os.clock() + seconds * 0.6)
 		local passes = if full then 4 else 2
 		local half = if full then ChalkBoard.BOARD_WIDTH / 2 - 2 else 9
 		local lowY = if full then ChalkBoard.BOARD_BOTTOM + 1.5 else ChalkBoard.NUMBER_Y - 2.4
@@ -14405,19 +14514,13 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	end
 
 	-- A gift: chalk bursts at the number (more for bigger gifts), or the eraser for gifts down.
+	-- The shake is added by the classroom camera each frame (below), so it is never overwritten.
+	local shakeDegrees, shakeStart, shakeSeconds = 0, 0, 1
 	local function camShake(degrees: number, seconds: number)
-		local start = os.clock()
-		local name = "ChalkShake" .. tostring(start)
-		RunService:BindToRenderStep(name, Enum.RenderPriority.Camera.Value + 2, function()
-			local t = os.clock() - start
-			local camera = workspace.CurrentCamera
-			if t > seconds or camera == nil then
-				RunService:UnbindFromRenderStep(name)
-				return
-			end
-			local a = math.rad(degrees) * (1 - t / seconds)
-			camera.CFrame *= CFrame.Angles(math.noise(t * 18, 1) * a, math.noise(t * 18, 5) * a, 0)
-		end)
+		local now = os.clock()
+		local left = shakeDegrees * math.max(0, 1 - (now - shakeStart) / shakeSeconds)
+		if degrees < left then return end
+		shakeDegrees, shakeStart, shakeSeconds = degrees, now, seconds
 	end
 	local function burst(at: Vector3, colour: Color3, count: number)
 		local spot = make("Attachment", { Position = at }, workspace.Terrain)
@@ -14499,7 +14602,10 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch or input.KeyCode == Enum.KeyCode.Space
 	end
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-		if active and not processed and isWriteInput(input) and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
+		-- Space is the jump key, so Roblox's controls mark it as used: it still writes
+		-- (the writer can't jump), but never while typing. Clicks on buttons don't write.
+		local space = input.KeyCode == Enum.KeyCode.Space
+		if active and (space or not processed) and isWriteInput(input) and UserInputService:GetFocusedTextBox() == nil then setHeld(true) end
 	end)
 	UserInputService.InputEnded:Connect(function(input: InputObject)
 		if isWriteInput(input) then setHeld(false) end
@@ -14545,8 +14651,18 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		if camera then
 			if camera.CameraType ~= Enum.CameraType.Scriptable then camera.CameraType = Enum.CameraType.Scriptable end
 			local t = os.clock()
-			camera.CFrame = ChalkBoard.cameraFrame() * CFrame.Angles(math.sin(t * 0.7) * 0.004, math.sin(t * 0.5) * 0.006, 0)
+			local frame = ChalkBoard.cameraFrame() * CFrame.Angles(math.sin(t * 0.7) * 0.004, math.sin(t * 0.5) * 0.006, 0)
+			local shook = t - shakeStart
+			if shook < shakeSeconds then
+				local a = math.rad(shakeDegrees) * (1 - shook / shakeSeconds)
+				frame *= CFrame.Angles(math.noise(shook * 18, 1) * a, math.noise(shook * 18, 5) * a, 0)
+			end
+			camera.CFrame = frame
+			-- Roblox draws the most detail round the camera's focus: the board.
+			camera.Focus = CFrame.new(ChalkBoard.centre())
 		end
+		-- The mouse stays free in the classroom.
+		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
 		-- The REC light blinks and the camera's clock runs.
 		recBlink += dt
 		recDot.BackgroundTransparency = if recBlink % 1.2 < 0.7 then 0 else 1
@@ -14568,7 +14684,7 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		hint.Visible = not writingNow and attr("ChalkCount", 0) < 3
 		-- The count, goal, progress and countdown on the board.
 		local count = attr("ChalkCount", 0)
-		if count ~= shownCount then
+		if count ~= shownCount and os.clock() >= holdDrawUntil then
 			local stepUp = count == shownCount + 1
 			drawCount(count, if stepUp then ChalkView.writeSeconds(speed) else 0)
 			drawProgress(count)
@@ -14632,7 +14748,7 @@ return ChalkView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="48">
+        <Item class="ModuleScript" referent="49">
           <Properties>
             <string name="Name">ClimbEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -14678,6 +14794,7 @@ local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
 local Format = require(Shared:WaitForChild("Format"))
+local CameraShake = require(script.Parent:WaitForChild("CameraShake"))
 
 local ClimbEffects = {}
 
@@ -14723,6 +14840,9 @@ local subLabel: TextLabel? = nil
 local bannerScale: UIScale? = nil
 local bannerSerial = 0
 local current: { folder: Folder, finish: () -> () }? = nil
+-- True while a show is stopped because the climber left the climb: the server
+-- is moving them elsewhere, so the ride lets go of them where they are.
+local leaving = false
 local shownIndex: number? = nil
 
 local function sequence(...: Color3): ColorSequence
@@ -14781,7 +14901,7 @@ local function addShake(degrees: number)
 		shakeTime += dt
 		local t = shakeTime * 19
 		local a = math.rad(shake) * 1.5
-		camera.CFrame *= CFrame.Angles(math.noise(t, 0.3) * a, math.noise(t, 7.1) * a, math.noise(t, 13.7) * a * 0.5)
+		CameraShake.apply(camera, CFrame.Angles(math.noise(t, 0.3) * a, math.noise(t, 7.1) * a, math.noise(t, 13.7) * a * 0.5))
 		shake *= math.exp(-dt * 3)
 	end)
 end
@@ -14867,9 +14987,15 @@ function ClimbEffects.playing(): boolean
 end
 
 -- Ends the show playing now at once (the climber is let go on their new platform).
-function ClimbEffects.stop()
+-- Ends the show now. `inPlace` (the climber left the climb) lets go of them
+-- where they are instead of putting them on the ride's platform.
+function ClimbEffects.stop(inPlace: boolean?)
 	local show = current
-	if show then show.finish() end
+	if show then
+		leaving = inPlace == true
+		show.finish()
+		leaving = false
+	end
 end
 
 export type Particles = {
@@ -14947,8 +15073,11 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 		p.Parent = folder
 		return p
 	end
+	local fovTween: Tween? = nil
 	local function animate(p: Instance, duration: number, goal: { [string]: any }, style: Enum.EasingStyle?, direction: Enum.EasingDirection?)
-		TweenService:Create(p, TweenInfo.new(S(duration), style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out), goal):Play()
+		local tween = TweenService:Create(p, TweenInfo.new(S(duration), style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out), goal)
+		if goal.FieldOfView ~= nil then fovTween = tween end
+		tween:Play()
 	end
 	local function fade(p: Instance, duration: number, goal: { [string]: any })
 		animate(p, duration, goal)
@@ -15239,11 +15368,13 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 		shownIndex = nil
 		if filming then RunService:UnbindFromRenderStep("DiamondClimbCamera") end
 		if camera and filming then
+			-- A zoom still tweening would undo the reset.
+			if fovTween then fovTween:Cancel() end
 			camera.CameraType = savedType or Enum.CameraType.Custom
 			camera.FieldOfView = savedFov
 		end
 		if riding and root and root.Parent then
-			root.CFrame = endFrame
+			if not leaving then root.CFrame = endFrame end
 			root.AssemblyLinearVelocity = Vector3.zero
 			root.Anchored = false
 		end
@@ -15990,7 +16121,7 @@ return ClimbEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="49">
+        <Item class="ModuleScript" referent="50">
           <Properties>
             <string name="Name">ClimbView</string>
             <string name="Source"><![CDATA[--!strict
@@ -16496,7 +16627,10 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		end
 		if walker.FloorMaterial == Enum.Material.Air or tower == nil then return end
 		rayParams.FilterDescendantsInstances = { tower :: Instance }
-		local hit = workspace:Raycast(root.Position, Vector3.new(0, -(walker.HipHeight + root.Size.Y / 2 + 1.5), 0), rayParams)
+		-- Down to the feet and a little more (an R6 rig's HipHeight is 0, its legs
+		-- are under the root); a sphere catches landings on a platform's edge.
+		local down = Vector3.new(0, -(walker.HipHeight + root.Size.Y / 2 + (if walker.RigType == Enum.HumanoidRigType.R6 then 2 else 0) + 1.5), 0)
+		local hit = workspace:Raycast(root.Position, down, rayParams) or workspace:Spherecast(root.Position, 1, down, rayParams)
 		local index = if hit then hit.Instance:GetAttribute("ClimbIndex") else nil
 		if type(index) ~= "number" then return end
 		if index ~= lastLanded then
@@ -16586,6 +16720,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	local function onRestart()
 		if not active then return end
 		table.clear(rides)
+		winWaiting = nil
 		ClimbEffects.stop()
 		task.delay(0.2, backToCheckpoint)
 	end
@@ -16595,7 +16730,8 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		active = on
 		gui.Enabled = on
 		if not on then
-			ClimbEffects.stop()
+			-- The server is moving the climber elsewhere: no putting them back on the tower.
+			ClimbEffects.stop(true)
 			riding = false
 		else
 			lastLanded = attr("ClimbCheckpoint", 0)
@@ -16644,7 +16780,7 @@ return ClimbView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="50">
+        <Item class="ModuleScript" referent="51">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -16783,7 +16919,9 @@ end
 -- The player's field of view in the game (the lobby keeps the default).
 function FirstPerson.setFieldOfView(fov: number)
 	fieldOfView = math.clamp(math.floor(fov + 0.5), FirstPerson.FOV_MIN, FirstPerson.FOV_MAX)
-	applyCamera()
+	-- Only the field of view: the zoom limits belong to whichever game is on.
+	local camera = workspace.CurrentCamera
+	if camera then camera.FieldOfView = if enabled then fieldOfView else BASE_FOV end
 end
 
 function FirstPerson.fieldOfView(): number
@@ -17129,7 +17267,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="51">
+        <Item class="ModuleScript" referent="52">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -17169,6 +17307,7 @@ local Debris = game:GetService("Debris")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Format = require(Shared:WaitForChild("Format"))
+local CameraShake = require(script.Parent:WaitForChild("CameraShake"))
 
 local GiftEffects = {}
 
@@ -17248,7 +17387,7 @@ local function addShake(degrees: number)
 		shakeTime += dt
 		local t = shakeTime * 17
 		local a = math.rad(shake) * 1.5 -- math.noise stays within about ±0.5
-		camera.CFrame *= CFrame.Angles(math.noise(t, 0.3) * a, math.noise(t, 7.1) * a, math.noise(t, 13.7) * a * 0.5)
+		CameraShake.apply(camera, CFrame.Angles(math.noise(t, 0.3) * a, math.noise(t, 7.1) * a, math.noise(t, 13.7) * a * 0.5))
 		shake *= math.exp(-dt * 3.5)
 	end)
 end
@@ -18386,7 +18525,7 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="52">
+        <Item class="ModuleScript" referent="53">
           <Properties>
             <string name="Name">HowToPlay</string>
             <string name="Source"><![CDATA[--!strict
@@ -18697,7 +18836,7 @@ return HowToPlay
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="53">
+        <Item class="ModuleScript" referent="54">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
@@ -19260,7 +19399,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="54">
+        <Item class="ModuleScript" referent="55">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -19761,7 +19900,7 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="55">
+        <Item class="ModuleScript" referent="56">
           <Properties>
             <string name="Name">PetalView</string>
             <string name="Source"><![CDATA[--!strict
@@ -19863,7 +20002,7 @@ return PetalView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="56">
+        <Item class="ModuleScript" referent="57">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -19991,7 +20130,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="57">
+        <Item class="ModuleScript" referent="58">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -20138,12 +20277,12 @@ return SceneryView
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="58">
+  <Item class="Workspace" referent="59">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="59">
+    <Item class="Terrain" referent="60">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>

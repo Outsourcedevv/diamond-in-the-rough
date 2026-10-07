@@ -35,6 +35,7 @@ local Debris = game:GetService("Debris")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Format = require(Shared:WaitForChild("Format"))
+local CameraShake = require(script.Parent:WaitForChild("CameraShake"))
 
 local GiftEffects = {}
 
@@ -114,7 +115,7 @@ local function addShake(degrees: number)
 		shakeTime += dt
 		local t = shakeTime * 17
 		local a = math.rad(shake) * 1.5 -- math.noise stays within about ±0.5
-		camera.CFrame *= CFrame.Angles(math.noise(t, 0.3) * a, math.noise(t, 7.1) * a, math.noise(t, 13.7) * a * 0.5)
+		CameraShake.apply(camera, CFrame.Angles(math.noise(t, 0.3) * a, math.noise(t, 7.1) * a, math.noise(t, 13.7) * a * 0.5))
 		shake *= math.exp(-dt * 3.5)
 	end)
 end

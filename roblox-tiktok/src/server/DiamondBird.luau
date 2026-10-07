@@ -228,7 +228,12 @@ function DiamondBird.start(options: Options): Bird
 		click.MouseClick:Connect(function(player: Player) caught(player, bird) end)
 		bird.Parent = workspace
 		current = bird
-		options.notify:FireAllClients("feed", { text = "A diamond bird appeared! Click it for double gifts", stone = 0, kind = "notice" })
+		-- Only players at the mountain can catch it, so only they hear about it.
+		for _, player in game:GetService("Players"):GetPlayers() do
+			if player:GetAttribute("InGame") == true then
+				options.notify:FireClient(player, "feed", { text = "A diamond bird appeared! Click it for double gifts", stone = 0, kind = "notice" })
+			end
+		end
 	end
 
 	task.spawn(function()

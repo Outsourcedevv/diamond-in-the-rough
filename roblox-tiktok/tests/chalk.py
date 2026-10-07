@@ -62,6 +62,13 @@ for d = 0, 9 do
 	end
 end
 
+-- No stroke has zero length (a chalk part needs a direction).
+for d = 0, 9 do
+	for _, segment in ChalkBoard.segments(d, 0, 0, ChalkBoard.NUMBER_HEIGHT) do
+		check((segment[2] - segment[1]).Magnitude > 1e-3, "digit " .. d .. " has no zero-length stroke")
+	end
+end
+
 -- The biggest count fits on the board, above the writer's head.
 local halfWidth = ChalkBoard.BOARD_WIDTH / 2
 local lefts = ChalkBoard.digitLefts(ChalkBoard.MAX_DIGITS)
@@ -263,6 +270,7 @@ streamer:SetAttribute("InChalk", true)
 chalk.entered(streamer, true)
 check(chalk.writer() == streamer, "the streamer is the writer")
 check(humanoid.WalkSpeed == 0 and humanoid.JumpHeight == 0, "the writer stands still at the board")
+check(humanoid.AutoRotate == false, "the movement keys can't turn the writer away from the board")
 
 -- Holding writes three numbers a second; letting go stops.
 chalk.hold(streamer, true)
@@ -331,6 +339,10 @@ chalk.gift("Ivy", { type = "gift", gift = "Universe", coins = 34999 }, 1, false)
 check(chalk.progress.count == 50 and chalk.progress.wins == 1 and state:GetAttribute("ChalkWins") == 1, "a big gift reaches the goal and wins")
 check(last("chalkWin").wins == 1 and last("chalkWin").goal == 50 and last("chalkWin").name == "Niamh", "the win is celebrated")
 check(chalk.gift("Bo", { type = "gift", gift = "Perfume", coins = 100 }, -500, false) == "" and chalk.progress.count == 50, "gifts wait during the celebration")
+chalk.hold(streamer, true)
+advance(0.5)
+check(chalk.progress.count == 50 and state:GetAttribute("ChalkWriting") == false, "the arm rests during the celebration")
+chalk.hold(streamer, false)
 advance(ChalkGame.WIN_SECONDS + 0.1)
 check(chalk.progress.count == 0 and last("chalkWipe").reason == "win", "the board is wiped for the next count")
 advance(70)
@@ -361,7 +373,7 @@ chalk.hold(streamer, true)
 streamer:SetAttribute("InChalk", false)
 chalk.entered(streamer, false)
 advance(1)
-check(humanoid.WalkSpeed == 16 and humanoid.JumpHeight == 7.2, "walking again after leaving")
+check(humanoid.WalkSpeed == 16 and humanoid.JumpHeight == 7.2 and humanoid.AutoRotate == true, "walking again after leaving")
 check(chalk.progress.count == 0 and state:GetAttribute("ChalkWriting") == false and chalk.writer() == nil, "nobody writes after leaving")
 chalk.removing(streamer)
 print(string.format("PASS: %d chalkboard game checks", passed))
@@ -541,6 +553,14 @@ state:SetAttribute("ChalkWriting", false)
 step(0.2)
 check(live("HeldChalk") == 0, "the chalk is put down")
 local twelve = live("Chalk")
+-- Space is the jump key, so it arrives already used by the controls: it still writes.
+UserInputService.InputBegan:Fire({ UserInputType = "UserInputType.Keyboard", KeyCode = "KeyCode.Space" }, true)
+check(sent[#sent].action == "chalkHold" and sent[#sent].value == true, "Space writes even though the controls saw it")
+UserInputService.InputEnded:Fire({ UserInputType = "UserInputType.Keyboard", KeyCode = "KeyCode.Space" })
+check(sent[#sent].value == false, "letting go of Space stops")
+local clicks = #sent
+UserInputService.InputBegan:Fire({ UserInputType = "UserInputType.MouseButton1", KeyCode = "KeyCode.Unknown" }, true)
+check(#sent == clicks, "clicking a button doesn't write")
 local function strokes(d: number): number return #ChalkBoard.segments(d, 0, 0, 1) end
 check(twelve - zero == strokes(1) + strokes(2) + 1 - strokes(0), "12 is chalked in place of 0, with the progress line")
 
