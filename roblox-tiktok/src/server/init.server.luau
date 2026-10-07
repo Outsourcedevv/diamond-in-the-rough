@@ -577,6 +577,10 @@ local function newRound(animated: boolean?)
 		holdWeld:Destroy()
 		holdWeld = nil
 	end
+	-- Held, the diamond is unanchored: without this it falls out of the world
+	-- (and is destroyed) while the new mountain is built.
+	diamond.Anchored = true
+	diamond.AssemblyLinearVelocity = Vector3.zero
 	for _, player in Players:GetPlayers() do
 		teleportHome(player)
 	end
@@ -1475,7 +1479,9 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 		end
 		local now = os.clock()
 		local since = now - (mineCooldown[player] or 0)
-		local allowed = math.min(math.floor(since * Config.DigPerSecond + 0.5), math.ceil(Config.DigPerSecond / 4))
+		-- Up to two strikes' worth, so a strike that arrives late (network
+		-- jitter) makes up for the one before it that came early.
+		local allowed = math.min(math.floor(since * Config.DigPerSecond + 0.5), math.ceil(Config.DigPerSecond / 4) * 2)
 		if allowed < 1 then
 			return
 		end
@@ -1486,7 +1492,8 @@ Request.OnServerEvent:Connect(function(player: Player, action: any, value: any)
 			return
 		end
 		local at = current:keyPosition(key)
-		if (root.Position - at).Magnitude > 16 then
+		-- The client allows 16 studs; the server sees the player a moment late.
+		if (root.Position - at).Magnitude > 20 then
 			return
 		end
 		mineCooldown[player] = now
