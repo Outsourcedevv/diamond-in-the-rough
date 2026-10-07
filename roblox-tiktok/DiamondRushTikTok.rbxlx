@@ -14269,8 +14269,10 @@ RunService.Heartbeat:Connect(function()
 	player:SetAttribute("DiggingRock", digTarget() ~= nil)
 end)
 -- Each landed strike cracks the rock with a crunch; every fourth a bigger
--- chunk breaks away.
+-- chunk breaks away. Hits in a row climb a little in pitch (eight steps, then
+-- round again), and a pause starts the climb over.
 local strikes = 0
+local lastStrikeAt = -math.huge
 FirstPerson.onStrike(function()
 	local key = digTarget()
 	local character = player.Character
@@ -14278,8 +14280,11 @@ FirstPerson.onStrike(function()
 		Request:FireServer("mine", key)
 		local rock = aimTarget
 		local at = if rock then rock.Position else nil
+		local now = os.clock()
+		if now - lastStrikeAt > 0.6 then strikes = 0 end
+		lastStrikeAt = now
 		strikes += 1
-		Sounds.play("dig", at)
+		Sounds.play("dig", at, 1, Sounds.digPitch(strikes))
 		if strikes % 4 == 0 then Sounds.play("crumble", at) end
 	end
 end)
@@ -21718,9 +21723,10 @@ return SceneryView
 -- public; each cue layers a few of them at different pitches to make the
 -- sound. To use your own uploads instead, change the ids in FILES.
 --
--- Sounds.play(cue, at?, scale?) plays a cue: at a point in the world (it
--- fades with distance) or, without one, straight to the player. `scale`
--- (default 1) makes it louder and deeper for bigger gifts. The same cue is
+-- Sounds.play(cue, at?, scale?, pitch?) plays a cue: at a point in the world
+-- (it fades with distance) or, without one, straight to the player. `scale`
+-- (default 1) makes it louder and deeper for bigger gifts; `pitch` (default 1)
+-- raises or lowers every layer (digging climbs a little with each hit). The same cue is
 -- not started again within a few hundredths of a second, and only so many
 -- sounds play at once, so a hundred sparks never make a hundred sounds.
 local SoundService = game:GetService("SoundService")
@@ -21753,16 +21759,25 @@ Sounds.FILES = {
 export type Layer = { file: string, volume: number, pitch: { number }, delay: number? }
 
 Sounds.CUES = {
-	-- Digging: a hand hits the rock, it cracks and pebbles scatter.
+	-- Digging: a solid thump as the hand lands, a crisp crack as the rock
+	-- gives, then a little patter of pebbles. Kept short and bright so a
+	-- hundred a minute stay pleasant.
 	dig = {
-		{ file = "crunch", volume = 0.55, pitch = { 0.55, 0.7 } },
-		{ file = "snap", volume = 0.22, pitch = { 0.75, 0.95 } },
-		{ file = "click", volume = 0.12, pitch = { 0.6, 0.8 }, delay = 0.04 },
+		{ file = "land", volume = 0.32, pitch = { 0.78, 0.9 } },
+		{ file = "crunch", volume = 0.3, pitch = { 0.82, 0.96 } },
+		{ file = "snap", volume = 0.2, pitch = { 1.25, 1.5 } },
+		{ file = "click", volume = 0.09, pitch = { 1.35, 1.7 }, delay = 0.05 },
+		{ file = "click", volume = 0.06, pitch = { 0.95, 1.15 }, delay = 0.11 },
 	},
-	-- Every few strikes a bigger chunk breaks away.
+	-- Every fourth hit a chunk breaks away: a deeper crunch, a soft pop and
+	-- pebbles tumbling down.
 	crumble = {
-		{ file = "boom", volume = 0.14, pitch = { 1.7, 2.1 } },
-		{ file = "crunch", volume = 0.4, pitch = { 0.45, 0.55 }, delay = 0.03 },
+		{ file = "land", volume = 0.45, pitch = { 0.6, 0.68 } },
+		{ file = "crunch", volume = 0.38, pitch = { 0.55, 0.62 }, delay = 0.02 },
+		{ file = "boom", volume = 0.1, pitch = { 1.05, 1.2 }, delay = 0.02 },
+		{ file = "click", volume = 0.08, pitch = { 1.1, 1.3 }, delay = 0.09 },
+		{ file = "click", volume = 0.07, pitch = { 1.3, 1.5 }, delay = 0.16 },
+		{ file = "click", volume = 0.06, pitch = { 1.5, 1.8 }, delay = 0.24 },
 	},
 	-- Gift shows.
 	pop = {
@@ -21858,6 +21873,12 @@ local playing = 0
 local lastPlayed: { [string]: number } = {}
 local muted = false
 
+-- The pitch of the `streak`th hit in a row: up a small step each hit, eight
+-- steps, then round again.
+function Sounds.digPitch(streak: number): number
+	return 1 + ((math.max(1, math.floor(streak)) - 1) % 8) * 0.025
+end
+
 -- How many sounds are playing now.
 function Sounds.playingCount(): number
 	return playing
@@ -21868,12 +21889,12 @@ function Sounds.setMuted(value: boolean)
 	muted = value
 end
 
-local function startLayer(layer: Layer, at: Vector3?, scale: number)
+local function startLayer(layer: Layer, at: Vector3?, scale: number, shift: number)
 	if playing >= Sounds.MAX_PLAYING then return end
 	local file = Sounds.FILES[layer.file]
 	if file == nil then return end
 	local low, high = layer.pitch[1], layer.pitch[2] or layer.pitch[1]
-	local pitch = (low + (high - low) * math.random()) / math.sqrt(math.max(scale, 0.25))
+	local pitch = (low + (high - low) * math.random()) / math.sqrt(math.max(scale, 0.25)) * shift
 	local sound = Instance.new("Sound")
 	sound.SoundId = file
 	sound.Volume = math.min(2, layer.volume * math.sqrt(scale))
@@ -21909,7 +21930,7 @@ local function startLayer(layer: Layer, at: Vector3?, scale: number)
 end
 
 -- Plays cue `name`: at `at` in the world, or to the player when `at` is nil.
-function Sounds.play(name: string, at: Vector3?, scale: number?)
+function Sounds.play(name: string, at: Vector3?, scale: number?, pitch: number?)
 	if muted then return end
 	local cue = Sounds.CUES[name]
 	if cue == nil then return end
@@ -21917,13 +21938,14 @@ function Sounds.play(name: string, at: Vector3?, scale: number?)
 	if now - (lastPlayed[name] or -math.huge) < Sounds.REPEAT_SECONDS then return end
 	lastPlayed[name] = now
 	local size = scale or 1
+	local shift = math.clamp(pitch or 1, 0.25, 4)
 	for _, layer in cue do
 		if layer.delay and layer.delay > 0 then
 			task.delay(layer.delay, function()
-				pcall(startLayer, layer, at, size)
+				pcall(startLayer, layer, at, size, shift)
 			end)
 		else
-			pcall(startLayer, layer, at, size)
+			pcall(startLayer, layer, at, size, shift)
 		end
 	end
 end
