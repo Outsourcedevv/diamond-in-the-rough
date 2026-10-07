@@ -3,10 +3,15 @@
 // Uses Node's single executable applications (SEA). Run from bridge/:
 //   node tools/build-exe.mjs [path to node-vXX-win-x64/node.exe] [output]
 // The node.exe must be the same version as the Node running this script.
+// The game owner's Open Cloud key and universe ID go inside the .exe, so
+// streamers' connectors reach the published game. They come from
+// bridge/roblox-cloud.txt (never committed) or from the DIAMOND_RUSH_UNIVERSE_ID
+// and DIAMOND_RUSH_API_KEY environment variables.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseCloudFile } from '../cloud.mjs';
 
 const bridge = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const work = path.join(bridge, 'build');
@@ -14,10 +19,21 @@ const target = path.resolve(process.argv[2] ?? process.execPath);
 const output = path.resolve(process.argv[3] ?? path.join(work, process.platform === 'win32' || target.endsWith('.exe') ? 'DiamondRushBridge.exe' : 'diamond-rush-bridge'));
 fs.mkdirSync(work, { recursive: true });
 
+let cloud = { universeId: process.env.DIAMOND_RUSH_UNIVERSE_ID ?? '', apiKey: process.env.DIAMOND_RUSH_API_KEY ?? '' };
+if (!cloud.universeId || !cloud.apiKey) {
+  try { cloud = parseCloudFile(fs.readFileSync(path.join(bridge, 'roblox-cloud.txt'), 'utf8')); } catch {}
+}
+if (!cloud.universeId || !cloud.apiKey) {
+  console.warn('No Roblox key found (bridge/roblox-cloud.txt): this .exe will only reach Roblox Studio.');
+}
+
 const run = (command, args) => execFileSync(command, args, { cwd: bridge, stdio: 'inherit', shell: process.platform === 'win32' });
 
 // 1. One CommonJS file with every package inside.
-run('npx', ['--yes', 'esbuild@0.24.0', 'bridge.mjs', '--bundle', '--platform=node', '--format=cjs', '--target=node22', '--log-level=warning',
+// The key is set up first, then the bridge runs (imports run in order).
+fs.writeFileSync(path.join(work, 'cloud-setup.mjs'), `globalThis.__DIAMOND_RUSH_CLOUD__ = ${JSON.stringify(cloud)};\n`);
+fs.writeFileSync(path.join(work, 'entry.mjs'), "import './cloud-setup.mjs';\nimport '../bridge.mjs';\n");
+run('npx', ['--yes', 'esbuild@0.24.0', path.join('build', 'entry.mjs'), '--bundle', '--platform=node', '--format=cjs', '--target=node22', '--log-level=warning',
   `--outfile=${path.join(work, 'bridge.cjs')}`,
   "--banner:js=globalThis.__DIAMOND_RUSH_SEA__ = { asset: (name) => Buffer.from(require('node:sea').getAsset(name)) };"]);
 
