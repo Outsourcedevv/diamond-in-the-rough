@@ -60,6 +60,12 @@ local Config = {
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
 	MessagingTopic = "DiamondRushTikTok", -- Open Cloud topic (published games)
+	-- The relay: lets any number of streamers play one published game, each
+	-- with their own gifts. Put the relay's address here (see relay/README.md)
+	-- and each streamer types their game code in the Y panel. Roblox must be
+	-- allowed to reach it: Game Settings > Security > Allow HTTP Requests.
+	RelayUrl = "", -- (live) e.g. "https://my-relay.example.com"
+	RelayMaxCodeLength = 12,
 
 	-- Single player: whoever plays is the streamer, so every player gets the Y
 	-- panel, test gifts and gift keybinds. Set to false for a game where others

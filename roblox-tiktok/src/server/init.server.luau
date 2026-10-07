@@ -78,6 +78,11 @@ local settings = {
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
 	statues = {} :: { any },
+	-- The streamer's game code on the relay (a published game many streamers
+	-- play). Empty means this game reads gifts from the bridge on this PC or
+	-- from its own Open Cloud key instead.
+	gameCode = "",
+	relayUrl = Config.RelayUrl,
 	theme = "default", -- the map's look: "default" (alpine), "sakura", "farm", "desert" or "haunted"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 	-- Diamond Climb's progress, chosen speed and jump, and gift strength (see ClimbGame).
@@ -115,6 +120,10 @@ if saved then
 		end
 		return rules
 	end
+	-- An older save has no relay address; the game's own setting is used then.
+	if settings.relayUrl == "" then settings.relayUrl = Config.RelayUrl end
+	settings.gameCode = string.upper((string.gsub(settings.gameCode, "[^%w]", "")))
+	if #settings.gameCode > Config.RelayMaxCodeLength then settings.gameCode = "" end
 	settings.giftRules = cleanRules(settings.giftRules, 1500000)
 	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
 	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
@@ -152,6 +161,8 @@ local function publishSettings()
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
+	State:SetAttribute("GameCode", settings.gameCode)
+	State:SetAttribute("RelayUrl", settings.relayUrl)
 	State:SetAttribute("Theme", settings.theme)
 	State:SetAttribute("Skin", settings.skin)
 end
@@ -1165,9 +1176,19 @@ function enqueue(event: TikTokFeed.Event)
 	end)
 end
 
-TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, function(status: string)
+local function setTikTokStatus(status: string)
 	State:SetAttribute("TikTok", status)
-end)
+end
+TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, setTikTokStatus)
+
+-- A published game played by many streamers: read this streamer's own gifts
+-- from the relay, under the game code they typed in the Y panel.
+local function useRelay()
+	TikTokFeed.useRelay(settings.relayUrl, settings.gameCode, onTikTok, function(status: string)
+		State:SetAttribute("TikTok", if settings.gameCode == "" then status else status .. " (code " .. settings.gameCode .. ")")
+	end)
+end
+useRelay()
 
 -- Pickaxe mining and settings ---------------------------------------------------------
 local function isAdmin(player: Player): boolean
@@ -1458,6 +1479,31 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
+		return
+	elseif action == "setGameCode" and type(value) == "string" then
+		-- GAME CODE in the Y panel: the code the bridge's control page shows.
+		-- The relay then sends this streamer's gifts to this game.
+		local code = string.upper((string.gsub(value, "[^%w]", "")))
+		if #code > Config.RelayMaxCodeLength then
+			notice(player, "That game code is too long. Copy it from the control page.")
+			return
+		end
+		settings.gameCode = code
+		saveSettings()
+		useRelay()
+		notice(player, if code == "" then "Game code cleared." else "Game code set to " .. code .. ".")
+		return
+	elseif action == "setRelayUrl" and type(value) == "string" then
+		-- The relay's address, for a streamer running their own relay.
+		local url = (string.gsub(value, "%s", ""))
+		if url ~= "" and not string.match(url, "^https?://[%w%.%-]+[%w%./%-:]*$") then
+			notice(player, "Enter the relay address, like https://my-relay.example.com")
+			return
+		end
+		settings.relayUrl = (string.gsub(url, "/+$", ""))
+		saveSettings()
+		useRelay()
+		notice(player, if settings.relayUrl == "" then "Relay cleared." else "Relay set.")
 		return
 	elseif action == "setTheme" and type(value) == "string" then
 		setTheme(value)

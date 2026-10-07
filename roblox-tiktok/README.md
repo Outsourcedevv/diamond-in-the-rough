@@ -253,6 +253,22 @@ The game is **single player** (`SinglePlayer = true` in `src/shared/Config.luau`
 
 To show the Blender mountains and trees in the published game, also turn on **Enable Mesh / Image APIs** (see [Blender scenery](#blender-scenery)).
 
+## Many streamers on one published game (optional)
+
+Open Cloud works for your own game, but it has two problems once other streamers play it: every gift goes to every server, and each streamer would need your API key. The **relay** in `relay/` solves both. You host it once, and each streamer gets a **game code**.
+
+```
+TikTok LIVE  ->  bridge (the streamer's PC)  ->  relay (hosted once)  ->  that streamer's game server
+```
+
+**As the game's owner, once:** host `relay/relay.mjs` somewhere with a public HTTPS address (`node relay.mjs`, no dependencies, nothing stored on disk), turn on **Allow HTTP Requests** in Game Settings → Security, and put the address in `RelayUrl` in `src/shared/Config.luau`. See [relay/README.md](relay/README.md) for the details and limits.
+
+**As a streamer, each time:** run the bridge, connect your TikTok username, then on the control page under **Playing the published game** paste the relay address (if the game doesn't already know it) and press **Save**. The page shows your game code, such as `ABCD EFGH`. In the game, press **Y**, scroll to **GAME CODE** and type it in. Your server then receives only your gifts.
+
+The code comes from a secret in your bridge's `config.json`, so only your bridge can send gifts under it. Keep the code to yourself: anyone with it and the relay's address could watch your gifts go by. Deleting `config.json` gives you a new code.
+
+One relay serves any number of streamers: it keeps only a few hundred recent events each, in memory, and holds each game's request open until a gift arrives, so gifts land about as fast as in Studio.
+
 ## Troubleshooting
 
 - **"Bridge app not running"** in the game: start **Start Bridge.bat** and keep its window open.
@@ -260,6 +276,8 @@ To show the Blender mountains and trees in the published game, also turn on **En
 - **TikTok "could not connect"**: check the username (no @ needed). TikTok sometimes rate-limits; wait a minute.
 - **Nothing happens on gifts but test gifts work**: make sure the control page says *connected to @yourname*.
 - **The page says "waiting for Roblox Studio"**: press Play in Studio. HTTP requests must be allowed (see above).
+- **The game says "can't reach the relay (check the game code)"**: the code in the **Y** panel must match the one on the control page, the relay must be running, and Game Settings → Security → Allow HTTP Requests must be on.
+- **The game says "waiting for your bridge"**: the code is right but no bridge is sending under it. Check the control page says *sending to the relay*.
 - **No mountain in Studio's Server view**: that is expected. Each player's client draws the rock; switch back to the Client view. Use **Play** (F5), not **Run** (F8), which has no client.
 - **No Blender mountains or trees in the published game**: Roblox only lets a published game build meshes once Mesh / Image APIs are turned on. See [Blender scenery](#blender-scenery) for that, or for importing the pack instead.
 - **The world looks flat or old-fashioned**: open the place file from this folder. It sets Future lighting and the 2022 material pack, which scripts cannot change. In an older copy, set **Lighting → LightingStyle** to Realistic and **MaterialService → Use2022Materials** on.

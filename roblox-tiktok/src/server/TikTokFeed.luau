@@ -3,7 +3,10 @@
 --  * In Roblox Studio the game polls the bridge on this PC over HTTP.
 --  * In a published game the bridge publishes to MessagingService through
 --    Roblox Open Cloud (see the README), and the game subscribes here.
--- Both paths can run at once; every event has a unique id and runs once.
+--  * A published game that many streamers play reads the streamer's own
+--    events from the relay, using the game code they typed in the Y panel
+--    (see relay/relay.mjs). Only that code's gifts arrive.
+-- Every path can run at once; every event has a unique id and runs once.
 local HttpService = game:GetService("HttpService")
 local MessagingService = game:GetService("MessagingService")
 local RunService = game:GetService("RunService")
@@ -66,6 +69,76 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 	if not ok then
 		warn("[DiamondRush] event failed: " .. tostring(problem))
 	end
+end
+
+-- The relay (a published game played by many streamers) ------------------------
+-- The game asks the relay for its code's events and holds the request open
+-- until something arrives, so gifts land about as fast as in Studio.
+local RELAY_WAIT = 15
+local relayCode = ""
+local relayUrl = ""
+-- Goes up whenever the code or address changes, so an older loop stops.
+local relayGeneration = 0
+
+local function relayLoop(generation: number, onEvent: (Event) -> (), onStatus: (string) -> ())
+	local session = ""
+	local since = 0
+	local failures = 0
+	local code = relayCode
+	while relayGeneration == generation and code ~= "" do
+		local url = string.format(
+			"%s/c/%s/events?since=%d&session=%s&wait=%d",
+			relayUrl,
+			HttpService:UrlEncode(code),
+			since,
+			HttpService:UrlEncode(session),
+			RELAY_WAIT
+		)
+		local ok, body = pcall(HttpService.GetAsync, HttpService, url, true)
+		local decoded, data = false, nil
+		if ok then
+			decoded, data = pcall(HttpService.JSONDecode, HttpService, body)
+		end
+		if decoded and type(data) == "table" and type(data.events) == "table" then
+			failures = 0
+			if data.session ~= session then
+				session = tostring(data.session)
+				since = 0
+			end
+			for _, raw in data.events do
+				deliver(raw, onEvent)
+			end
+			if type(data.last) == "number" then
+				since = data.last
+			end
+			onStatus(if type(data.tiktok) == "string" and data.tiktok ~= "" then data.tiktok else "waiting for your bridge")
+			task.wait(0.2)
+		else
+			failures += 1
+			onStatus(if failures > 2 then "can't reach the relay (check the game code)" else "connecting to the relay…")
+			task.wait(math.min(2 * failures, 15))
+		end
+	end
+end
+
+-- The streamer's game code and the relay's address, from the Y panel. An empty
+-- code stops reading from the relay.
+function TikTokFeed.useRelay(url: string, code: string, onEvent: (Event) -> (), onStatus: (string) -> ())
+	local cleanUrl = (string.gsub(url, "/+$", ""))
+	-- The streamer may type the code with a space or dash, as it is shown.
+	local cleanCode = if cleanUrl == "" then "" else string.upper((string.gsub(code, "[^%w]", "")))
+	if cleanUrl == relayUrl and cleanCode == relayCode then
+		return
+	end
+	relayUrl = cleanUrl
+	relayCode = cleanCode
+	-- Any loop still running is for the old code, so it stops on its own.
+	relayGeneration += 1
+	if relayCode == "" then
+		onStatus("no game code set")
+		return
+	end
+	task.spawn(relayLoop, relayGeneration, onEvent, onStatus)
 end
 
 -- onStatus receives a short line for the screen, such as

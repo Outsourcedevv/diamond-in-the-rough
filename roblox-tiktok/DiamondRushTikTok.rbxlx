@@ -500,6 +500,12 @@ local Config = {
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
 	MessagingTopic = "DiamondRushTikTok", -- Open Cloud topic (published games)
+	-- The relay: lets any number of streamers play one published game, each
+	-- with their own gifts. Put the relay's address here (see relay/README.md)
+	-- and each streamer types their game code in the Y panel. Roblox must be
+	-- allowed to reach it: Game Settings > Security > Allow HTTP Requests.
+	RelayUrl = "", -- (live) e.g. "https://my-relay.example.com"
+	RelayMaxCodeLength = 12,
 
 	-- Single player: whoever plays is the streamer, so every player gets the Y
 	-- panel, test gifts and gift keybinds. Set to false for a game where others
@@ -5065,6 +5071,11 @@ local settings = {
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
 	statues = {} :: { any },
+	-- The streamer's game code on the relay (a published game many streamers
+	-- play). Empty means this game reads gifts from the bridge on this PC or
+	-- from its own Open Cloud key instead.
+	gameCode = "",
+	relayUrl = Config.RelayUrl,
 	theme = "default", -- the map's look: "default" (alpine), "sakura", "farm", "desert" or "haunted"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 	-- Diamond Climb's progress, chosen speed and jump, and gift strength (see ClimbGame).
@@ -5102,6 +5113,10 @@ if saved then
 		end
 		return rules
 	end
+	-- An older save has no relay address; the game's own setting is used then.
+	if settings.relayUrl == "" then settings.relayUrl = Config.RelayUrl end
+	settings.gameCode = string.upper((string.gsub(settings.gameCode, "[^%w]", "")))
+	if #settings.gameCode > Config.RelayMaxCodeLength then settings.gameCode = "" end
 	settings.giftRules = cleanRules(settings.giftRules, 1500000)
 	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
 	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
@@ -5139,6 +5154,8 @@ local function publishSettings()
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
+	State:SetAttribute("GameCode", settings.gameCode)
+	State:SetAttribute("RelayUrl", settings.relayUrl)
 	State:SetAttribute("Theme", settings.theme)
 	State:SetAttribute("Skin", settings.skin)
 end
@@ -6152,9 +6169,19 @@ function enqueue(event: TikTokFeed.Event)
 	end)
 end
 
-TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, function(status: string)
+local function setTikTokStatus(status: string)
 	State:SetAttribute("TikTok", status)
-end)
+end
+TikTokFeed.start(Config.BridgeUrls, Config.MessagingTopic, onTikTok, setTikTokStatus)
+
+-- A published game played by many streamers: read this streamer's own gifts
+-- from the relay, under the game code they typed in the Y panel.
+local function useRelay()
+	TikTokFeed.useRelay(settings.relayUrl, settings.gameCode, onTikTok, function(status: string)
+		State:SetAttribute("TikTok", if settings.gameCode == "" then status else status .. " (code " .. settings.gameCode .. ")")
+	end)
+end
+useRelay()
 
 -- Pickaxe mining and settings ---------------------------------------------------------
 local function isAdmin(player: Player): boolean
@@ -6445,6 +6472,31 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
+		return
+	elseif action == "setGameCode" and type(value) == "string" then
+		-- GAME CODE in the Y panel: the code the bridge's control page shows.
+		-- The relay then sends this streamer's gifts to this game.
+		local code = string.upper((string.gsub(value, "[^%w]", "")))
+		if #code > Config.RelayMaxCodeLength then
+			notice(player, "That game code is too long. Copy it from the control page.")
+			return
+		end
+		settings.gameCode = code
+		saveSettings()
+		useRelay()
+		notice(player, if code == "" then "Game code cleared." else "Game code set to " .. code .. ".")
+		return
+	elseif action == "setRelayUrl" and type(value) == "string" then
+		-- The relay's address, for a streamer running their own relay.
+		local url = (string.gsub(value, "%s", ""))
+		if url ~= "" and not string.match(url, "^https?://[%w%.%-]+[%w%./%-:]*$") then
+			notice(player, "Enter the relay address, like https://my-relay.example.com")
+			return
+		end
+		settings.relayUrl = (string.gsub(url, "/+$", ""))
+		saveSettings()
+		useRelay()
+		notice(player, if settings.relayUrl == "" then "Relay cleared." else "Relay set.")
 		return
 	elseif action == "setTheme" and type(value) == "string" then
 		setTheme(value)
@@ -12173,7 +12225,10 @@ return Store
 --  * In Roblox Studio the game polls the bridge on this PC over HTTP.
 --  * In a published game the bridge publishes to MessagingService through
 --    Roblox Open Cloud (see the README), and the game subscribes here.
--- Both paths can run at once; every event has a unique id and runs once.
+--  * A published game that many streamers play reads the streamer's own
+--    events from the relay, using the game code they typed in the Y panel
+--    (see relay/relay.mjs). Only that code's gifts arrive.
+-- Every path can run at once; every event has a unique id and runs once.
 local HttpService = game:GetService("HttpService")
 local MessagingService = game:GetService("MessagingService")
 local RunService = game:GetService("RunService")
@@ -12236,6 +12291,76 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 	if not ok then
 		warn("[DiamondRush] event failed: " .. tostring(problem))
 	end
+end
+
+-- The relay (a published game played by many streamers) ------------------------
+-- The game asks the relay for its code's events and holds the request open
+-- until something arrives, so gifts land about as fast as in Studio.
+local RELAY_WAIT = 15
+local relayCode = ""
+local relayUrl = ""
+-- Goes up whenever the code or address changes, so an older loop stops.
+local relayGeneration = 0
+
+local function relayLoop(generation: number, onEvent: (Event) -> (), onStatus: (string) -> ())
+	local session = ""
+	local since = 0
+	local failures = 0
+	local code = relayCode
+	while relayGeneration == generation and code ~= "" do
+		local url = string.format(
+			"%s/c/%s/events?since=%d&session=%s&wait=%d",
+			relayUrl,
+			HttpService:UrlEncode(code),
+			since,
+			HttpService:UrlEncode(session),
+			RELAY_WAIT
+		)
+		local ok, body = pcall(HttpService.GetAsync, HttpService, url, true)
+		local decoded, data = false, nil
+		if ok then
+			decoded, data = pcall(HttpService.JSONDecode, HttpService, body)
+		end
+		if decoded and type(data) == "table" and type(data.events) == "table" then
+			failures = 0
+			if data.session ~= session then
+				session = tostring(data.session)
+				since = 0
+			end
+			for _, raw in data.events do
+				deliver(raw, onEvent)
+			end
+			if type(data.last) == "number" then
+				since = data.last
+			end
+			onStatus(if type(data.tiktok) == "string" and data.tiktok ~= "" then data.tiktok else "waiting for your bridge")
+			task.wait(0.2)
+		else
+			failures += 1
+			onStatus(if failures > 2 then "can't reach the relay (check the game code)" else "connecting to the relay…")
+			task.wait(math.min(2 * failures, 15))
+		end
+	end
+end
+
+-- The streamer's game code and the relay's address, from the Y panel. An empty
+-- code stops reading from the relay.
+function TikTokFeed.useRelay(url: string, code: string, onEvent: (Event) -> (), onStatus: (string) -> ())
+	local cleanUrl = (string.gsub(url, "/+$", ""))
+	-- The streamer may type the code with a space or dash, as it is shown.
+	local cleanCode = if cleanUrl == "" then "" else string.upper((string.gsub(code, "[^%w]", "")))
+	if cleanUrl == relayUrl and cleanCode == relayCode then
+		return
+	end
+	relayUrl = cleanUrl
+	relayCode = cleanCode
+	-- Any loop still running is for the old code, so it stops on its own.
+	relayGeneration += 1
+	if relayCode == "" then
+		onStatus("no game code set")
+		return
+	end
+	task.spawn(relayLoop, relayGeneration, onEvent, onStatus)
 end
 
 -- onStatus receives a short line for the screen, such as
@@ -13435,6 +13560,19 @@ panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
 
+-- A published game that many streamers play: the code from the bridge's
+-- control page tells the relay which stream's gifts belong to this game.
+panelLabel("GAME CODE (published game: from localhost:8787)")
+local gameCodeBox = panelBox("", function(text)
+	send("setGameCode", text)
+end)
+gameCodeBox.PlaceholderText = "e.g. ABCD EFGH, or empty for none"
+panelLabel("RELAY ADDRESS (only if you run your own relay)")
+local relayBox = panelBox("", function(text)
+	send("setRelayUrl", text)
+end)
+relayBox.PlaceholderText = "https://my-relay.example.com"
+
 panelLabel("MAP THEME (changes for everyone straight away)")
 local THEME_BUTTONS = { { "Alpine", "default" }, { "Sakura", "sakura" }, { "Farm", "farm" }, { "Desert", "desert" }, { "Haunted", "haunted" } }
 local themeButtons: { TextButton } = {}
@@ -13622,6 +13760,9 @@ local function refreshPanelFields()
 	perLikeBox.Text = "Like: " .. tostring(attr("PerLike", Config.StonePerLike))
 	perFollowBox.Text = "Follow: " .. tostring(attr("PerFollow", Config.StonePerFollow))
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
+	local code = attr("GameCode", "")
+	gameCodeBox.Text = if #code == 8 then string.sub(code, 1, 4) .. " " .. string.sub(code, 5) else code
+	relayBox.Text = attr("RelayUrl", Config.RelayUrl)
 end
 
 -- Settings (every player): the field of view and hiding the buttons, from the

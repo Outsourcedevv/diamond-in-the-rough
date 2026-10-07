@@ -1,0 +1,15 @@
+{
+  "name": "diamond-rush-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lets many streamers play the published Diamond Rush game at once: bridges send TikTok events here under a game code.",
+  "type": "module",
+  "main": "relay.mjs",
+  "scripts": {
+    "start": "node relay.mjs",
+    "test": "node --test *.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

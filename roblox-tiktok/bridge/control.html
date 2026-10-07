@@ -104,6 +104,7 @@
     .scene > * { transform: none !important; }
     .scroll-hint span { animation: none; }
   }
+.code-line strong{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.3rem;letter-spacing:.14em}
 </style>
 </head>
 <body>
@@ -323,8 +324,20 @@
   </section>
 
   <section>
+    <h2>Playing the published game</h2>
+    <p>Your game code is how the game knows the gifts are yours. In the game, press <strong>Y</strong>, scroll to <strong>GAME CODE</strong> and type it in. Keep it to yourself: anyone with your relay address and code could watch your gifts go by.</p>
+    <p class="code-line">Game code: <strong id="gameCode">…</strong></p>
+    <form class="row" id="relayForm">
+      <input id="relayUrl" placeholder="Relay address, e.g. https://my-relay.example.com" autocomplete="off" aria-label="Relay address">
+      <button>Save</button>
+    </form>
+    <p id="relayState" style="margin-top:10px" role="status"></p>
+    <p><small>The relay is the small program in the <code>relay</code> folder. One relay serves any number of streamers, and the game's owner hosts it. Leave this empty to play in Roblox Studio or with your own Open Cloud key.</small></p>
+  </section>
+
+  <section>
     <details>
-      <summary>Published game (optional): Roblox Open Cloud</summary>
+      <summary>Your own published game (optional): Roblox Open Cloud</summary>
       <p style="margin-top:12px">Only needed when you play the published game instead of pressing Play in Roblox Studio. See the README for how to make the key.</p>
       <form class="row" id="cloud">
         <input id="universe" placeholder="Universe ID (Experience ID)" autocomplete="off" aria-label="Universe ID">
@@ -423,6 +436,17 @@ for (const [label, body] of tests) {
 document.getElementById('connect').onsubmit = (event) => {
   event.preventDefault();
   post('/connect', { username: document.getElementById('username').value }).then(refresh);
+};
+document.getElementById('relayForm').onsubmit = async (event) => {
+  event.preventDefault();
+  const state = document.getElementById('relayState');
+  try {
+    const response = await post('/relay', { url: document.getElementById('relayUrl').value });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    state.textContent = data.gameCode ? 'Saved.' : 'Saved.';
+    await refresh();
+  } catch (error) { state.textContent = error.message; }
 };
 document.getElementById('cloud').onsubmit = (event) => {
   event.preventDefault();
@@ -570,8 +594,15 @@ async function refresh() {
     roblox.className = data.roblox.startsWith('connected') ? 'good' : 'wait';
     if (!filled) {
       document.getElementById('username').value = data.username || '';
+      document.getElementById('relayUrl').value = data.relayUrl || '';
       filled = true;
     }
+    document.getElementById('gameCode').textContent = `${data.gameCode.slice(0, 4)} ${data.gameCode.slice(4)}`;
+    const relayState = document.getElementById('relayState');
+    relayState.textContent = data.relay === 'off'
+      ? 'No relay set: gifts go to Roblox Studio, or to your own game through Open Cloud.'
+      : `Relay: ${data.relay}`;
+    relayState.className = data.relay.startsWith('sending') ? 'good' : data.relay === 'off' ? '' : 'wait';
     document.getElementById('cloudState').textContent = data.openCloud ? 'Open Cloud is set up: events also go to the published game.' : 'Open Cloud is off.';
     const list = document.getElementById('recent');
     list.replaceChildren(...(data.recent.length ? data.recent : [null]).map((event) => {
