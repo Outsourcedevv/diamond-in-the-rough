@@ -249,6 +249,13 @@
   </section>
 
   <section>
+    <h2>Your game code</h2>
+    <p>The game code is how the game knows the gifts are yours. In Diamond Rush on Roblox, press <strong>Y</strong>, scroll to <strong>GAME CODE</strong> and type it in. It stays the same every time you open the connector on this PC.</p>
+    <p class="code-line">Game code: <strong id="gameCode">…</strong></p>
+    <p><small>Keep it off your stream: anyone who knows it could try to send pretend gifts to your game.</small></p>
+  </section>
+
+  <section>
     <h2>1 · Connect your TikTok LIVE</h2>
     <p>Go live on TikTok first, then enter your username (the part after @).</p>
     <form class="row" id="connect">
@@ -317,30 +324,6 @@
     <ul id="recent"><li><small>Nothing yet.</small></li></ul>
   </section>
 
-  <section>
-    <h2>Playing the published game</h2>
-    <p>Your game code is how the game knows the gifts are yours. In the game, press <strong>Y</strong>, scroll to <strong>GAME CODE</strong> and type it in. Keep it to yourself: anyone with your relay address and code could watch your gifts go by.</p>
-    <p class="code-line">Game code: <strong id="gameCode">…</strong></p>
-    <form class="row" id="relayForm">
-      <input id="relayUrl" placeholder="Relay address, e.g. https://my-relay.example.com" autocomplete="off" aria-label="Relay address">
-      <button>Save</button>
-    </form>
-    <p id="relayState" style="margin-top:10px" role="status"></p>
-    <p><small>The relay is the small program in the <code>relay</code> folder. One relay serves any number of streamers, and the game's owner hosts it. Leave this empty to play in Roblox Studio or with your own Open Cloud key.</small></p>
-  </section>
-
-  <section>
-    <details>
-      <summary>Your own published game (optional): Roblox Open Cloud</summary>
-      <p style="margin-top:12px">Only needed when you play the published game instead of pressing Play in Roblox Studio. See the README for how to make the key.</p>
-      <form class="row" id="cloud">
-        <input id="universe" placeholder="Universe ID (Experience ID)" autocomplete="off" aria-label="Universe ID">
-        <input id="apikey" placeholder="Open Cloud API key" type="password" autocomplete="off" aria-label="Open Cloud API key">
-        <button>Save</button>
-      </form>
-      <p id="cloudState" style="margin-top:10px"></p>
-    </details>
-  </section>
 </main>
 <footer>May your mountain crumble and your diamond shine</footer>
 
@@ -388,22 +371,6 @@ document.getElementById('connect').onsubmit = (event) => {
   event.preventDefault();
   post('/connect', { username: document.getElementById('username').value }).then(refresh);
 };
-document.getElementById('relayForm').onsubmit = async (event) => {
-  event.preventDefault();
-  const state = document.getElementById('relayState');
-  try {
-    const response = await post('/relay', { url: document.getElementById('relayUrl').value });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
-    state.textContent = data.gameCode ? 'Saved.' : 'Saved.';
-    await refresh();
-  } catch (error) { state.textContent = error.message; }
-};
-document.getElementById('cloud').onsubmit = (event) => {
-  event.preventDefault();
-  post('/opencloud', { universeId: document.getElementById('universe').value, apiKey: document.getElementById('apikey').value }).then(refresh);
-};
-
 let giftCatalogue = [], giftRules = {}, selectedGift = null, gameRules = { climb: {}, chalk: {} };
 const catalogueBox = document.getElementById('catalogue');
 function drawCatalogue() {
@@ -528,20 +495,13 @@ async function refresh() {
     tiktok.textContent = data.tiktok;
     tiktok.className = data.tiktok.startsWith('connected') ? 'good' : 'wait';
     const roblox = document.getElementById('roblox');
-    roblox.textContent = data.openCloud ? `${data.roblox} · Open Cloud on` : data.roblox;
-    roblox.className = data.roblox.startsWith('connected') ? 'good' : 'wait';
+    roblox.textContent = data.roblox;
+    roblox.className = data.roblox.startsWith('connected') || data.roblox.startsWith('sending') || data.roblox.startsWith('ready') ? 'good' : 'wait';
     if (!filled) {
       document.getElementById('username').value = data.username || '';
-      document.getElementById('relayUrl').value = data.relayUrl || '';
       filled = true;
     }
     document.getElementById('gameCode').textContent = `${data.gameCode.slice(0, 4)} ${data.gameCode.slice(4)}`;
-    const relayState = document.getElementById('relayState');
-    relayState.textContent = data.relay === 'off'
-      ? 'No relay set: gifts go to Roblox Studio, or to your own game through Open Cloud.'
-      : `Relay: ${data.relay}`;
-    relayState.className = data.relay.startsWith('sending') ? 'good' : data.relay === 'off' ? '' : 'wait';
-    document.getElementById('cloudState').textContent = data.openCloud ? 'Open Cloud is set up: events also go to the published game.' : 'Open Cloud is off.';
     const list = document.getElementById('recent');
     list.replaceChildren(...(data.recent.length ? data.recent : [null]).map((event) => {
       const item = document.createElement('li');

@@ -59,13 +59,11 @@ local Config = {
 
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
-	MessagingTopic = "DiamondRushTikTok", -- Open Cloud topic (published games)
-	-- The relay: lets any number of streamers play one published game, each
-	-- with their own gifts. Put the relay's address here (see relay/README.md)
-	-- and each streamer types their game code in the Y panel. Roblox must be
-	-- allowed to reach it: Game Settings > Security > Allow HTTP Requests.
-	RelayUrl = "", -- (live) e.g. "https://my-relay.example.com"
-	RelayMaxCodeLength = 12,
+	-- The published game: each streamer's connector sends their gifts through
+	-- Roblox Open Cloud on this topic plus their game code (bridge/cloud.mjs
+	-- uses the same prefix), and they type the code in the Y panel.
+	MessagingTopicPrefix = "DiamondRush_",
+	GameCodeMaxLength = 12,
 	-- Where streamers get the TikTok connector. Roblox does not allow links
 	-- that lead off Roblox inside the game, so name the place and put the
 	-- actual Discord invite under Social Links on the game's page.

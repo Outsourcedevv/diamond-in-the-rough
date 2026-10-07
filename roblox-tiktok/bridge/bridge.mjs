@@ -1,15 +1,16 @@
 // DIAMOND RUSH TikTok bridge.
 // Connects to a TikTok LIVE and hands gifts, likes, follows and shares to the
-// Roblox game: Roblox Studio polls http://localhost:8787/events, and published
-// games can receive them through Roblox Open Cloud MessagingService.
+// Roblox game. The published game receives them through Roblox Open Cloud
+// MessagingService, on the topic for this PC's game code (see cloud.mjs);
+// Roblox Studio can also poll http://localhost:8787/events.
 // Open http://localhost:8787 for the control page (connect + test gifts).
 import http from 'node:http';
 import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue, GAMES, defaultGameRules, validateGameRule, CONNECT_OPTIONS, learnGift, catalogueError, mergeGifts } from './catalogue.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createEventQueue, createGiftTracker, likeEvent, socialEvent, packMessages, themeEvent, THEMES, skinEvent, SKINS } from './events.mjs';
-import { codeFor } from '../relay/relay.mjs';
+import { createEventQueue, createGiftTracker, likeEvent, socialEvent, themeEvent, THEMES, skinEvent, SKINS } from './events.mjs';
+import { codeFor, topicFor, parseCloudFile, takeMessage, ruleId, SEND_EVERY_MS } from './cloud.mjs';
 import { randomBytes } from 'node:crypto';
 
 // Packaged as DiamondRushBridge.exe (see tools/build-exe.mjs): settings sit next
@@ -27,26 +28,27 @@ const defaults = {
   // Diamond Climb's and Chalkboard Count's own rules (see defaultGameRules).
   climbRules: defaultGameRules(),
   chalkRules: defaultGameRules(),
-  openCloud: { apiKey: '', universeId: '', topic: 'DiamondRushTikTok' },
-  // The relay: lets this bridge feed a published game that other streamers
-  // play too, without sharing the game's Open Cloud key. The secret is this
-  // PC's own; the game code comes from it (see relay/relay.mjs).
-  relay: { url: '', secret: '' },
+  // This PC's own secret: the game code comes from it (see cloud.mjs).
+  secret: '',
 };
 
 function loadConfig() {
   let config;
   try {
     const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    config = { ...defaults, ...saved, openCloud: { ...defaults.openCloud, ...(saved.openCloud ?? {}) }, relay: { ...defaults.relay, ...(saved.relay ?? {}) } };
+    config = { ...defaults, ...saved };
+    // Older saves kept the secret with the relay settings; the code stays the same.
+    if (!config.secret && typeof saved.relay?.secret === 'string') config.secret = saved.relay.secret;
+    delete config.relay;
+    delete config.openCloud;
   } catch {
     config = structuredClone(defaults);
   }
   // Keybinds used to be set on this page; pressing them sent pretend gifts.
   // They are gone, so older saves lose theirs (the game's own keybinds stay).
   for (const rule of Object.values(config.giftRules ?? {})) if (rule && typeof rule === 'object') rule.keybind = '';
-  // This PC's relay secret, made once. The game code is worked out from it.
-  if (typeof config.relay.secret !== 'string' || config.relay.secret.length < 32) config.relay.secret = randomBytes(24).toString('hex');
+  // This PC's secret, made once. The game code is worked out from it.
+  if (typeof config.secret !== 'string' || config.secret.length < 32) config.secret = randomBytes(24).toString('hex');
   return config;
 }
 
@@ -55,21 +57,16 @@ function saveConfig() {
 }
 
 const config = loadConfig();
-saveConfig(); // keeps this PC's relay secret (and its game code) for next time
+saveConfig(); // keeps this PC's secret (and its game code) for next time
 const queue = createEventQueue();
 const handleGift = createGiftTracker();
-const outbox = [];
 const recent = [];
 let tiktokStatus = 'not connected';
 let connection = null;
 let reconnectTimer = null;
 let lastRobloxPoll = 0;
-// The relay's queue and state (see "The relay" below).
-const relayOutbox = [];
-let relaySending = false;
-let relayRetryAt = 0;
-let relayStatus = 'off';
-let lastRelayPush = 0;
+// What waits to go to the published game (see "Roblox Open Cloud" below).
+const cloudQueue = [];
 
 function log(line) {
   const stamp = new Date().toLocaleTimeString();
@@ -83,10 +80,9 @@ function emit(event) {
     if(rule && event.rocks === undefined) event={...event,rocks:rule.rocks};
   }
   const stamped = queue.push(event);
-  outbox.push(stamped);
   const { seq, ...compact } = stamped;
-  relayOutbox.push(compact);
-  if (relayOutbox.length > 2000) relayOutbox.splice(0, relayOutbox.length - 2000);
+  cloudQueue.push(compact);
+  if (cloudQueue.length > 2000) cloudQueue.splice(0, cloudQueue.length - 2000);
   if (event.type === 'giftRule' || event.type === 'climbRule' || event.type === 'chalkRule') return;
   recent.unshift({ at: Date.now(), ...stamped });
   recent.length = Math.min(recent.length, 30);
@@ -189,120 +185,100 @@ async function connectTikTok(username) {
   }
 }
 
-// Roblox Open Cloud (published games) --------------------------------------------
-let flushing = false;
-let retryAt = 0;
-async function flushOpenCloud() {
-  const { apiKey, universeId, topic } = config.openCloud;
-  if (!apiKey || !universeId || outbox.length === 0) {
-    outbox.length = 0;
-    return;
-  }
-  if (flushing || Date.now() < retryAt) return;
-  flushing = true;
-  const batch = outbox.splice(0, outbox.length);
-  const messages = packMessages(batch);
-  try {
-    for (let i = 0; i < messages.length; i += 1) {
-      let retry = false;
-      try {
-        const response = await fetch(`https://apis.roblox.com/messaging-service/v1/universes/${encodeURIComponent(universeId)}/topics/${encodeURIComponent(topic)}`, {
-          method: 'POST',
-          headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
-          body: JSON.stringify({ message: messages[i] }),
-        });
-        if (!response.ok) {
-          log(`Open Cloud refused a message: ${response.status} ${await response.text()}`);
-          // Too many messages or Roblox busy: try again shortly. Anything else
-          // (a wrong key or universe) would fail every time, so it is dropped.
-          retry = response.status === 429 || response.status >= 500;
-        }
-      } catch (error) {
-        log(`Open Cloud unreachable: ${error.message}`);
-        retry = true;
-      }
-      if (retry) {
-        // Put this message and the rest back, in order, ahead of newer events.
-        const unsent = messages.slice(i).flatMap((message) => JSON.parse(message));
-        outbox.unshift(...unsent);
-        // A long Roblox outage keeps only the newest events.
-        if (outbox.length > 2000) outbox.splice(0, outbox.length - 2000);
-        retryAt = Date.now() + 3000;
-        return;
-      }
-    }
-  } finally {
-    flushing = false;
-  }
-}
-setInterval(flushOpenCloud, 1000);
-
-// The relay (many streamers on one published game) ------------------------------
-// Everything the game needs goes to the relay under this PC's game code: the
-// events as they happen, and the gift rules so a game that just started knows
-// them. The relay keeps no account; the code is worked out from the secret.
+// Roblox Open Cloud (the published game) ------------------------------------------
+// The game owner's key and universe: built into DiamondRushBridge.exe (see
+// tools/build-exe.mjs), or in roblox-cloud.txt next to the bridge. The key
+// can only publish messages to this one game.
 function gameCode() {
-  return codeFor(config.relay.secret);
+  return codeFor(config.secret);
 }
-function relayRules() {
-  const rules = [];
-  for (const [key, rule] of Object.entries(config.giftRules ?? {})) rules.push({ id: `rules:${queue.session}:${key}:${JSON.stringify(rule)}`, type: 'giftRule', ...rule });
-  for (const game of Object.keys(GAMES)) for (const rule of gameRuleEvents(game)) rules.push({ id: `${game}Rules:${queue.session}:${JSON.stringify(rule)}`, ...rule });
-  return rules;
-}
-async function flushRelay() {
-  const url = String(config.relay.url ?? '').trim().replace(/\/+$/, '');
-  if (!url) {
-    relayOutbox.length = 0;
-    relayStatus = 'off';
-    return;
-  }
-  if (relaySending || Date.now() < relayRetryAt) return;
-  // Nothing new: still check in now and then so the relay keeps the rules and
-  // the TikTok status fresh for a game that starts later.
-  const batch = relayOutbox.splice(0, 300);
-  if (batch.length === 0 && Date.now() - lastRelayPush < 15000) return;
-  relaySending = true;
-  lastRelayPush = Date.now();
+function cloudSettings() {
   try {
-    const response = await fetch(`${url}/c/${gameCode()}/push`, {
+    const found = parseCloudFile(fs.readFileSync(path.join(here, 'roblox-cloud.txt'), 'utf8'));
+    if (found.apiKey && found.universeId) return found;
+  } catch {}
+  const built = globalThis.__DIAMOND_RUSH_CLOUD__ ?? {};
+  return { apiKey: String(built.apiKey ?? ''), universeId: String(built.universeId ?? '') };
+}
+const cloud = cloudSettings();
+let cloudStatus = cloud.apiKey && cloud.universeId ? 'starting' : 'off';
+let cloudSending = false;
+let nextSendAt = 0;
+let lastStatusSent = '';
+let lastStatusAt = 0;
+let lastRulesAt = 0;
+// Every gift rule, as events. Their ids stay the same while the rules do, so a
+// game that just started takes them and one that has them skips the repeat.
+function allRules() {
+  const rules = [];
+  for (const rule of Object.values(config.giftRules ?? {})) rules.push({ type: 'giftRule', name: 'Gift catalogue', ...rule });
+  for (const game of Object.keys(GAMES)) rules.push(...gameRuleEvents(game));
+  return rules.map((rule) => ({ id: ruleId(rule), ...rule }));
+}
+async function flushCloud() {
+  if (!cloud.apiKey || !cloud.universeId) { cloudQueue.length = 0; return; }
+  if (cloudSending || Date.now() < nextSendAt) return;
+  const now = Date.now();
+  if (cloudQueue.length === 0) {
+    // Nothing new: the TikTok status now and then, so the game can show it,
+    // and the rules every two minutes, for a game that started since.
+    if (tiktokStatus !== lastStatusSent || now - lastStatusAt > 60000) {
+      lastStatusSent = tiktokStatus;
+      lastStatusAt = now;
+      cloudQueue.push({ id: `s${now.toString(36)}`, type: 'status', tiktok: tiktokStatus });
+    } else if (now - lastRulesAt > 120000) {
+      lastRulesAt = now;
+      cloudQueue.push(...allRules());
+    }
+    if (cloudQueue.length === 0) return;
+  }
+  const message = takeMessage(cloudQueue);
+  if (!message) return;
+  cloudSending = true;
+  nextSendAt = now + SEND_EVERY_MS;
+  try {
+    const response = await fetch(`https://apis.roblox.com/messaging-service/v1/universes/${encodeURIComponent(cloud.universeId)}/topics/${encodeURIComponent(topicFor(gameCode()))}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-relay-secret': config.relay.secret },
-      body: JSON.stringify({ events: batch, rules: relayRules(), tiktok: tiktokStatus }),
+      headers: { 'x-api-key': cloud.apiKey, 'content-type': 'application/json' },
+      body: JSON.stringify({ message }),
     });
     if (response.ok) {
-      relayStatus = `sending to the relay as ${gameCode()}`;
+      cloudStatus = 'sending';
     } else {
       const text = (await response.text()).slice(0, 200);
-      relayStatus = `the relay refused this bridge (${response.status})`;
-      log(`Relay refused a push: ${response.status} ${text}`);
-      // Busy or down: keep the events and try again. A refusal of this bridge
-      // (a wrong address, or another bridge on this code) would always fail.
+      log(`Roblox refused a message: ${response.status} ${text}`);
+      cloudQueue.unshift(...JSON.parse(message));
       if (response.status === 429 || response.status >= 500) {
-        relayOutbox.unshift(...batch);
-        relayRetryAt = Date.now() + 3000;
+        cloudStatus = 'Roblox is busy, retrying';
+        nextSendAt = Date.now() + 10000;
       } else {
-        relayRetryAt = Date.now() + 30000;
+        // A wrong or expired key fails every time: try again now and then.
+        cloudStatus = `Roblox refused the connector's key (${response.status}). Ask the game's owner for a new download.`;
+        nextSendAt = Date.now() + 30000;
       }
     }
   } catch (error) {
-    relayStatus = `the relay is unreachable (${error.message})`;
-    relayOutbox.unshift(...batch);
-    if (relayOutbox.length > 2000) relayOutbox.splice(0, relayOutbox.length - 2000);
-    relayRetryAt = Date.now() + 5000;
+    cloudStatus = `can't reach Roblox (${error.message})`;
+    cloudQueue.unshift(...JSON.parse(message));
+    nextSendAt = Date.now() + 5000;
   } finally {
-    relaySending = false;
+    if (cloudQueue.length > 2000) cloudQueue.splice(0, cloudQueue.length - 2000);
+    cloudSending = false;
   }
 }
-setInterval(flushRelay, 500);
+setInterval(flushCloud, 250);
+if (cloudStatus === 'off') log('No Roblox key found: gifts reach Roblox Studio only (see roblox-cloud.txt in the README).');
 
 // Local web server ------------------------------------------------------------------
 function statusLine() {
   const robloxSeen = Date.now() - lastRobloxPoll < 5000;
   return {
     tiktok: tiktokStatus,
-    roblox: robloxSeen ? 'connected (Roblox Studio)' : 'waiting for Roblox Studio (press Play)',
-    relay: relayStatus,
+    roblox: robloxSeen ? 'connected (Roblox Studio)'
+      : cloudStatus === 'sending' ? 'sending to the game'
+      : cloudStatus === 'starting' ? 'ready: type your game code in the game'
+      : cloudStatus === 'off' ? 'not set up (this connector has no Roblox key)'
+      : cloudStatus,
     gameCode: gameCode(),
   };
 }
@@ -391,32 +367,13 @@ const server = http.createServer(async (request, response) => {
     return sendJson(response, 200, { session: queue.session, last: queue.last, tiktok: tiktokStatus, events });
   }
   if (request.method === 'GET' && url.pathname === '/status') {
-    return sendJson(response, 200, { ...statusLine(), username: config.tiktokUsername, openCloud: Boolean(config.openCloud.apiKey && config.openCloud.universeId), relayUrl: config.relay.url, recent });
+    return sendJson(response, 200, { ...statusLine(), username: config.tiktokUsername, recent });
   }
   if (request.method === 'POST' && url.pathname === '/connect') {
     const body = await readBody(request);
     config.tiktokUsername = String(body.username ?? '').trim().replace(/^@/, '');
     saveConfig();
     connectTikTok(config.tiktokUsername);
-    return sendJson(response, 200, { ok: true });
-  }
-  if (request.method === 'POST' && url.pathname === '/relay') {
-    const body = await readBody(request);
-    const given = String(body.url ?? '').trim();
-    if (given && !/^https?:\/\/[^\s]+$/i.test(given)) return sendJson(response, 400, { error: 'Enter the relay address, like https://my-relay.example.com' });
-    config.relay.url = given.replace(/\/+$/, '');
-    saveConfig();
-    relayRetryAt = 0;
-    lastRelayPush = 0; // check in with the relay at once, so the page can say so
-    relayStatus = config.relay.url ? 'starting' : 'off';
-    if (config.relay.url) log(`Relay set to ${config.relay.url} · game code ${gameCode()}`);
-    return sendJson(response, 200, { ok: true, gameCode: gameCode() });
-  }
-  if (request.method === 'POST' && url.pathname === '/opencloud') {
-    const body = await readBody(request);
-    config.openCloud.apiKey = String(body.apiKey ?? '').trim();
-    config.openCloud.universeId = String(body.universeId ?? '').trim();
-    saveConfig();
     return sendJson(response, 200, { ok: true });
   }
   if (request.method === 'POST' && url.pathname === '/theme') {

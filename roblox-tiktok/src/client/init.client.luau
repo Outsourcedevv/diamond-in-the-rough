@@ -923,20 +923,15 @@ panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
 
--- A published game that many streamers play: the code from the bridge's
--- control page tells the relay which stream's gifts belong to this game.
+-- The code from the connector's control page tells this game which stream's
+-- gifts are its own.
 panelLabel("TIKTOK CONNECTOR")
 panelLabel(Config.ConnectorMessage)
-panelLabel("GAME CODE (published game: from localhost:8787)")
+panelLabel("GAME CODE (shown on the connector's page)")
 local gameCodeBox = panelBox("", function(text)
 	send("setGameCode", text)
 end)
 gameCodeBox.PlaceholderText = "e.g. ABCD EFGH, or empty for none"
-panelLabel("RELAY ADDRESS (only if you run your own relay)")
-local relayBox = panelBox("", function(text)
-	send("setRelayUrl", text)
-end)
-relayBox.PlaceholderText = "https://my-relay.example.com"
 
 panelLabel("MAP THEME (changes for everyone straight away)")
 local THEME_BUTTONS = { { "Alpine", "default" }, { "Sakura", "sakura" }, { "Farm", "farm" }, { "Desert", "desert" }, { "Haunted", "haunted" } }
@@ -1127,7 +1122,6 @@ local function refreshPanelFields()
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
 	local code = attr("GameCode", "")
 	gameCodeBox.Text = if #code == 8 then string.sub(code, 1, 4) .. " " .. string.sub(code, 5) else code
-	relayBox.Text = attr("RelayUrl", Config.RelayUrl)
 end
 
 -- Settings (every player): the field of view and hiding the buttons, from the

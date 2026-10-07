@@ -36,7 +36,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 - **Haunted night theme.** Midnight under a big full moon, with cold blue mist, dark grass and stone, and glowing lanterns. An iron cemetery gate between stone pillars, its doors swung open and a green lantern hanging from its spiked arch, stands where the trail leaves the camp. To one side of the mountain is a stone mausoleum with columns and a green glow leaking round its iron door, beside a graveyard of crooked headstones and crosses behind a spiked iron fence, with will-o'-wisps drifting over the graves and the lake. Bare dead trees stand across the meadows, and carved jack-o'-lanterns glow at the gate, the camp, the crypt steps and the graveyard. The dark pines stay; the flowers, birches and oaks are hidden. The ambient light stays bright enough to see the rock you dig. The scenery is in `src/server/Haunted.luau`; which of the valley's trees each theme hides is in `src/shared/SceneryThemes.luau`.
 - **Haystack skin.** The mountain itself can be reskinned as a haystack with a **needle** hidden in it instead of a diamond: the same game, the same rules, only the look changes. The rock turns to straw (sun-bleached on top, greener fresh hay low down, packed hay and golden bales inside) and the gem becomes a steel needle with a red thread through its eye, found, clicked and held exactly like the diamond. The display follows: **HAY LEFT**, **NEEDLE UNCOVERED**, **NEEDLE SECURED!** and the lobby's status line. Choose it in the **Y** panel under **MOUNTAIN SKIN** (**Stone & diamond** or **Hay & needle**) or under **3 · Map theme** on the control page. It works with either map theme, changes for everyone straight away and is remembered. The palettes are in `src/shared/RockStyle.luau` (`HAY_LAYERS`), the needle in `src/shared/DiamondShape.luau` and the words in `src/shared/Skin.luau`.
 - **Leaderboards.** Two giant 3D wooden boards stand behind the mountain, either side of the summit, angled towards the camp: **TOP HELPERS** (blue border, a pickaxe on the roof) ranks viewers by the coins they sent in gifts that break the mountain, and **TOP GRIEFERS** (red border, boulders on the roof) by the coins they sent in gifts that add stone (gifts with a negative rule). Each shows the top 10 on a shingle-roofed board with log posts. Totals are saved between streams, viewer names are text-filtered, and test gifts never count.
-- **Gold statues.** Honour a big gifter with a gold statue holding a diamond aloft on a marble pedestal. An engraved brass plaque shows their name and coins. Statues are placed and removed from the settings panel and saved to the player who built them (see [single player](#playing-the-published-game-instead-of-studio-optional)).
+- **Gold statues.** Honour a big gifter with a gold statue holding a diamond aloft on a marble pedestal. An engraved brass plaque shows their name and coins. Statues are placed and removed from the settings panel and saved to the player who built them (see [single player](#the-published-game)).
 - **Win counter.** It sits under the stone count and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and NEW BEST TIME when you beat it). Then the mountain rebuilds from base to peak in 16 waves, with flying stones snapping into place and a final glint at the summit. Gifts arriving during the rebuild are saved and applied when digging resumes.
 - **Settings and field of view.** Every player has a **SETTINGS** button at the top left (or press **P**, which frees the mouse in first person; it used to be O, but O is Roblox's zoom-out key and Roblox swallowed it). Its **Field of view** slider runs from 50 to 100 (70 by default) with **Reset** and **Done**. **Hide buttons** tucks away the **GAMES** tab and the **SETTINGS** button so they stay off the stream; **G** and **P** still open them, and the game remembers the choice for that player. The hands are refitted to the field of view, so they keep the same size and place on screen and the dig swing looks the same at any setting. The field of view applies only in the game (the lobby keeps the normal view) and lasts for the session. If the streamer gave **P** to a gift keybind through an older bridge, use the button instead.
@@ -48,7 +48,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 
 Open the updated bridge control page at **http://localhost:8787** and enter your TikTok username to connect. Connecting is free. The catalogue starts with a starter list of common gifts, and every gift you receive on your LIVE is added to it automatically, with the coins TikTok reports, and saved for next time. After connecting, the bridge loads the room's full gift list straight from TikTok (free), and **Refresh from TikTok** loads it again. Only if TikTok doesn't send it does the bridge try the signed route through Euler Stream, which is a paid feature; then the page says so and keeps the list it has. The bridge never asks for the paid list while connecting.
 
-Search by gift name or coin price, click a gift, choose **Add blocks** or **Remove blocks**, enter the amount per gift and press **Save gift**. Rules are saved locally and synced to Roblox, including published games configured with Open Cloud or the relay. The control page can't send pretend gifts: it has no test buttons or keybinds, and the bridge has no route for them, so only real gifts from your LIVE reach the game. To try things out, use the game's own **Y** panel (test gifts, rebuild tests and gift keybinds).
+Search by gift name or coin price, click a gift, choose **Add blocks** or **Remove blocks**, enter the amount per gift and press **Save gift**. Rules are saved locally and synced to Roblox, in Studio and in the published game. The control page can't send pretend gifts: it has no test buttons or keybinds, and the bridge has no route for them, so only real gifts from your LIVE reach the game. To try things out, use the game's own **Y** panel (test gifts, rebuild tests and gift keybinds).
 
 **Keybinds without the bridge.** In the game's **Y** panel, **GIFT KEYBINDS** lists every keybind and lets the streamer add their own: type the gift name (a gift rule with that name applies, otherwise its coins times rocks per coin) and its coins, press **Key: choose** and then the key, and press **Save keybind**. **X** removes one. Pressing the key in the game then sends that gift, with or without the bridge, through the same path as the test gifts. The free keys are B, C, F, J, K, L, M, N, Q, R, T, U, V, X, Z, 1 to 0 and F6 to F8 (W A S D, E, G, H, I, O, P and Y are kept for the game and Roblox). Up to 24 keybinds are kept and saved with the game. A keybind set in the game stays when the bridge resends its catalogue; the bridge only replaces its own.
 
@@ -173,7 +173,7 @@ The mountains, trees, rocks and undergrowth around the arena are real 3D meshes 
 
 The preview pictures are Blender renders. Roblox's own lighting, haze and terrain textures will look a little different.
 
-This uses Roblox's EditableMesh, which always works in Studio. A [published game](#playing-the-published-game-instead-of-studio-optional) may only use it once you are 13+ age-verified and ID-verified, and have turned on **Enable Mesh / Image APIs** for the experience in the [Creator Dashboard](https://create.roblox.com/dashboard/creations). Until then the published game uses its built-in scenery, and the Output window says so.
+This uses Roblox's EditableMesh, which always works in Studio. A [published game](#the-published-game) may only use it once you are 13+ age-verified and ID-verified, and have turned on **Enable Mesh / Image APIs** for the experience in the [Creator Dashboard](https://create.roblox.com/dashboard/creations). Until then the published game uses its built-in scenery, and the Output window says so.
 
 If you can't turn that on, import the pack as normal meshes instead. This works in any published game:
 
@@ -235,41 +235,40 @@ In Studio, open **ReplicatedStorage → DiamondRush → Config**:
 
 With the defaults, clearing the whole mountain takes 2,500 coins of gifts. The diamond often shows up before that, depending on where the blasts land.
 
-## Playing the published game instead of Studio (optional)
+## The published game
 
-A published Roblox server cannot reach the bridge on your PC, so the bridge sends events through Roblox **Open Cloud** instead:
+A published Roblox server can't reach anyone's PC, so each streamer's connector sends their gifts through Roblox **Open Cloud** (MessagingService), straight to the game. No server needs hosting.
+
+```
+TikTok LIVE  ->  DiamondRushBridge.exe (the streamer's PC)  ->  Roblox Open Cloud  ->  that streamer's game server
+```
+
+**As the game's owner, once:**
 
 1. Publish the place (File → Publish to Roblox).
 2. At [create.roblox.com](https://create.roblox.com) go to **Open Cloud → API Keys → Create API Key**:
-   - Add **Messaging Service** with the **publish** permission for your experience.
-   - Set **Accepted IP Addresses** to `0.0.0.0/0`.
+   - Add **Messaging Service** with the **publish** permission for this experience only.
+   - Set **Accepted IP Addresses** to `0.0.0.0/0` (streamers are everywhere) and no expiration.
    - Copy the key.
-3. On your experience's page use **⋯ → Copy Universe ID**.
-4. On the control page, open **Published game (optional)**, paste both and press **Save**.
+3. On the experience's page use **⋯ → Copy Universe ID**.
+4. Put both in `bridge/roblox-cloud.txt` (it is never committed):
+   ```
+   universe: 1234567890
+   key: paste-the-key-here
+   ```
+5. Build `DiamondRushBridge.exe` (see [The connector as one .exe](#the-connector-as-one-exe)). The key goes inside it. Alternatively, put `roblox-cloud.txt` next to an existing .exe in the download.
 
-The game listens on the topic `DiamondRushTikTok`. Studio keeps working at the same time.
+The key can only publish messages to this one game. Anyone who digs it out of the .exe could send pretend gifts to a game code they know, so if that ever happens, delete the key, make a new one and share a new download.
 
-The game is **single player** (`SinglePlayer = true` in `src/shared/Config.luau`). Whoever plays is treated as the streamer and gets the **Y** panel, test gifts and gift keybinds. **Each player has their own save**: statues, wins, the win counter's look, best time, leaderboards, map theme, skin, gift rules and keybinds. The server waits for its player, then loads that player's save (stored as `player_<user id>`). A player's first visit starts from the game's older shared save, so nothing built before this change is lost. Set the published game's maximum players to 1: a second player in the same server would be saving into the first player's save. Set `SinglePlayer = false` to go back to one shared save and owner-and-Admins only.
+**As a streamer, each time:** open DiamondRushBridge.exe and connect your TikTok username. The control page shows your **game code**, such as `ABCD EFGH`. In the game, press **Y**, scroll to **GAME CODE** and type it in. Your server then receives only your gifts, a second or two after they're sent. The code stays the same on that PC (it comes from a secret in `config.json`; deleting that file gives a new code). Keep it off your stream.
 
-To show the Blender mountains and trees in the published game, also turn on **Enable Mesh / Image APIs** (see [Blender scenery](#blender-scenery)).
-
-## Many streamers on one published game (optional)
-
-Open Cloud works for your own game, but it has two problems once other streamers play it: every gift goes to every server, and each streamer would need your API key. The **relay** in `relay/` solves both. You host it once, and each streamer gets a **game code**.
-
-```
-TikTok LIVE  ->  bridge (the streamer's PC)  ->  relay (hosted once)  ->  that streamer's game server
-```
-
-**As the game's owner, once:** host `relay/relay.mjs` somewhere with a public HTTPS address (`node relay.mjs`, no dependencies, nothing stored on disk), turn on **Allow HTTP Requests** in Game Settings → Security, and put the address in `RelayUrl` in `src/shared/Config.luau`. See [relay/README.md](relay/README.md) for the details and limits.
+Roblox lets one game code's topic receive about 30 messages a minute, so the connector sends one message every 2.5 seconds and packs gifts into it. In a gift storm it folds repeats together (a viewer's ten Roses become one gift of ten), so nothing is lost. Studio keeps working at the same time.
 
 **Where streamers get the connector:** Roblox does not allow links that lead off Roblox inside a game, so the game tells streamers to join your Discord to download it (the wording is `ConnectorMessage` in `src/shared/Config.luau`; it shows in the How to Play guide and the Y panel). Put your Discord invite under **Social Links** on the game's page, and the download in that Discord.
 
-**As a streamer, each time:** run the bridge, connect your TikTok username, then on the control page under **Playing the published game** paste the relay address (if the game doesn't already know it) and press **Save**. The page shows your game code, such as `ABCD EFGH`. In the game, press **Y**, scroll to **GAME CODE** and type it in. Your server then receives only your gifts.
+The game is **single player** (`SinglePlayer = true` in `src/shared/Config.luau`). Whoever plays is treated as the streamer and gets the **Y** panel, test gifts and gift keybinds. **Each player has their own save**: statues, wins, the win counter's look, best time, leaderboards, map theme, skin, gift rules, keybinds and game code. The server waits for its player, then loads that player's save (stored as `player_<user id>`). A player's first visit starts from the game's older shared save, so nothing built before this change is lost. Set the published game's maximum players to 1: a second player in the same server would be saving into the first player's save. Set `SinglePlayer = false` to go back to one shared save and owner-and-Admins only.
 
-The code comes from a secret in your bridge's `config.json`, so only your bridge can send gifts under it. Keep the code to yourself: anyone with it and the relay's address could watch your gifts go by. Deleting `config.json` gives you a new code.
-
-One relay serves any number of streamers: it keeps only a few hundred recent events each, in memory, and holds each game's request open until a gift arrives, so gifts land about as fast as in Studio.
+To show the Blender mountains and trees in the published game, also turn on **Enable Mesh / Image APIs** (see [Blender scenery](#blender-scenery)).
 
 ## Troubleshooting
 
@@ -277,9 +276,10 @@ One relay serves any number of streamers: it keeps only a few hundred recent eve
 - **TikTok "is not live right now"**: go live first. The bridge retries every 20 seconds by itself.
 - **TikTok "could not connect"**: check the username (no @ needed). TikTok sometimes rate-limits; wait a minute.
 - **Nothing happens on gifts but test gifts work**: make sure the control page says *connected to @yourname*.
-- **The page says "waiting for Roblox Studio"**: press Play in Studio. HTTP requests must be allowed (see above).
-- **The game says "can't reach the relay (check the game code)"**: the code in the **Y** panel must match the one on the control page, the relay must be running, and Game Settings → Security → Allow HTTP Requests must be on.
-- **The game says "waiting for your bridge"**: the code is right but no bridge is sending under it. Check the control page says *sending to the relay*.
+- **The game says "no game code set"**: press **Y**, scroll to **GAME CODE** and type the code from the control page.
+- **The game says "waiting for DiamondRushBridge.exe" or "connector not heard from"**: open the connector and check the code in the **Y** panel matches the one on its page. Its page should say Roblox: *ready* or *sending to the game*.
+- **The control page says "not set up (this connector has no Roblox key)"**: the .exe was built without the game's key. See [The published game](#the-published-game).
+- **The control page says "Roblox refused the connector's key"**: the key was deleted or expired. Make a new one and share a new download.
 - **No mountain in Studio's Server view**: that is expected. Each player's client draws the rock; switch back to the Client view. Use **Play** (F5), not **Run** (F8), which has no client.
 - **No Blender mountains or trees in the published game**: Roblox only lets a published game build meshes once Mesh / Image APIs are turned on. See [Blender scenery](#blender-scenery) for that, or for importing the pack instead.
 - **The world looks flat or old-fashioned**: open the place file from this folder. It sets Future lighting and the 2022 material pack, which scripts cannot change. In an older copy, set **Lighting → LightingStyle** to Realistic and **MaterialService → Use2022Materials** on.
