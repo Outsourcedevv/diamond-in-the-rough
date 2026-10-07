@@ -8,10 +8,10 @@
   <Item class="Lighting" referent="1">
     <Properties>
       <string name="Name">Lighting</string>
-      <token name="Technology">4</token>
+      <bool name="GlobalShadows">true</bool>
       <token name="LightingStyle">0</token>
       <bool name="PrioritizeLightingQuality">true</bool>
-      <bool name="GlobalShadows">true</bool>
+      <token name="Technology">4</token>
     </Properties>
   </Item>
   <Item class="MaterialService" referent="2">
@@ -506,6 +506,10 @@ local Config = {
 	-- allowed to reach it: Game Settings > Security > Allow HTTP Requests.
 	RelayUrl = "", -- (live) e.g. "https://my-relay.example.com"
 	RelayMaxCodeLength = 12,
+	-- Where streamers get the TikTok connector. Roblox does not allow links
+	-- that lead off Roblox inside the game, so name the place and put the
+	-- actual Discord invite under Social Links on the game's page.
+	ConnectorMessage = "Streamers: join our Discord to download the TikTok connector. The Discord link is on this game's page, under Social Links.",
 
 	-- Single player: whoever plays is the streamer, so every player gets the Y
 	-- panel, test gifts and gift keybinds. Set to false for a game where others
@@ -13562,6 +13566,8 @@ panelButtons({
 
 -- A published game that many streamers play: the code from the bridge's
 -- control page tells the relay which stream's gifts belong to this game.
+panelLabel("TIKTOK CONNECTOR")
+panelLabel(Config.ConnectorMessage)
 panelLabel("GAME CODE (published game: from localhost:8787)")
 local gameCodeBox = panelBox("", function(text)
 	send("setGameCode", text)
@@ -19910,6 +19916,11 @@ HowToPlay.PAGES = {
 	{
 		title = "Connect TikTok",
 		text = table.concat({
+			"<b>Get the TikTok connector:</b> join our <b>Discord</b> to download it. The Discord link is on this game's Roblox page, under <b>Social Links</b>.",
+			"",
+			"<b>Playing this game on Roblox:</b> open the connector, go LIVE on TikTok, type your TikTok username and press <b>Connect</b>. The connector shows your <b>game code</b>: press <b>Y</b> here, scroll to <b>GAME CODE</b> and type it in.",
+			"",
+			"<b>Running your own copy in Roblox Studio:</b>",
 			"<b>You need</b> a Windows PC with Roblox Studio and Node.js LTS (free from nodejs.org, installed once).",
 			"",
 			"<b>1.</b>  Open the <b>bridge</b> folder and double-click <b>Start Bridge.bat</b>. Keep the black window open: that is the bridge.",

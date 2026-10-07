@@ -25,6 +25,11 @@ HowToPlay.PAGES = {
 	{
 		title = "Connect TikTok",
 		text = table.concat({
+			"<b>Get the TikTok connector:</b> join our <b>Discord</b> to download it. The Discord link is on this game's Roblox page, under <b>Social Links</b>.",
+			"",
+			"<b>Playing this game on Roblox:</b> open the connector, go LIVE on TikTok, type your TikTok username and press <b>Connect</b>. The connector shows your <b>game code</b>: press <b>Y</b> here, scroll to <b>GAME CODE</b> and type it in.",
+			"",
+			"<b>Running your own copy in Roblox Studio:</b>",
 			"<b>You need</b> a Windows PC with Roblox Studio and Node.js LTS (free from nodejs.org, installed once).",
 			"",
 			"<b>1.</b>  Open the <b>bridge</b> folder and double-click <b>Start Bridge.bat</b>. Keep the black window open: that is the bridge.",
