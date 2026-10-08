@@ -56,6 +56,19 @@ function GiftSettings.apply(store: Store, value: any, limits: Limits): string?
 		end
 		store.customGifts[name] = coins or oldCoins :: number
 	end
+	if known and coins then
+		-- A built-in gift: a different price (TikTok's differ by country) is
+		-- kept as the streamer's own; the built-in price needs nothing kept.
+		for other in store.customGifts do
+			if string.lower(other) == lower then store.customGifts[other] = nil end
+		end
+		if coins ~= known.coins then
+			local count = 0
+			for _ in store.customGifts do count += 1 end
+			if count >= GiftSettings.MAX_CUSTOM then return string.format("You can change up to %d gifts' coins.", GiftSettings.MAX_CUSTOM) end
+			store.customGifts[known.name] = coins
+		end
+	end
 	local key = value.key
 	if type(key) == "string" and key ~= "" and not Keybinds.allowed(key) then
 		return Keybinds.label(key) .. " is used by the game. Pick another key."
@@ -78,7 +91,7 @@ function GiftSettings.apply(store: Store, value: any, limits: Limits): string?
 		if store.giftBindings[key] == nil and count >= Keybinds.MAX then
 			return string.format("You can keep up to %d keybinds. Remove one first.", Keybinds.MAX)
 		end
-		local giftCoins = coins or (if known then known.coins else nil) or store.customGifts[name] or 1
+		local giftCoins = coins or store.customGifts[if known then known.name else name] or (if known then known.coins else nil) or 1
 		store.giftBindings[key] = { gift = if known then known.name else name, coins = giftCoins, game = true }
 	end
 	return nil
