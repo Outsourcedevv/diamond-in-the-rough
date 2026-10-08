@@ -1195,7 +1195,7 @@ local function useCode()
 		if RunService:IsStudio() and settings.gameCode == "" then return end
 		status = shownStatus(status)
 		State:SetAttribute("TikTok", if settings.gameCode == "" then status else status .. " (code " .. settings.gameCode .. ")")
-	end)
+	end, Config.RelayUrl)
 end
 useCode()
 

@@ -1,8 +1,9 @@
-"""Checks how the published game hears its streamer's connector
-(TikTokFeed.useCode) under the Luau CLI with a Roblox stand-in: the topic it
-listens on for the game code, the events it delivers once each, the TikTok
-status lines, changing and clearing the code, retrying when MessagingService
-is down, and saying so when the connector goes quiet.
+"""Checks how the published game hears its streamer's connector through the
+relay (TikTokFeed.useCode) under the Luau CLI with a Roblox stand-in: the
+address it asks for its game code, starting from the rules (not old gifts),
+events delivered once each and in order, the TikTok status line, changing and
+clearing the code, a missing relay address, and retrying when the relay can't
+be reached.
 
     python3 tests/code-feed.py [path/to/luau]
 """
@@ -15,12 +16,8 @@ root = Path(__file__).resolve().parents[1]
 luau = sys.argv[1] if len(sys.argv) > 1 else "luau"
 
 source = (root / "src/server/TikTokFeed.luau").read_text(encoding="utf-8")
-for name in ("HttpService", "MessagingService", "RunService", "ReplicatedStorage", "Config"):
+for name in ("HttpService", "RunService"):
     source = re.sub(rf'local {name} = [^\n]*\n', "", source)
-prefix = re.search(r'MessagingTopicPrefix = "([^"]+)"', (root / "src/shared/Config.luau").read_text(encoding="utf-8")).group(1)
-bridge_prefix = re.search(r"TOPIC_PREFIX = '([^']+)'", (root / "bridge/cloud.mjs").read_text(encoding="utf-8")).group(1)
-if prefix != bridge_prefix:
-    sys.exit(f"FAIL the game listens on {prefix!r} but the connector sends on {bridge_prefix!r}")
 
 harness = r'''
 local clock = 0
@@ -51,35 +48,39 @@ local function step(seconds)
 		if not ok then error(problem, 0) end
 	end
 end
-local os = { clock = function() return clock end }
 local warn = function() end
-local Config = { MessagingTopicPrefix = "PREFIX" }
--- Message data is handed over as a table already; JSONDecode passes it on.
-local HttpService = { JSONDecode = function(_, data) return data end }
-local listeners = {}
-local failSubscribes = 0
-local MessagingService = {
-	SubscribeAsync = function(_, topic, callback)
-		if failSubscribes > 0 then
-			failSubscribes -= 1
-			error("MessagingService unavailable", 0)
+-- A pretend relay: events per code, numbered across all codes like D1.
+local relay = { events = {}, rules = {}, tiktok = {}, down = 0, asked = {} }
+local nextId = 0
+local function send(code, event)
+	nextId += 1
+	table.insert(relay.events, { id = nextId, code = code, event = event })
+end
+local HttpService = {
+	HttpEnabled = true,
+	-- Replies come back as tables already; JSONDecode passes them on.
+	JSONDecode = function(_, data) return data end,
+	GetAsync = function(_, url)
+		table.insert(relay.asked, url)
+		if relay.down > 0 then
+			relay.down -= 1
+			error("HttpError: ConnectFail", 0)
 		end
-		local listener = { topic = topic, callback = callback, connected = true }
-		table.insert(listeners, listener)
-		return { Disconnect = function() listener.connected = false end }
+		local code, since = string.match(url, "/c/(%w+)/events%?since=(%d+)")
+		since = tonumber(since)
+		if since == 0 then
+			return { session = "d1", last = nextId, tiktok = relay.tiktok[code] or "", events = relay.rules[code] or {} }
+		end
+		local out, last = {}, since
+		for _, row in relay.events do
+			if row.code == code and row.id > since then table.insert(out, row.event) last = row.id end
+		end
+		-- Nothing new: the relay holds the request for a while.
+		if #out == 0 then task.wait(8) end
+		return { session = "d1", last = last, tiktok = relay.tiktok[code] or "", events = out }
 	end,
 }
 local RunService = { IsStudio = function() return false end }
-local function publish(topic, events)
-	for _, listener in listeners do
-		if listener.connected and listener.topic == topic then listener.callback({ Data = events }) end
-	end
-end
-local function connectedTopics()
-	local topics = {}
-	for _, listener in listeners do if listener.connected then table.insert(topics, listener.topic) end end
-	return topics
-end
 '''
 
 test = r'''
@@ -92,56 +93,56 @@ local got = {}
 local status = ""
 local function onEvent(event) table.insert(got, event.type .. ":" .. tostring(event.gift or event.likes)) end
 local function onStatus(line) status = line end
+local URL = "https://relay.example.workers.dev/"
 
--- A published server never polls a PC.
 TikTokFeed.start({ "http://localhost:8787" }, onEvent, onStatus)
-check(#sleeping == 0, "no polling outside Studio")
+check(#sleeping == 0, "a published server never polls a PC")
 
-TikTokFeed.useCode("", onEvent, onStatus)
-check(#connectedTopics() == 0 and string.find(status, "no game code", 1, true) ~= nil, "no code: nothing to listen to")
+TikTokFeed.useCode("ABCDEFGH", onEvent, onStatus, "")
+check(string.find(status, "no relay address", 1, true) ~= nil, "no relay address is reported")
+TikTokFeed.useCode("", onEvent, onStatus, URL)
+check(string.find(status, "no game code", 1, true) ~= nil and #relay.asked == 0, "no code: nothing is asked")
 
-TikTokFeed.useCode("abcd efgh", onEvent, onStatus)
-check(connectedTopics()[1] == "PREFIXABCDEFGH" and #connectedTopics() == 1, "listens on the topic for the cleaned-up code")
-check(string.find(status, "waiting", 1, true) ~= nil, "waits for the connector")
+-- Gifts sent before the game started are not replayed; the rules are.
+send("ABCDEFGH", { id = "old:1", type = "gift", gift = "Old" })
+relay.rules.ABCDEFGH = { { id = "r1", type = "giftRule", gift = "Rose" } }
+relay.tiktok.ABCDEFGH = "connected to @streamer"
+TikTokFeed.useCode("abcd efgh", onEvent, onStatus, URL)
+step(0.5)
+check(string.find(relay.asked[1], "https://relay.example.workers.dev/c/ABCDEFGH/events?since=0", 1, true) == 1, "asks the relay for its cleaned-up code")
+check(#got == 1 and got[1] == "giftRule:Rose", "starts from the rules, not old gifts")
+check(status == "connected to @streamer", "shows the TikTok status")
 
-publish("PREFIXABCDEFGH", {
-	{ id = "s1:1", type = "gift", gift = "Rose", coins = 1, count = 3 },
-	{ id = "s1:2", type = "like", likes = 9 },
-	{ id = "st1", type = "status", tiktok = "connected to @streamer" },
-})
-check(#got == 2 and got[1] == "gift:Rose" and got[2] == "like:9", "events arrive in order")
-check(status == "connected to @streamer", "the status line shows, not as an event")
-publish("PREFIXABCDEFGH", { { id = "s1:1", type = "gift", gift = "Rose", coins = 1, count = 3 } })
-check(#got == 2, "a repeated event runs once")
-publish("PREFIXOTHERCODE", { { id = "x:1", type = "gift", gift = "Lion", coins = 1, count = 1 } })
-check(#got == 2, "another streamer's gifts never arrive")
+send("ABCDEFGH", { id = "s:1", type = "gift", gift = "Galaxy" })
+send("OTHERCOD", { id = "x:1", type = "gift", gift = "Lion" })
+send("ABCDEFGH", { id = "s:2", type = "like", likes = 9 })
+step(10)
+check(#got == 3 and got[2] == "gift:Galaxy" and got[3] == "like:9", "new gifts arrive in order, only this code's")
+step(30)
+check(#got == 3, "nothing twice")
 
--- Quiet for too long: the screen says so.
-step(TikTokFeed.QUIET_SECONDS + 15)
-check(string.find(status, "not heard from", 1, true) ~= nil, "a quiet connector is reported")
-
--- A new code: the old topic is dropped.
-TikTokFeed.useCode("WXYZ2345", onEvent, onStatus)
-check(#connectedTopics() == 1 and connectedTopics()[1] == "PREFIXWXYZ2345", "changing the code moves to its topic")
-publish("PREFIXABCDEFGH", { { id = "s1:9", type = "gift", gift = "Lion", coins = 1, count = 1 } })
-check(#got == 2, "the old code's gifts stop")
-
--- MessagingService down for a moment: it keeps trying.
-failSubscribes = 2
-TikTokFeed.useCode("QRST6789", onEvent, onStatus)
-check(#connectedTopics() == 0 and string.find(status, "retrying", 1, true) ~= nil, "a failed subscribe retries")
+-- The relay goes down for a moment: it keeps trying.
+relay.down = 4
+send("ABCDEFGH", { id = "s:3", type = "gift", gift = "Rose" })
+step(9)
 step(60)
-check(#connectedTopics() == 1 and connectedTopics()[1] == "PREFIXQRST6789", "listens once MessagingService is back")
+check(got[4] == "gift:Rose", "gets going again once the relay is back")
 
-TikTokFeed.useCode("", onEvent, onStatus)
-check(#connectedTopics() == 0, "clearing the code stops listening")
+-- A new code: the old one stops.
+TikTokFeed.useCode("WXYZ2345", onEvent, onStatus, URL)
+send("ABCDEFGH", { id = "s:9", type = "gift", gift = "Late" })
+step(30)
+for _, line in got do check(line ~= "gift:Late", "the old code's gifts stop") end
+TikTokFeed.useCode("", onEvent, onStatus, URL)
+local asked = #relay.asked
+step(60)
+check(#relay.asked <= asked + 1, "clearing the code stops asking")
 print("code feed: " .. passed .. " checks passed")
 '''
 
 body = source.replace("return TikTokFeed", "")
-program = harness + body + test
 work = root / "tests" / ".code-feed.luau"
-work.write_text(program, encoding="utf-8")
+work.write_text(harness + body + test, encoding="utf-8")
 try:
     result = subprocess.run([luau, str(work)], capture_output=True, text=True)
 finally:
