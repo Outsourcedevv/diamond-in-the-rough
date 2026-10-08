@@ -267,7 +267,7 @@ function ChalkBoard.giftAmount(rocks: number, coins: number, count: number, stre
 	return if rocks > 0 then amount else -amount
 end
 
-ChalkBoard.tier = GiftTier.forCoins
+ChalkBoard.tier = GiftTier.pick
 
 -- True if a gift called `gift` starts the reset countdown.
 function ChalkBoard.isResetGift(gift: string?, resetGift: string): boolean
@@ -1065,6 +1065,12 @@ function GiftTier.forCoins(coins: number): number
 	if coins >= 100 then return 3 end
 	if coins >= 10 then return 2 end
 	return 1
+end
+-- The show to play: the one chosen for the gift in the gift settings (1 to 6),
+-- otherwise the one its coins pick.
+function GiftTier.pick(coins: number, chosen: any): number
+	if type(chosen) == "number" and chosen == math.floor(chosen) and chosen >= 1 and chosen <= 6 then return chosen end
+	return GiftTier.forCoins(coins)
 end
 return GiftTier
 ]]></string>
@@ -5357,6 +5363,8 @@ local settings = {
 	winRules = {} :: { [string]: number },
 	-- Reset gifts (gift settings): send the game being played back to the start.
 	resetGifts = {} :: { [string]: boolean },
+	-- The show each gift plays (1 smallest to 6 biggest), chosen in the gift settings.
+	animRules = {} :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
 	-- Gifts the streamer added in the gift settings (name -> coins), for gifts
 	-- missing from the built-in list (see GiftCatalogue).
@@ -5424,6 +5432,11 @@ if saved then
 		if type(name) == "string" and on == true then resets[string.lower(name)] = true end
 	end
 	settings.resetGifts = resets
+	local anims: { [string]: number } = {}
+	for name, tier in settings.animRules do
+		if type(name) == "string" and type(tier) == "number" and tier == math.floor(tier) and tier >= 1 and tier <= 6 then anims[string.lower(name)] = tier end
+	end
+	settings.animRules = anims
 	settings.customGifts = GiftSettings.cleanCustom(settings.customGifts)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
@@ -5457,6 +5470,7 @@ local function publishSettings()
 	State:SetAttribute("ChalkRules", game:GetService("HttpService"):JSONEncode(settings.chalkRules))
 	State:SetAttribute("WinRules", game:GetService("HttpService"):JSONEncode(settings.winRules))
 	State:SetAttribute("ResetGifts", game:GetService("HttpService"):JSONEncode(settings.resetGifts))
+	State:SetAttribute("AnimRules", game:GetService("HttpService"):JSONEncode(settings.animRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
 	State:SetAttribute("CustomGifts", game:GetService("HttpService"):JSONEncode(settings.customGifts))
 	local statueList = {}
@@ -6304,6 +6318,9 @@ local function processTikTok(event: TikTokFeed.Event)
 	local who = boardName(event.name or event.user or "Someone") or "Viewer"
 	local giftLabel = if event.gift then (boardName(event.gift) or "a gift") else nil;
 	(event :: any).giftLabel = giftLabel
+	-- The show chosen for this gift in the gift settings (nil: its coins pick).
+	local effectTier = if event.type == "gift" then settings.animRules[string.lower(event.gift or "")] else nil;
+	(event :: any).effectTier = effectTier
 	local amount = 0
 	local text = ""
 	if event.type == "gift" then
@@ -6380,6 +6397,7 @@ local function processTikTok(event: TikTokFeed.Event)
 			elseif amount > 0 then 1 else 0
 		local from, to, wallDamage, wallBroke = climbGame.gift(who, move, {
 			coins = if event.type == "gift" then coins else 1,
+			tier = effectTier,
 			gift = (giftLabel or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"))
 				.. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
 		})
@@ -6409,6 +6427,7 @@ local function processTikTok(event: TikTokFeed.Event)
 			-- One gift's coins, never the combo total: Galaxy x10 arrives here
 			-- as ten Galaxies, each with the Galaxy's own effect.
 			coins = math.max(1, event.coins or 1),
+			tier = effectTier,
 			position = preview,
 			name = who,
 			gift = (giftLabel or "Gift") .. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
@@ -7543,7 +7562,7 @@ function ChalkGame.start(options: Options): Game
 			local from = progress.count
 			local to = math.clamp(from + amount, 0, progress.goal)
 			local moved = to - from
-			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = to, amount = moved, coins = coins, name = who,
+			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = to, amount = moved, coins = coins, name = who, tier = event.effectTier,
 				gift = event.giftLabel or event.gift or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"), doubled = doubled })
 			add(amount)
 			if moved ~= 0 then
@@ -9560,6 +9579,8 @@ return Farm
 --   chalk: numbers per gift in Chalkboard Count (negative counts down)
 --   wins:  wins per gift, added to (or, negative, taken from) the win
 --          counter of whichever game is being played
+--   anim:  the show to play (1 smallest to 6 biggest), or nil for the one
+--          the gift's coins pick
 --   reset: true to send whichever game is being played back to the start
 --          (a full mountain, platform 0, or a count of 0)
 --   key:   a keybind name ("K", "Shift+K"), or "" for none
@@ -9579,6 +9600,7 @@ export type Store = {
 	chalkRules: { [string]: any },
 	winRules: { [string]: any },
 	resetGifts: { [string]: any },
+	animRules: { [string]: any },
 	giftBindings: { [string]: any },
 	customGifts: { [string]: number },
 }
@@ -9639,6 +9661,7 @@ function GiftSettings.apply(store: Store, value: any, limits: Limits): string?
 	store.chalkRules[lower] = amount(value.chalk, limits.chalk)
 	store.winRules[lower] = amount(value.wins, limits.wins)
 	store.resetGifts[lower] = if value.reset == true then true else nil
+	store.animRules[lower] = if type(value.anim) == "number" and value.anim == math.floor(value.anim) and value.anim >= 1 and value.anim <= 6 then value.anim else nil
 
 	-- One key per gift: the gift's old key goes, and the new key leaves any
 	-- other gift it was on.
@@ -9671,6 +9694,7 @@ function GiftSettings.remove(store: Store, gift: any)
 	store.chalkRules[lower] = nil
 	store.winRules[lower] = nil
 	store.resetGifts[lower] = nil
+	store.animRules[lower] = nil
 	for key, binding in store.giftBindings do
 		if type(binding) == "table" and type(binding.gift) == "string" and string.lower(binding.gift) == lower then
 			store.giftBindings[key] = nil
@@ -16335,7 +16359,7 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	local function onGift(data: any)
 		if not active or type(data) ~= "table" then return end
 		local coins = tonumber(data.coins) or 1
-		local tier = ChalkBoard.tier(coins)
+		local tier = ChalkBoard.tier(coins, data.tier)
 		local amount = tonumber(data.amount) or 0
 		local up = data.up == true
 		local look = theme()
@@ -16908,7 +16932,7 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 	ClimbEffects.stop()
 	local speed = math.max(1, pace or 1)
 	local coins = math.max(1, tonumber(data.coins) or 1)
-	local tier = GiftTier.forCoins(coins)
+	local tier = GiftTier.pick(coins, data.tier)
 	local up = data.up == true
 	local from = math.clamp(math.floor(tonumber(data.from) or 0), 0, ClimbPath.TOP)
 	local to = math.clamp(math.floor(tonumber(data.to) or from), 0, ClimbPath.TOP)
@@ -18089,7 +18113,16 @@ end
 -- Platform numbers float over the platforms near the climber: this many below
 -- and above the one they're on (only those, so 1000 signs never draw at once).
 ClimbView.NUMBERS_BELOW, ClimbView.NUMBERS_ABOVE = 6, 24
-ClimbView.NUMBER_HEIGHT = 6.5 -- studs over the platform's top, above a standing climber's head
+ClimbView.NUMBER_HEIGHT = 1.8 -- studs over the platform's top, at its outer edge
+
+-- Where platform `index`'s number hangs: just above the outer edge of its
+-- top (away from the pillar), so it never sits in a platform or on the climber.
+function ClimbView.numberPoint(index: number): Vector3
+	local top = ClimbPath.top(index)
+	local out = Vector3.new(top.X - ClimbPath.ORIGIN.X, 0, top.Z - ClimbPath.ORIGIN.Z)
+	local edge = if out.Magnitude > 1e-3 then out.Unit * (ClimbPath.size(index) / 2 - 0.6) else Vector3.zero
+	return top + edge + Vector3.new(0, ClimbView.NUMBER_HEIGHT, 0)
+end
 
 -- The platforms that show their number while the climber is on `index`.
 function ClimbView.numberRange(index: number): (number, number)
@@ -18651,14 +18684,20 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	local numberFolder = make("Folder", { Name = "ClimbNumbers" }, player:WaitForChild("PlayerGui"))
 	local numberSigns: { [number]: BillboardGui } = {}
 	local numbersFrom, numbersTo = -1, -1
-	local function numberSign(index: number, platform: BasePart): BillboardGui
+	-- Each number hangs on its own invisible point just above its platform's
+	-- outer edge, and is drawn over everything, so no platform ever hides it.
+	local anchorFolder = make("Folder", { Name = "ClimbNumberPoints" }, workspace)
+	local anchors: { [number]: BasePart } = {}
+	local function numberSign(index: number, _platform: BasePart): BillboardGui
 		local milestone = index % ClimbPath.MILESTONE == 0
+		local point = make("Part", { Name = "Point" .. index, Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
+			Transparency = 1, Size = Vector3.new(0.2, 0.2, 0.2), CFrame = CFrame.new(ClimbView.numberPoint(index)) }, anchorFolder)
+		anchors[index] = point
 		local sign = make("BillboardGui", {
 			Name = "Platform" .. index,
-			Adornee = platform,
-			-- The platform's middle is half its thickness under its top.
-			StudsOffsetWorldSpace = Vector3.new(0, ClimbPath.THICKNESS / 2 + ClimbView.NUMBER_HEIGHT, 0),
-			Size = UDim2.fromScale(if milestone then 9 else 6, if milestone then 3.6 else 2.6),
+			Adornee = point,
+			Size = UDim2.fromScale(if milestone then 7 else 4.6, if milestone then 2.8 else 2),
+			AlwaysOnTop = true,
 			LightInfluence = 0,
 			MaxDistance = 220,
 			ResetOnSpawn = false,
@@ -18685,6 +18724,8 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 			if index < first or index > last then
 				sign:Destroy()
 				numberSigns[index] = nil
+				if anchors[index] then anchors[index]:Destroy() end
+				anchors[index] = nil
 			end
 		end
 		local missing = false
@@ -19552,7 +19593,7 @@ export type Particles = {
 
 function GiftEffects.play(data: any)
 	if typeof(data.position) ~= "Vector3" or type(data.coins) ~= "number" then return end
-	local tier = GiftTier.forCoins(data.coins)
+	local tier = GiftTier.pick(data.coins, data.tier)
 	for i = #active, 1, -1 do
 		if active[i].folder.Parent == nil then table.remove(active, i) end
 	end
@@ -20658,6 +20699,28 @@ local FONT = Enum.Font.GothamBold
 local FONT_MEDIUM = Enum.Font.GothamMedium
 local FONT_HEAVY = Enum.Font.GothamBlack
 
+-- Each show (1 smallest to 6 biggest) by name in each game: breaking or
+-- adding stone, climbing up or down, counting up or down. The same lists as
+-- GiftEffects, ClimbPath and ChalkEffects (the tests check they match).
+GiftMenu.ANIMATIONS = {
+	{ rough = "SPARK BURST", add = "PEBBLE DROP", up = "BOUNCE PAD", down = "BANANA SLIP", chalkUp = "CHALK STAR", chalkDown = "SPITBALL" },
+	{ rough = "SHOCKWAVE", add = "ROCKSLIDE", up = "SPRING LAUNCH", down = "SPIKE BOUNCE", chalkUp = "GOLD STARS", chalkDown = "ERASER TOSS" },
+	{ rough = "DIAMOND FRACTURE", add = "STONE SURGE", up = "ROCKET BOOST", down = "ANVIL SMASH", chalkUp = "PAPER PLANES", chalkDown = "SPONGE SPLASH" },
+	{ rough = "ORBITAL STRIKE", add = "BOULDER BARRAGE", up = "DIAMOND CANNON", down = "METEOR STRIKE", chalkUp = "CHALK STORM", chalkDown = "BOARD QUAKE" },
+	{ rough = "GALAXY COLLAPSE", add = "STONE CYCLONE", up = "STARLIGHT ASCENT", down = "THUNDER HAMMER", chalkUp = "FIREWORKS", chalkDown = "DUSTER TORNADO" },
+	{ rough = "COSMIC BURST", add = "MOUNTAIN RISING", up = "GALACTIC ASCENSION", down = "BLACK HOLE PLUNGE", chalkUp = "SUPERNOVA", chalkDown = "BLACK HOLE" },
+}
+
+-- What the animation button and its line under it say for a choice (nil: auto).
+function GiftMenu.animationText(tier: number?): (string, string)
+	if tier == nil then
+		return "Animation: Auto (picked by the coins)", "Bigger gifts play bigger shows. Press to choose one."
+	end
+	local a = GiftMenu.ANIMATIONS[tier]
+	return string.format("Animation: %d of 6", tier),
+		string.format("Rough: %s / %s · Climb: %s / %s · Chalk: %s / %s", a.rough, a.add, a.up, a.down, a.chalkUp, a.chalkDown)
+end
+
 local open = false
 local onOpenChanged: { (boolean) -> () } = {}
 
@@ -20855,6 +20918,10 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local climbBox = section("DIAMOND CLIMB: platforms per gift", "Positive sends the climber up; negative sends them down. Empty: worked out from the coins.", "auto (from the coins)")
 	local chalkBox = section("CHALKBOARD COUNT: numbers per gift", "Positive counts up; negative counts down. Empty: worked out from the coins.", "auto (from the coins)")
 	local winsBox = section("WINS per gift", "Adds wins (e.g. 1) or takes them away (e.g. -1) on the win counter of whichever game you're playing. Empty: no change.", "no change")
+	add(label(right, "ANIMATION", 15, GOLD, FONT, 20))
+	local animButton = add(button(right, "Animation: Auto"))
+	animButton.Size = UDim2.new(1, 0, 0, 38)
+	local animNames = add(label(right, "", 13, MUTED, FONT_MEDIUM, 34))
 	add(label(right, "RESET", 15, GOLD, FONT, 20))
 	add(label(right, "On: this gift sends the game you're playing back to the start (a full mountain, platform 0, or a count of 0), and does nothing else.", 13, MUTED, FONT_MEDIUM, 34))
 	local resetToggle = add(button(right, "Reset: off"))
@@ -20884,6 +20951,13 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local chosen: Gift? = nil
 	local chosenKey = ""
 	local chosenReset = false
+	local chosenAnim: number? = nil
+	local function showAnim()
+		local text, names = GiftMenu.animationText(chosenAnim)
+		animButton.Text = text
+		animButton.BackgroundColor3 = if chosenAnim then SELECTED else BUTTON
+		animNames.Text = names
+	end
 	local function showReset()
 		resetToggle.Text = if chosenReset then "Reset: ON (back to the start)" else "Reset: off"
 		resetToggle.BackgroundColor3 = if chosenReset then DANGER else BUTTON
@@ -20891,7 +20965,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local capturing = false
 
 	local function rules()
-		return decode("GiftRules"), decode("ClimbRules"), decode("ChalkRules"), decode("GiftBindings"), decode("CustomGifts"), decode("WinRules"), decode("ResetGifts")
+		return decode("GiftRules"), decode("ClimbRules"), decode("ChalkRules"), decode("GiftBindings"), decode("CustomGifts"), decode("WinRules"), decode("ResetGifts"), decode("AnimRules")
 	end
 	local function keyFor(bindings: { [string]: any }, name: string): string
 		local lower = string.lower(name)
@@ -20909,10 +20983,12 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		chosen = gift
 		capturing = false
 		status.Text = ""
-		local rough, climb, chalk, bindings, _, wins, resets = rules()
+		local rough, climb, chalk, bindings, _, wins, resets, anims = rules()
 		if gift == nil then
 			chosenReset = false
 			showReset()
+			chosenAnim = nil
+			showAnim()
 			giftName.Text = "Pick a gift"
 			giftCoins.Text = "Choose one from the list, or search for a gift that's missing to add it."
 			coinsBox.Visible = false
@@ -20934,6 +21010,8 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		winsBox.Text = if type(wins[lower]) == "number" then tostring(wins[lower]) else ""
 		chosenReset = resets[lower] == true
 		showReset()
+		chosenAnim = if type(anims[lower]) == "number" then anims[lower] else nil
+		showAnim()
 		chosenKey = keyFor(bindings, gift.name)
 		showKey()
 	end
@@ -20943,7 +21021,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		for _, child in list:GetChildren() do
 			if child:IsA("GuiObject") then child:Destroy() end
 		end
-		local rough, climb, chalk, bindings, custom, wins, resets = rules()
+		local rough, climb, chalk, bindings, custom, wins, resets, anims = rules()
 		local all = GiftCatalogue.all(custom :: any)
 		local shown = GiftCatalogue.search(all, search.Text)
 		local query = (string.gsub(search.Text, "^%s*(.-)%s*$", "%1"))
@@ -21026,7 +21104,8 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 				Text = string.format("Rough %s · Climb %s · Chalk %s%s%s",
 					GiftMenu.ruleText(rough[lower]), GiftMenu.ruleText(climb[lower]), GiftMenu.ruleText(chalk[lower]),
 					(if type(wins[lower]) == "number" and wins[lower] ~= 0 then " · Wins " .. GiftMenu.ruleText(wins[lower]) else "")
-						.. (if resets[lower] == true then " · RESET" else ""),
+						.. (if resets[lower] == true then " · RESET" else "")
+						.. (if type(anims[lower]) == "number" then " · Anim " .. tostring(anims[lower]) else ""),
 					if key ~= "" then " · [" .. Keybinds.label(key) .. "]" else ""),
 			}, row)
 			row.Activated:Connect(function()
@@ -21037,7 +21116,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	end
 
 	search:GetPropertyChangedSignal("Text"):Connect(draw)
-	for _, name in { "GiftRules", "ClimbRules", "ChalkRules", "GiftBindings", "CustomGifts", "WinRules", "ResetGifts" } do
+	for _, name in { "GiftRules", "ClimbRules", "ChalkRules", "GiftBindings", "CustomGifts", "WinRules", "ResetGifts", "AnimRules" } do
 		state:GetAttributeChangedSignal(name):Connect(function()
 			if open then draw() end
 		end)
@@ -21047,6 +21126,12 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		if chosen == nil then return end
 		capturing = true
 		showKey()
+	end)
+	animButton.Activated:Connect(function()
+		if chosen == nil then return end
+		-- Auto, then 1 to 6, then auto again.
+		chosenAnim = if chosenAnim == nil then 1 elseif chosenAnim >= 6 then nil else chosenAnim + 1
+		showAnim()
 	end)
 	resetToggle.Activated:Connect(function()
 		if chosen == nil then return end
@@ -21092,6 +21177,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 			chalk = GiftMenu.parseAmount(chalkBox.Text),
 			wins = GiftMenu.parseAmount(winsBox.Text),
 			reset = chosenReset,
+			anim = chosenAnim,
 			key = chosenKey,
 		}
 	end
@@ -21113,6 +21199,8 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		roughBox.Text, climbBox.Text, chalkBox.Text, winsBox.Text = "", "", "", ""
 		chosenReset = false
 		showReset()
+		chosenAnim = nil
+		showAnim()
 		chosenKey = ""
 		capturing = false
 		showKey()

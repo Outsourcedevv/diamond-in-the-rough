@@ -62,7 +62,16 @@ end
 -- Platform numbers float over the platforms near the climber: this many below
 -- and above the one they're on (only those, so 1000 signs never draw at once).
 ClimbView.NUMBERS_BELOW, ClimbView.NUMBERS_ABOVE = 6, 24
-ClimbView.NUMBER_HEIGHT = 6.5 -- studs over the platform's top, above a standing climber's head
+ClimbView.NUMBER_HEIGHT = 1.8 -- studs over the platform's top, at its outer edge
+
+-- Where platform `index`'s number hangs: just above the outer edge of its
+-- top (away from the pillar), so it never sits in a platform or on the climber.
+function ClimbView.numberPoint(index: number): Vector3
+	local top = ClimbPath.top(index)
+	local out = Vector3.new(top.X - ClimbPath.ORIGIN.X, 0, top.Z - ClimbPath.ORIGIN.Z)
+	local edge = if out.Magnitude > 1e-3 then out.Unit * (ClimbPath.size(index) / 2 - 0.6) else Vector3.zero
+	return top + edge + Vector3.new(0, ClimbView.NUMBER_HEIGHT, 0)
+end
 
 -- The platforms that show their number while the climber is on `index`.
 function ClimbView.numberRange(index: number): (number, number)
@@ -624,14 +633,20 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	local numberFolder = make("Folder", { Name = "ClimbNumbers" }, player:WaitForChild("PlayerGui"))
 	local numberSigns: { [number]: BillboardGui } = {}
 	local numbersFrom, numbersTo = -1, -1
-	local function numberSign(index: number, platform: BasePart): BillboardGui
+	-- Each number hangs on its own invisible point just above its platform's
+	-- outer edge, and is drawn over everything, so no platform ever hides it.
+	local anchorFolder = make("Folder", { Name = "ClimbNumberPoints" }, workspace)
+	local anchors: { [number]: BasePart } = {}
+	local function numberSign(index: number, _platform: BasePart): BillboardGui
 		local milestone = index % ClimbPath.MILESTONE == 0
+		local point = make("Part", { Name = "Point" .. index, Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
+			Transparency = 1, Size = Vector3.new(0.2, 0.2, 0.2), CFrame = CFrame.new(ClimbView.numberPoint(index)) }, anchorFolder)
+		anchors[index] = point
 		local sign = make("BillboardGui", {
 			Name = "Platform" .. index,
-			Adornee = platform,
-			-- The platform's middle is half its thickness under its top.
-			StudsOffsetWorldSpace = Vector3.new(0, ClimbPath.THICKNESS / 2 + ClimbView.NUMBER_HEIGHT, 0),
-			Size = UDim2.fromScale(if milestone then 9 else 6, if milestone then 3.6 else 2.6),
+			Adornee = point,
+			Size = UDim2.fromScale(if milestone then 7 else 4.6, if milestone then 2.8 else 2),
+			AlwaysOnTop = true,
 			LightInfluence = 0,
 			MaxDistance = 220,
 			ResetOnSpawn = false,
@@ -658,6 +673,8 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 			if index < first or index > last then
 				sign:Destroy()
 				numberSigns[index] = nil
+				if anchors[index] then anchors[index]:Destroy() end
+				anchors[index] = nil
 			end
 		end
 		local missing = false

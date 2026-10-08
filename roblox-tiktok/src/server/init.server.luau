@@ -73,6 +73,8 @@ local settings = {
 	winRules = {} :: { [string]: number },
 	-- Reset gifts (gift settings): send the game being played back to the start.
 	resetGifts = {} :: { [string]: boolean },
+	-- The show each gift plays (1 smallest to 6 biggest), chosen in the gift settings.
+	animRules = {} :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
 	-- Gifts the streamer added in the gift settings (name -> coins), for gifts
 	-- missing from the built-in list (see GiftCatalogue).
@@ -140,6 +142,11 @@ if saved then
 		if type(name) == "string" and on == true then resets[string.lower(name)] = true end
 	end
 	settings.resetGifts = resets
+	local anims: { [string]: number } = {}
+	for name, tier in settings.animRules do
+		if type(name) == "string" and type(tier) == "number" and tier == math.floor(tier) and tier >= 1 and tier <= 6 then anims[string.lower(name)] = tier end
+	end
+	settings.animRules = anims
 	settings.customGifts = GiftSettings.cleanCustom(settings.customGifts)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
@@ -173,6 +180,7 @@ local function publishSettings()
 	State:SetAttribute("ChalkRules", game:GetService("HttpService"):JSONEncode(settings.chalkRules))
 	State:SetAttribute("WinRules", game:GetService("HttpService"):JSONEncode(settings.winRules))
 	State:SetAttribute("ResetGifts", game:GetService("HttpService"):JSONEncode(settings.resetGifts))
+	State:SetAttribute("AnimRules", game:GetService("HttpService"):JSONEncode(settings.animRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
 	State:SetAttribute("CustomGifts", game:GetService("HttpService"):JSONEncode(settings.customGifts))
 	local statueList = {}
@@ -1020,6 +1028,9 @@ local function processTikTok(event: TikTokFeed.Event)
 	local who = boardName(event.name or event.user or "Someone") or "Viewer"
 	local giftLabel = if event.gift then (boardName(event.gift) or "a gift") else nil;
 	(event :: any).giftLabel = giftLabel
+	-- The show chosen for this gift in the gift settings (nil: its coins pick).
+	local effectTier = if event.type == "gift" then settings.animRules[string.lower(event.gift or "")] else nil;
+	(event :: any).effectTier = effectTier
 	local amount = 0
 	local text = ""
 	if event.type == "gift" then
@@ -1096,6 +1107,7 @@ local function processTikTok(event: TikTokFeed.Event)
 			elseif amount > 0 then 1 else 0
 		local from, to, wallDamage, wallBroke = climbGame.gift(who, move, {
 			coins = if event.type == "gift" then coins else 1,
+			tier = effectTier,
 			gift = (giftLabel or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"))
 				.. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
 		})
@@ -1125,6 +1137,7 @@ local function processTikTok(event: TikTokFeed.Event)
 			-- One gift's coins, never the combo total: Galaxy x10 arrives here
 			-- as ten Galaxies, each with the Galaxy's own effect.
 			coins = math.max(1, event.coins or 1),
+			tier = effectTier,
 			position = preview,
 			name = who,
 			gift = (giftLabel or "Gift") .. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),

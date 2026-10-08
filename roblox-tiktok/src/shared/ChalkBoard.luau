@@ -171,7 +171,7 @@ function ChalkBoard.giftAmount(rocks: number, coins: number, count: number, stre
 	return if rocks > 0 then amount else -amount
 end
 
-ChalkBoard.tier = GiftTier.forCoins
+ChalkBoard.tier = GiftTier.pick
 
 -- True if a gift called `gift` starts the reset countdown.
 function ChalkBoard.isResetGift(gift: string?, resetGift: string): boolean

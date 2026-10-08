@@ -202,7 +202,7 @@ export type Particles = {
 
 function GiftEffects.play(data: any)
 	if typeof(data.position) ~= "Vector3" or type(data.coins) ~= "number" then return end
-	local tier = GiftTier.forCoins(data.coins)
+	local tier = GiftTier.pick(data.coins, data.tier)
 	for i = #active, 1, -1 do
 		if active[i].folder.Parent == nil then table.remove(active, i) end
 	end

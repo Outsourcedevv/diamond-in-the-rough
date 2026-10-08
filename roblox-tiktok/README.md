@@ -52,6 +52,7 @@ In the game, press **Y** and click **Open gift settings (full screen)**. About 1
 - **Diamond Climb:** platforms per gift (negative sends the climber down),
 - **Chalkboard Count:** numbers per gift (negative counts down),
 - **Wins:** wins per gift, e.g. `1` or `-1` (or more), added to or taken from the win counter of whichever game is being played (never below 0),
+- **Animation:** the show the gift plays, from 1 (smallest) to 6 (biggest), named in each game (e.g. 3 is Diamond Fracture / Stone Surge, Rocket Boost / Anvil Smash, Paper Planes / Sponge Splash), or **Auto** to let the coins pick,
 - **Reset:** switch it on and the gift sends whichever game is being played back to the start: a full mountain again in Diamond in the Rough (back to the starting stone), platform 0 in Diamond Climb, or a count of 0 in Chalkboard Count. A reset gift does nothing else,
 - **a keybind:** press **Set key**, then a key: letters like K, numbers, F1 to F8, the number pad, Insert, Home, End, Page Up/Down or Delete, on their own or with **Shift** or **Ctrl**, so there are hundreds to give out.
 

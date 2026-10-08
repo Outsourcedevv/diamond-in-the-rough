@@ -137,7 +137,24 @@ first, last = ClimbView.numberRange(500)
 check(first == 500 - ClimbView.NUMBERS_BELOW and last == 500 + ClimbView.NUMBERS_ABOVE, "numbers round the climber")
 first, last = ClimbView.numberRange(ClimbPath.TOP)
 check(last == ClimbPath.TOP and last - first == ClimbView.NUMBERS_BELOW, "numbers stop at the top")
-check(ClimbView.NUMBER_HEIGHT > 5.5, "numbers float above a standing climber's head")
+for _, n in { 1, 57, 100, 1000 } do
+	local point = ClimbView.numberPoint(n)
+	local top = ClimbPath.top(n)
+	local flatOut = Vector3.new(point.X - top.X, 0, point.Z - top.Z).Magnitude
+	check(point.Y > top.Y + 1 and point.Y < top.Y + 3, "platform " .. n .. "'s number hangs just above it")
+	check(flatOut > ClimbPath.size(n) / 2 - 2 and flatOut <= ClimbPath.size(n) / 2, "at its outer edge, clear of the climber")
+	local fromPillar = Vector3.new(point.X - ClimbPath.ORIGIN.X, 0, point.Z - ClimbPath.ORIGIN.Z).Magnitude
+	check(fromPillar > Vector3.new(top.X - ClimbPath.ORIGIN.X, 0, top.Z - ClimbPath.ORIGIN.Z).Magnitude, "on the outside of the spiral")
+	-- Never inside another platform.
+	for m = math.max(1, n - 40), math.min(ClimbPath.TOP, n + 40) do
+		if m ~= n then
+			local other = ClimbPath.top(m)
+			local inside = Vector3.new(point.X - other.X, 0, point.Z - other.Z).Magnitude < ClimbPath.size(m) / 2
+				and point.Y > other.Y - ClimbPath.THICKNESS - 1 and point.Y < other.Y + 1
+			check(not inside, "platform " .. n .. "'s number is not inside platform " .. m)
+		end
+	end
+end
 check(ClimbView.pace(0) == 1 and ClimbView.pace(2) > 1 and ClimbView.pace(50) == 3, "queued rides play faster")
 
 -- The tower.

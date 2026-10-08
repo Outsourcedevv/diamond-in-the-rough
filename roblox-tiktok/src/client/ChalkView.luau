@@ -541,7 +541,7 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	local function onGift(data: any)
 		if not active or type(data) ~= "table" then return end
 		local coins = tonumber(data.coins) or 1
-		local tier = ChalkBoard.tier(coins)
+		local tier = ChalkBoard.tier(coins, data.tier)
 		local amount = tonumber(data.amount) or 0
 		local up = data.up == true
 		local look = theme()
