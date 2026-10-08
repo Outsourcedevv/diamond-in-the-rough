@@ -89,6 +89,7 @@ export type Game = {
 	setting: (player: Player, action: string, value: any) -> boolean,
 	gift: (who: string, event: { [string]: any }, rocks: number, doubled: boolean, rule: number?) -> string,
 	addWins: (amount: number) -> number,
+	resetNow: () -> number,
 	removing: (player: Player) -> (),
 }
 
@@ -338,6 +339,21 @@ function ChalkGame.start(options: Options): Game
 		publish()
 		options.save()
 		return progress.wins
+	end
+
+	-- A reset gift (gift settings): the board is wiped back to 0 straight away.
+	-- Returns how many numbers were lost.
+	function self.resetNow(): number
+		if winning then return 0 end
+		cancelReset()
+		cancelHold()
+		local lost = progress.count
+		if lost > 0 then
+			notify:FireAllClients("chalkReset", { state = "wiped", lost = lost })
+			notify:FireAllClients("chalkWipe", { reason = "reset" })
+		end
+		setCount(0)
+		return lost
 	end
 
 	function self.gift(who: string, event: { [string]: any }, rocks: number, doubled: boolean, rule: number?): string

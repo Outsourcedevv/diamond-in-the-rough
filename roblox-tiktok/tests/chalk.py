@@ -383,6 +383,15 @@ chalk.gift("Bea", { type = "gift", gift = "Money Gun", coins = 1000 }, 1, false)
 check(state:GetAttribute("ChalkResetEnds") > 0, "1,000 coins no longer saves it at 5,000")
 check(chalk.setting(streamer, "chalkTestSave", nil) and state:GetAttribute("ChalkResetEnds") == 0, "Test save saves it")
 check(chalk.setting(streamer, "chalkRestart", nil) and chalk.progress.count == 0 and last("chalkWipe").reason == "restart", "Restart wipes the board")
+-- Gift settings: a reset gift wipes the board at once, and gifts can give or take wins.
+chalk.gift("Viewer", { type = "gift", gift = "Rose", coins = 1, count = 3, id = "reset-1" }, 3, false)
+local before = chalk.progress.count
+check(before > 0, "a gift counts up before the reset")
+check(chalk.resetNow() == before and chalk.progress.count == 0 and last("chalkWipe").reason == "reset", "a reset gift wipes the board straight away")
+check(chalk.resetNow() == 0 and chalk.progress.count == 0, "resetting an empty board is fine")
+local wins = chalk.progress.wins
+check(chalk.addWins(2) == wins + 2 and state:GetAttribute("ChalkWins") == wins + 2, "a gift can add wins")
+check(chalk.addWins(-9999) == 0, "wins never go below 0")
 check(not chalk.setting(streamer, "setPerCoin", 5), "other settings are left to the game")
 check(saves > 0, "settings are saved")
 
