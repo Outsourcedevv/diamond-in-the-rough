@@ -12,10 +12,12 @@
 // it. Events are kept for ten minutes.
 //
 //   POST /c/CODE/push   header x-relay-secret, body { events, rules, tiktok }
-//   GET  /c/CODE/events?since=N&wait=S
+//   GET  /c/CODE/events?since=N&wait=S&start=0|1
 //        -> { session, last, tiktok, events }
-//   A game asking with since=0 has just started: it gets the gift rules and
-//   the newest event number, not the events that came before it.
+//   A game that has just started asks with start=1: it gets the newest event
+//   number, not the events that came before it, and then asks for the ones
+//   after it (start=0, even when that number is 0). Games from before the
+//   start flag ask with since=0 instead.
 
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const CODE_LENGTH = 8;
@@ -97,7 +99,10 @@ async function push(db, code, request, now) {
     db.prepare('INSERT INTO codes (code, tiktok, rules, pushed) VALUES (?1, ?2, COALESCE(?3, \'[]\'), ?4) ON CONFLICT (code) DO UPDATE SET tiktok = ?2, rules = COALESCE(?3, rules), pushed = ?4')
       .bind(code, tiktok, rules, now),
     ...events.map((line) => db.prepare('INSERT INTO events (code, body, at) VALUES (?, ?, ?)').bind(code, line, now)),
-    db.prepare('DELETE FROM events WHERE code = ? AND at < ?').bind(code, now - LIMITS.keepSeconds * 1000),
+    // The newest event is always kept, so the newest event number never goes
+    // back to 0 when everything is old (a game starting then would miss the
+    // next gifts).
+    db.prepare('DELETE FROM events WHERE code = ? AND at < ? AND id < (SELECT MAX(id) FROM events)').bind(code, now - LIMITS.keepSeconds * 1000),
   ];
   await db.batch(writes);
   return json(200, { ok: true, received: events.length });
@@ -106,9 +111,11 @@ async function push(db, code, request, now) {
 async function read(db, code, url, clock) {
   const since = Math.max(0, Math.floor(Number(url.searchParams.get('since')) || 0));
   const wait = Math.min(LIMITS.waitSeconds, Math.max(0, Number(url.searchParams.get('wait')) || 0));
+  const start = url.searchParams.get('start');
+  const starting = start === '1' || (start === null && since === 0);
   const state = await db.prepare('SELECT tiktok, rules FROM codes WHERE code = ?').bind(code).first();
   const tiktok = state?.tiktok || 'waiting for DiamondRushBridge.exe (check the game code)';
-  if (since === 0) {
+  if (starting) {
     // A game that just started: the rules, and where the events are up to.
     const top = await db.prepare('SELECT MAX(id) AS last FROM events').first();
     let rules = [];

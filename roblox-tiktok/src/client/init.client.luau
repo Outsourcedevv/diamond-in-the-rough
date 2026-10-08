@@ -9,6 +9,11 @@ local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 
 local player = Players.LocalPlayer
+-- Nobody carries a tool (digging is bare-handed), so Roblox's backpack bar is
+-- off: it would otherwise take the number keys, which gifts can be bound to.
+pcall(function()
+	game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+end)
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
@@ -576,7 +581,7 @@ panelLabel("WIN COUNTER TITLE")
 local titleBox = panelBox("", function(text)
 	send("setTitle", text)
 end)
-panelLabel("WINS")
+panelLabel("WINS (of the game you are playing)")
 local winsInput = panelBox("", function(text)
 	local number = tonumber(text)
 	if number then
@@ -938,9 +943,15 @@ end
 State:GetAttributeChangedSignal("Statues"):Connect(refreshStatues)
 refreshStatues()
 
+-- The wins of the game being played (Diamond Climb and Chalkboard Count keep their own).
+local function currentWins(): number
+	if player:GetAttribute("InClimb") == true then return attr("ClimbWins", 0) end
+	if player:GetAttribute("InChalk") == true then return attr("ChalkWins", 0) end
+	return attr("Wins", 0)
+end
 local function refreshPanelFields()
 	titleBox.Text = attr("WinTitle", "WINS")
-	winsInput.Text = tostring(attr("Wins", 0))
+	winsInput.Text = tostring(currentWins())
 	goalBox.Text = tostring(attr("WinGoal", 0))
 	textColourBox.Text = attr("WinTextColor", "#FFFFFF")
 	backgroundBox.Text = attr("WinBackgroundColor", "#2B2140")
@@ -1159,11 +1170,9 @@ local function setSettingsOpen(show: boolean)
 end
 settingsButton.Activated:Connect(function() setSettingsOpen(not settingsCard.Visible) end)
 settingsDone.Activated:Connect(function() setSettingsOpen(false) end)
--- P toggles the settings in the game, unless the streamer bound P to a test gift.
+-- P toggles the settings in the game (no gift can be given P, see Keybinds).
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed or input.KeyCode ~= SETTINGS_KEY or not gui.Enabled or UserInputService:GetFocusedTextBox() then return end
-	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
-	if ok and type(bindings) == "table" and bindings[SETTINGS_KEY.Name] ~= nil then return end
 	setSettingsOpen(not settingsCard.Visible)
 end)
 
@@ -1211,12 +1220,6 @@ player:GetAttributeChangedSignal("DiamondRushAdmin"):Connect(refreshAdmin)
 refreshAdmin()
 
 -- Live updates ---------------------------------------------------------------------------
--- The wins of the game being played (Diamond Climb and Chalkboard Count keep their own).
-local function currentWins(): number
-	if player:GetAttribute("InClimb") == true then return attr("ClimbWins", 0) end
-	if player:GetAttribute("InChalk") == true then return attr("ChalkWins", 0) end
-	return attr("Wins", 0)
-end
 local function refreshWins()
 	winsBox.Visible = attr("ShowWins", true)
 	winsBox.Text = Format.wins(attr("WinTitle", "WINS"), currentWins(), attr("WinGoal", 0))

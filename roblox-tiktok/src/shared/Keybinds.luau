@@ -12,7 +12,9 @@ Keybinds.MAX = 300 -- bindings kept at once
 -- (E for prompts, G games, H how to play, P settings, Y the streamer panel)
 -- and Roblox's own keys (I and O zoom, F9 to F12) are left out, so a binding
 -- never fights them. Any of them can also be held with Shift or Ctrl (or both),
--- which gives TikFinity hundreds of keys to press, one per gift.
+-- which gives TikFinity hundreds of keys to press, one per gift, except the
+-- F keys: Roblox uses Shift and Ctrl with those (Shift+F2 to F5 show its stats
+-- on screen, Ctrl+F6 its profiler), so F1 to F8 work on their own only.
 Keybinds.KEYS = {
 	"B", "C", "F", "J", "K", "L", "M", "N", "Q", "R", "T", "U", "V", "X", "Z",
 	"One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Zero",
@@ -50,6 +52,7 @@ function Keybinds.split(name: string): (string?, boolean, boolean)
 	if string.sub(rest, 1, 5) == "Ctrl+" then ctrl = true; rest = string.sub(rest, 6) end
 	if string.sub(rest, 1, 6) == "Shift+" then shift = true; rest = string.sub(rest, 7) end
 	if not allowed[rest] then return nil, false, false end
+	if (ctrl or shift) and string.match(rest, "^F%d$") then return nil, false, false end
 	return rest, ctrl, shift
 end
 

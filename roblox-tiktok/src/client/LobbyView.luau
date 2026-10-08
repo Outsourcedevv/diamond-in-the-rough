@@ -11,7 +11,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
@@ -446,13 +445,9 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	tab.Activated:Connect(function() setOpen(true) end)
 	hide.Activated:Connect(function() setOpen(false) end)
 
-	-- G toggles the menu, unless the streamer bound G to a test gift.
+	-- G toggles the menu (no gift can be given G, see Keybinds).
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 		if processed or input.KeyCode ~= TOGGLE_KEY then return end
-		local ok, bindings = pcall(function()
-			return HttpService:JSONDecode(state:GetAttribute("GiftBindings") or "{}")
-		end)
-		if ok and type(bindings) == "table" and bindings[TOGGLE_KEY.Name] ~= nil then return end
 		setOpen(not open)
 	end)
 	-- First person locks the mouse; free it while the menu is open.

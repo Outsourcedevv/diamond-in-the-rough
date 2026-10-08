@@ -21,6 +21,7 @@ for name in ("HttpService", "RunService"):
 
 harness = r'''
 local clock = 0
+local os = { clock = function() return clock end }
 local sleeping = {}
 local task = {
 	spawn = function(f, ...)
@@ -50,7 +51,9 @@ local function step(seconds)
 end
 local warn = function() end
 -- A pretend relay: events per code, numbered across all codes like D1.
-local relay = { events = {}, rules = {}, tiktok = {}, down = 0, asked = {} }
+-- `startLast` stands in for an empty relay (it reports 0 to a starting game);
+-- `legacy` for a relay from before the start flag (since=0 always means start).
+local relay = { events = {}, rules = {}, tiktok = {}, down = 0, asked = {}, startLast = nil :: number?, legacy = false }
 local nextId = 0
 local function send(code, event)
 	nextId += 1
@@ -68,8 +71,9 @@ local HttpService = {
 		end
 		local code, since = string.match(url, "/c/(%w+)/events%?since=(%d+)")
 		since = tonumber(since)
-		if since == 0 then
-			return { session = "d1", last = nextId, tiktok = relay.tiktok[code] or "", events = relay.rules[code] or {} }
+		local start = string.match(url, "[?&]start=(%d)")
+		if (start == "1" and not relay.legacy) or ((start == nil or relay.legacy) and since == 0) then
+			return { session = "d1", last = relay.startLast or nextId, tiktok = relay.tiktok[code] or "", events = relay.rules[code] or {} }
 		end
 		local out, last = {}, since
 		for _, row in relay.events do
@@ -137,6 +141,27 @@ TikTokFeed.useCode("", onEvent, onStatus, URL)
 local asked = #relay.asked
 step(60)
 check(#relay.asked <= asked + 1, "clearing the code stops asking")
+
+-- A relay with nothing stored (no gifts for ten minutes) tells a starting
+-- game the events are at 0. The next gift must still arrive.
+check(string.find(relay.asked[1], "start=1", 1, true) ~= nil and string.find(relay.asked[2], "start=0", 1, true) ~= nil, "the first request starts, the rest ask for events")
+relay.startLast = 0
+TikTokFeed.useCode("EMPTY234", onEvent, onStatus, URL)
+step(0.5)
+check(string.find(relay.asked[#relay.asked], "since=0&wait=8&start=0", 1, true) ~= nil, "after an empty start it asks for the events after 0")
+send("EMPTY234", { id = "e:1", type = "gift", gift = "First" })
+step(10)
+check(got[#got] == "gift:First", "the first gift after an empty start arrives")
+-- An older relay answers every since=0 at once: the game asks about once a
+-- second, not ten times (Roblox allows 500 requests a minute).
+relay.legacy = true
+TikTokFeed.useCode("OLDRELAY", onEvent, onStatus, URL)
+asked = #relay.asked
+step(60)
+check(#relay.asked - asked <= 62, "an empty, quick relay is asked about once a second: " .. (#relay.asked - asked))
+TikTokFeed.useCode("", onEvent, onStatus, URL)
+relay.legacy = false
+relay.startLast = nil
 print("code feed: " .. passed .. " checks passed")
 '''
 

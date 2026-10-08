@@ -247,6 +247,9 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local roughBox = section("DIAMOND IN THE ROUGH: rocks per gift", "Positive breaks that many rocks off the mountain; negative adds stone. Empty: worked out from the coins.", "auto (from the coins)")
 	local climbBox = section("DIAMOND CLIMB: platforms per gift", "Positive sends the climber up; negative sends them down. Empty: worked out from the coins.", "auto (from the coins)")
 	local chalkBox = section("CHALKBOARD COUNT: numbers per gift", "Positive counts up; negative counts down. Empty: worked out from the coins.", "auto (from the coins)")
+	-- Chalkboard Count's own reset gift (Y panel) starts its countdown instead.
+	local chalkNote = add(label(right, "", 13, GOLD, FONT_MEDIUM, 34))
+	chalkNote.Visible = false
 	local winsBox = section("WINS per gift", "Adds wins (e.g. 1) or takes them away (e.g. -1) on the win counter of whichever game you're playing. Empty: no change.", "no change")
 	add(label(right, "ANIMATION", 15, GOLD, FONT, 20))
 	local animButton = add(button(right, "Animation: Auto"))
@@ -323,6 +326,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 			giftCoins.Text = "Choose one from the list, or search for a gift that's missing to add it."
 			coinsBox.Visible = false
 			removeCustom.Visible = false
+			chalkNote.Visible = false
 			for _, input in { roughBox, climbBox, chalkBox, winsBox } do input.Text = "" end
 			chosenKey = ""
 			showKey()
@@ -344,6 +348,9 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		showAnim()
 		chosenKey = keyFor(bindings, gift.name)
 		showKey()
+		local countdownGift = state:GetAttribute("ChalkResetGift")
+		chalkNote.Visible = type(countdownGift) == "string" and string.lower(countdownGift) == lower
+		chalkNote.Text = "In Chalkboard Count this is the countdown reset gift (set in the Y panel), so there it starts the countdown and the number above isn't used."
 	end
 
 	-- The list, drawn again whenever the search or the settings change.
@@ -486,7 +493,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 			chosenKey = combo
 			status.Text = ""
 		else
-			status.Text = Keybinds.label(combo) .. " is used by the game. Try a letter like K, a number, F1–F8 or the number pad."
+			status.Text = Keybinds.label(combo) .. " is used by the game or Roblox. Try a letter like K, a number, F1–F8 on their own or the number pad."
 		end
 		showKey()
 	end)
@@ -521,8 +528,12 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	test.Activated:Connect(function()
 		local value = current()
 		if value == nil then return end
+		-- Saved first, so the test plays what the boxes say now (the server
+		-- handles the two in order).
+		send("setGiftSettings", value)
+		if chosen then (chosen :: Gift).coins = value.coins end
 		send("testGift", { coins = value.coins, count = 1, name = value.gift })
-		status.Text = "Sent a test " .. value.gift .. " (test gifts never count on the leaderboards)."
+		status.Text = "Saved, and sent a test " .. value.gift .. " (test gifts never count on the leaderboards)."
 	end)
 	reset.Activated:Connect(function()
 		if chosen == nil then return end
