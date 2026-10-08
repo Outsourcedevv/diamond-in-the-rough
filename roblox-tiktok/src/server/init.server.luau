@@ -1410,6 +1410,21 @@ local function placeCharacter(player: Player, character: Model)
 	chalkGame.characterAdded(player, character)
 end
 
+-- The lobby's game rooms: walking into a room's portal, or pressing E at it,
+-- joins that game, just like JOIN in the games menu.
+for _, portal in lobby.portals do
+	local function join(player: Player)
+		if placeOf(player) == "lobby" then setPlace(player, portal.place) end
+	end
+	portal.part.Touched:Connect(function(hit: BasePart)
+		-- A hat or hair touches too: its character is the nearest model above it.
+		local character = hit:FindFirstAncestorWhichIsA("Model")
+		local player = if character then Players:GetPlayerFromCharacter(character) else nil
+		if player then join(player) end
+	end)
+	portal.prompt.Triggered:Connect(join)
+end
+
 local function applySetting(player: Player, action: string, value: any)
 	-- The wins box and its +1 / -1 change the win counter on screen: Diamond
 	-- Climb's or Chalkboard Count's own while the streamer is in that game.
