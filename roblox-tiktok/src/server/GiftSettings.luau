@@ -6,6 +6,8 @@
 --   chalk: numbers per gift in Chalkboard Count (negative counts down)
 --   wins:  wins per gift, added to (or, negative, taken from) the win
 --          counter of whichever game is being played
+--   anim:  the show to play (1 smallest to 6 biggest), or nil for the one
+--          the gift's coins pick
 --   reset: true to send whichever game is being played back to the start
 --          (a full mountain, platform 0, or a count of 0)
 --   key:   a keybind name ("K", "Shift+K"), or "" for none
@@ -25,6 +27,7 @@ export type Store = {
 	chalkRules: { [string]: any },
 	winRules: { [string]: any },
 	resetGifts: { [string]: any },
+	animRules: { [string]: any },
 	giftBindings: { [string]: any },
 	customGifts: { [string]: number },
 }
@@ -85,6 +88,7 @@ function GiftSettings.apply(store: Store, value: any, limits: Limits): string?
 	store.chalkRules[lower] = amount(value.chalk, limits.chalk)
 	store.winRules[lower] = amount(value.wins, limits.wins)
 	store.resetGifts[lower] = if value.reset == true then true else nil
+	store.animRules[lower] = if type(value.anim) == "number" and value.anim == math.floor(value.anim) and value.anim >= 1 and value.anim <= 6 then value.anim else nil
 
 	-- One key per gift: the gift's old key goes, and the new key leaves any
 	-- other gift it was on.
@@ -117,6 +121,7 @@ function GiftSettings.remove(store: Store, gift: any)
 	store.chalkRules[lower] = nil
 	store.winRules[lower] = nil
 	store.resetGifts[lower] = nil
+	store.animRules[lower] = nil
 	for key, binding in store.giftBindings do
 		if type(binding) == "table" and type(binding.gift) == "string" and string.lower(binding.gift) == lower then
 			store.giftBindings[key] = nil

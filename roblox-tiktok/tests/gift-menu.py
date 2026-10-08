@@ -137,7 +137,7 @@ local keyCount = #Keybinds.KEYS * 4
 check(keyCount >= 200, "hundreds of keys for TikFinity (" .. keyCount .. ")")
 
 -- Saving a gift's settings ---------------------------------------------------
-local store = { giftRules = {}, climbRules = {}, chalkRules = {}, winRules = {}, resetGifts = {}, giftBindings = { K = { gift = "Rose", coins = 1 } }, customGifts = {} }
+local store = { giftRules = {}, climbRules = {}, chalkRules = {}, winRules = {}, resetGifts = {}, animRules = {}, giftBindings = { K = { gift = "Rose", coins = 1 } }, customGifts = {} }
 local limits = { rough = 1500000, climb = 1000, chalk = 9999, wins = 1000 }
 check(GiftSettings.apply(store, { gift = "Galaxy", rough = 5000, climb = -20, chalk = 99999, wins = 1, key = "Shift+K" }, limits) == nil, "saves a gift")
 check(store.winRules.galaxy == 1, "a gift can give a win")
@@ -149,6 +149,10 @@ GiftSettings.apply(store, { gift = "Universe Test", coins = 5, reset = true }, l
 check(store.resetGifts["universe test"] == true, "a gift can reset the game")
 GiftSettings.apply(store, { gift = "Universe Test", coins = 5, reset = false }, limits)
 check(store.resetGifts["universe test"] == nil, "and stop resetting it")
+GiftSettings.apply(store, { gift = "Universe Test", coins = 5, anim = 6 }, limits)
+check(store.animRules["universe test"] == 6, "a gift can pick its show")
+GiftSettings.apply(store, { gift = "Universe Test", coins = 5, anim = 9 }, limits)
+check(store.animRules["universe test"] == nil, "a show that doesn't exist goes back to auto")
 GiftSettings.remove(store, "Universe Test")
 check(store.giftRules.galaxy == 5000 and store.climbRules.galaxy == -20 and store.chalkRules.galaxy == 9999, "each game's amount, kept in range")
 check(store.giftBindings["Shift+K"].gift == "Galaxy" and store.giftBindings["Shift+K"].coins == 1000, "the key sends the gift with its coins")
@@ -172,7 +176,7 @@ check(store.customGifts.Galaxy == nil, "the built-in price needs nothing kept")
 check(next(GiftSettings.cleanCustom({ [""] = 4, Good = 5.5, Bad = "x" })) == "Good", "saved custom gifts are cleaned")
 
 -- The menu -------------------------------------------------------------------
-publish("GiftRules", {}); publish("ClimbRules", {}); publish("ChalkRules", {}); publish("GiftBindings", {}); publish("CustomGifts", {}); publish("WinRules", {}); publish("ResetGifts", {})
+publish("GiftRules", {}); publish("ClimbRules", {}); publish("ChalkRules", {}); publish("GiftBindings", {}); publish("CustomGifts", {}); publish("WinRules", {}); publish("ResetGifts", {}); publish("AnimRules", {})
 local sent = {}
 GiftMenu.start(function(action, value) table.insert(sent, { action = action, value = value }) end, state)
 local function find(predicate)
@@ -222,6 +226,11 @@ winsBox.Text = "-1"
 local resetToggle = find(function(o) return o.ClassName == "TextButton" and o.Text == "Reset: off" end)
 check(resetToggle ~= nil, "a reset switch, off to start with")
 resetToggle.Activated:Fire()
+local animButton = find(function(o) return o.ClassName == "TextButton" and o.Text == "Animation: Auto (picked by the coins)" end)
+check(animButton ~= nil, "an animation picker, on auto to start with")
+animButton.Activated:Fire(); animButton.Activated:Fire(); animButton.Activated:Fire()
+check(animButton.Text == "Animation: 3 of 6", "pressing it steps through the shows")
+check(find(function(o) return o.ClassName == "TextLabel" and o.Text and string.find(o.Text, "DIAMOND FRACTURE", 1, true) and string.find(o.Text, "ROCKET BOOST", 1, true) end) ~= nil, "and names the show in each game")
 check(resetToggle.Text == "Reset: ON (back to the start)", "the reset switch turns on")
 local keyButton = find(function(o) return o.ClassName == "TextButton" and o.Text == "Set key" end)
 keyButton.Activated:Fire()
@@ -242,13 +251,14 @@ check(hasIcon, "each row shows the gift's icon")
 check(last.value.rough == -1000 and last.value.climb == 25 and last.value.chalk == nil and last.value.key == "Shift+M", "with each game's amount and the key")
 check(last.value.wins == -1, "and the wins")
 check(last.value.reset == true, "and the reset")
+check(last.value.anim == 3, "and the animation")
 find(function(o) return o.ClassName == "TextButton" and o.Text == "Test gift" end).Activated:Fire()
 check(sent[#sent].action == "testGift" and sent[#sent].value.name == "Lion", "Test sends a test gift")
 
 -- The server saves it and publishes; the list shows it.
-publish("GiftRules", { lion = -1000 }); publish("ClimbRules", { lion = 25 }); publish("WinRules", { lion = -1 }); publish("ResetGifts", { lion = true }); publish("GiftBindings", { ["Shift+M"] = { gift = "Lion", coins = 29999 } })
+publish("GiftRules", { lion = -1000 }); publish("ClimbRules", { lion = 25 }); publish("WinRules", { lion = -1 }); publish("ResetGifts", { lion = true }); publish("AnimRules", { lion = 3 }); publish("GiftBindings", { ["Shift+M"] = { gift = "Lion", coins = 29999 } })
 local summary = textOf(rowNamed("Lion"))
-check(string.find(summary, "Rough -1000", 1, true) and string.find(summary, "Climb +25", 1, true) and string.find(summary, "Chalk auto", 1, true) and string.find(summary, "[Shift+M]", 1, true) and string.find(summary, "Wins -1", 1, true) and string.find(summary, "RESET", 1, true), "the list shows the saved settings: " .. summary)
+check(string.find(summary, "Rough -1000", 1, true) and string.find(summary, "Climb +25", 1, true) and string.find(summary, "Chalk auto", 1, true) and string.find(summary, "[Shift+M]", 1, true) and string.find(summary, "Wins -1", 1, true) and string.find(summary, "RESET", 1, true) and string.find(summary, "Anim 3", 1, true), "the list shows the saved settings: " .. summary)
 
 -- A gift that's missing can be added.
 search:setText("Space Whale")
@@ -265,10 +275,22 @@ check(sent[#sent].value.gift == "Space Whale" and sent[#sent].value.coins == 123
 GiftMenu.setOpen(false)
 check(gui.Enabled == false and not GiftMenu.isOpen(), "closes")
 check(GiftMenu.parseAmount(" 1,500 ") == 1500 and GiftMenu.parseAmount("") == nil and GiftMenu.parseAmount("x") == nil, "amounts are read")
+-- The show names match each game's own lists.
+for tier, names in GiftMenu.ANIMATIONS do
+	check(names.rough == SHOWS.rough[tier] and names.add == SHOWS.add[tier] and names.up == SHOWS.up[tier] and names.down == SHOWS.down[tier]
+		and names.chalkUp == SHOWS.chalkUp[tier] and names.chalkDown == SHOWS.chalkDown[tier], "show names match the games: " .. tier)
+end
 print("gift menu: " .. passed .. " checks passed")
 '''
 
-program = (harness
+def titles(path, name):
+    src = (root / path).read_text(encoding="utf-8")
+    return "{" + re.search(name + r" = \{([^}]*)\}", src).group(1) + "}"
+shows = "local SHOWS = { rough = %s, add = %s, up = %s, down = %s, chalkUp = %s, chalkDown = %s }\n" % (
+    titles("src/client/GiftEffects.luau", r"GiftEffects\.TITLES"), titles("src/client/GiftEffects.luau", r"GiftEffects\.ADD_TITLES"),
+    titles("src/shared/ClimbPath.luau", r"ClimbPath\.UP_TITLES"), titles("src/shared/ClimbPath.luau", r"ClimbPath\.DOWN_TITLES"),
+    titles("src/client/ChalkEffects.luau", r"ChalkEffects\.UP_TITLES"), titles("src/client/ChalkEffects.luau", r"ChalkEffects\.DOWN_TITLES"))
+program = (shows + harness
     + "local GiftCatalogue = require(\"../src/shared/GiftCatalogue\")\n"
     + "local Keybinds = require(\"../src/shared/Keybinds\")\n"
     + "local GiftSettings = " + module("src/server/GiftSettings.luau") + "\n"

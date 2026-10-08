@@ -406,7 +406,7 @@ function ChalkGame.start(options: Options): Game
 			local from = progress.count
 			local to = math.clamp(from + amount, 0, progress.goal)
 			local moved = to - from
-			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = to, amount = moved, coins = coins, name = who,
+			notify:FireAllClients("chalkGift", { up = amount > 0, from = from, to = to, amount = moved, coins = coins, name = who, tier = event.effectTier,
 				gift = event.giftLabel or event.gift or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"), doubled = doubled })
 			add(amount)
 			if moved ~= 0 then

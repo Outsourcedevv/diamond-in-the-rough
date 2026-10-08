@@ -287,7 +287,7 @@ function ClimbEffects.play(data: any, root: BasePart?, pace: number?, onDone: ((
 	ClimbEffects.stop()
 	local speed = math.max(1, pace or 1)
 	local coins = math.max(1, tonumber(data.coins) or 1)
-	local tier = GiftTier.forCoins(coins)
+	local tier = GiftTier.pick(coins, data.tier)
 	local up = data.up == true
 	local from = math.clamp(math.floor(tonumber(data.from) or 0), 0, ClimbPath.TOP)
 	local to = math.clamp(math.floor(tonumber(data.to) or from), 0, ClimbPath.TOP)

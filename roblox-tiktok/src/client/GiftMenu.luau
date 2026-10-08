@@ -29,6 +29,28 @@ local FONT = Enum.Font.GothamBold
 local FONT_MEDIUM = Enum.Font.GothamMedium
 local FONT_HEAVY = Enum.Font.GothamBlack
 
+-- Each show (1 smallest to 6 biggest) by name in each game: breaking or
+-- adding stone, climbing up or down, counting up or down. The same lists as
+-- GiftEffects, ClimbPath and ChalkEffects (the tests check they match).
+GiftMenu.ANIMATIONS = {
+	{ rough = "SPARK BURST", add = "PEBBLE DROP", up = "BOUNCE PAD", down = "BANANA SLIP", chalkUp = "CHALK STAR", chalkDown = "SPITBALL" },
+	{ rough = "SHOCKWAVE", add = "ROCKSLIDE", up = "SPRING LAUNCH", down = "SPIKE BOUNCE", chalkUp = "GOLD STARS", chalkDown = "ERASER TOSS" },
+	{ rough = "DIAMOND FRACTURE", add = "STONE SURGE", up = "ROCKET BOOST", down = "ANVIL SMASH", chalkUp = "PAPER PLANES", chalkDown = "SPONGE SPLASH" },
+	{ rough = "ORBITAL STRIKE", add = "BOULDER BARRAGE", up = "DIAMOND CANNON", down = "METEOR STRIKE", chalkUp = "CHALK STORM", chalkDown = "BOARD QUAKE" },
+	{ rough = "GALAXY COLLAPSE", add = "STONE CYCLONE", up = "STARLIGHT ASCENT", down = "THUNDER HAMMER", chalkUp = "FIREWORKS", chalkDown = "DUSTER TORNADO" },
+	{ rough = "COSMIC BURST", add = "MOUNTAIN RISING", up = "GALACTIC ASCENSION", down = "BLACK HOLE PLUNGE", chalkUp = "SUPERNOVA", chalkDown = "BLACK HOLE" },
+}
+
+-- What the animation button and its line under it say for a choice (nil: auto).
+function GiftMenu.animationText(tier: number?): (string, string)
+	if tier == nil then
+		return "Animation: Auto (picked by the coins)", "Bigger gifts play bigger shows. Press to choose one."
+	end
+	local a = GiftMenu.ANIMATIONS[tier]
+	return string.format("Animation: %d of 6", tier),
+		string.format("Rough: %s / %s · Climb: %s / %s · Chalk: %s / %s", a.rough, a.add, a.up, a.down, a.chalkUp, a.chalkDown)
+end
+
 local open = false
 local onOpenChanged: { (boolean) -> () } = {}
 
@@ -226,6 +248,10 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local climbBox = section("DIAMOND CLIMB: platforms per gift", "Positive sends the climber up; negative sends them down. Empty: worked out from the coins.", "auto (from the coins)")
 	local chalkBox = section("CHALKBOARD COUNT: numbers per gift", "Positive counts up; negative counts down. Empty: worked out from the coins.", "auto (from the coins)")
 	local winsBox = section("WINS per gift", "Adds wins (e.g. 1) or takes them away (e.g. -1) on the win counter of whichever game you're playing. Empty: no change.", "no change")
+	add(label(right, "ANIMATION", 15, GOLD, FONT, 20))
+	local animButton = add(button(right, "Animation: Auto"))
+	animButton.Size = UDim2.new(1, 0, 0, 38)
+	local animNames = add(label(right, "", 13, MUTED, FONT_MEDIUM, 34))
 	add(label(right, "RESET", 15, GOLD, FONT, 20))
 	add(label(right, "On: this gift sends the game you're playing back to the start (a full mountain, platform 0, or a count of 0), and does nothing else.", 13, MUTED, FONT_MEDIUM, 34))
 	local resetToggle = add(button(right, "Reset: off"))
@@ -255,6 +281,13 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local chosen: Gift? = nil
 	local chosenKey = ""
 	local chosenReset = false
+	local chosenAnim: number? = nil
+	local function showAnim()
+		local text, names = GiftMenu.animationText(chosenAnim)
+		animButton.Text = text
+		animButton.BackgroundColor3 = if chosenAnim then SELECTED else BUTTON
+		animNames.Text = names
+	end
 	local function showReset()
 		resetToggle.Text = if chosenReset then "Reset: ON (back to the start)" else "Reset: off"
 		resetToggle.BackgroundColor3 = if chosenReset then DANGER else BUTTON
@@ -262,7 +295,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local capturing = false
 
 	local function rules()
-		return decode("GiftRules"), decode("ClimbRules"), decode("ChalkRules"), decode("GiftBindings"), decode("CustomGifts"), decode("WinRules"), decode("ResetGifts")
+		return decode("GiftRules"), decode("ClimbRules"), decode("ChalkRules"), decode("GiftBindings"), decode("CustomGifts"), decode("WinRules"), decode("ResetGifts"), decode("AnimRules")
 	end
 	local function keyFor(bindings: { [string]: any }, name: string): string
 		local lower = string.lower(name)
@@ -280,10 +313,12 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		chosen = gift
 		capturing = false
 		status.Text = ""
-		local rough, climb, chalk, bindings, _, wins, resets = rules()
+		local rough, climb, chalk, bindings, _, wins, resets, anims = rules()
 		if gift == nil then
 			chosenReset = false
 			showReset()
+			chosenAnim = nil
+			showAnim()
 			giftName.Text = "Pick a gift"
 			giftCoins.Text = "Choose one from the list, or search for a gift that's missing to add it."
 			coinsBox.Visible = false
@@ -305,6 +340,8 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		winsBox.Text = if type(wins[lower]) == "number" then tostring(wins[lower]) else ""
 		chosenReset = resets[lower] == true
 		showReset()
+		chosenAnim = if type(anims[lower]) == "number" then anims[lower] else nil
+		showAnim()
 		chosenKey = keyFor(bindings, gift.name)
 		showKey()
 	end
@@ -314,7 +351,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		for _, child in list:GetChildren() do
 			if child:IsA("GuiObject") then child:Destroy() end
 		end
-		local rough, climb, chalk, bindings, custom, wins, resets = rules()
+		local rough, climb, chalk, bindings, custom, wins, resets, anims = rules()
 		local all = GiftCatalogue.all(custom :: any)
 		local shown = GiftCatalogue.search(all, search.Text)
 		local query = (string.gsub(search.Text, "^%s*(.-)%s*$", "%1"))
@@ -397,7 +434,8 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 				Text = string.format("Rough %s · Climb %s · Chalk %s%s%s",
 					GiftMenu.ruleText(rough[lower]), GiftMenu.ruleText(climb[lower]), GiftMenu.ruleText(chalk[lower]),
 					(if type(wins[lower]) == "number" and wins[lower] ~= 0 then " · Wins " .. GiftMenu.ruleText(wins[lower]) else "")
-						.. (if resets[lower] == true then " · RESET" else ""),
+						.. (if resets[lower] == true then " · RESET" else "")
+						.. (if type(anims[lower]) == "number" then " · Anim " .. tostring(anims[lower]) else ""),
 					if key ~= "" then " · [" .. Keybinds.label(key) .. "]" else ""),
 			}, row)
 			row.Activated:Connect(function()
@@ -408,7 +446,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	end
 
 	search:GetPropertyChangedSignal("Text"):Connect(draw)
-	for _, name in { "GiftRules", "ClimbRules", "ChalkRules", "GiftBindings", "CustomGifts", "WinRules", "ResetGifts" } do
+	for _, name in { "GiftRules", "ClimbRules", "ChalkRules", "GiftBindings", "CustomGifts", "WinRules", "ResetGifts", "AnimRules" } do
 		state:GetAttributeChangedSignal(name):Connect(function()
 			if open then draw() end
 		end)
@@ -418,6 +456,12 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		if chosen == nil then return end
 		capturing = true
 		showKey()
+	end)
+	animButton.Activated:Connect(function()
+		if chosen == nil then return end
+		-- Auto, then 1 to 6, then auto again.
+		chosenAnim = if chosenAnim == nil then 1 elseif chosenAnim >= 6 then nil else chosenAnim + 1
+		showAnim()
 	end)
 	resetToggle.Activated:Connect(function()
 		if chosen == nil then return end
@@ -463,6 +507,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 			chalk = GiftMenu.parseAmount(chalkBox.Text),
 			wins = GiftMenu.parseAmount(winsBox.Text),
 			reset = chosenReset,
+			anim = chosenAnim,
 			key = chosenKey,
 		}
 	end
@@ -484,6 +529,8 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		roughBox.Text, climbBox.Text, chalkBox.Text, winsBox.Text = "", "", "", ""
 		chosenReset = false
 		showReset()
+		chosenAnim = nil
+		showAnim()
 		chosenKey = ""
 		capturing = false
 		showKey()
