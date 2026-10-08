@@ -22,7 +22,6 @@ Sounds.FILES = {
 	snap = "rbxasset://sounds/snap.wav",
 	click = "rbxasset://sounds/clickfast.wav",
 	button = "rbxasset://sounds/button.wav",
-	boom = "rbxasset://sounds/impact_explosion_03.mp3",
 	whoosh = "rbxasset://sounds/swoosh.wav",
 	ping = "rbxasset://sounds/electronicpingshort.wav",
 	glass = "rbxasset://sounds/glassbreak.wav",
@@ -70,22 +69,26 @@ Sounds.CUES = {
 		{ file = "click", volume = 0.18, pitch = { 0.5, 0.7 }, delay = 0.06 },
 		{ file = "click", volume = 0.14, pitch = { 0.7, 0.9 }, delay = 0.14 },
 	},
+	-- The impacts at the end of the gift shows: a deep whump, a crack and a
+	-- sparkly tinkle (no explosion).
 	boom = {
-		{ file = "boom", volume = 0.7, pitch = { 0.85, 1.05 } },
-		{ file = "crunch", volume = 0.45, pitch = { 0.4, 0.5 } },
+		{ file = "whoosh", volume = 0.45, pitch = { 0.5, 0.6 } },
+		{ file = "snap", volume = 0.3, pitch = { 0.7, 0.85 } },
+		{ file = "glass", volume = 0.12, pitch = { 1.4, 1.6 }, delay = 0.04 },
 	},
 	bigBoom = {
-		{ file = "boom", volume = 1, pitch = { 0.5, 0.6 } },
-		{ file = "boom", volume = 0.6, pitch = { 0.8, 0.9 }, delay = 0.08 },
-		{ file = "crunch", volume = 0.6, pitch = { 0.3, 0.38 } },
+		{ file = "whoosh", volume = 0.55, pitch = { 0.38, 0.45 } },
+		{ file = "snap", volume = 0.35, pitch = { 0.55, 0.65 } },
+		{ file = "glass", volume = 0.2, pitch = { 1.1, 1.25 }, delay = 0.05 },
+		{ file = "ping", volume = 0.18, pitch = { 1.8, 2.1 }, delay = 0.12 },
 	},
 	thud = {
 		{ file = "land", volume = 0.6, pitch = { 0.6, 0.8 } },
 		{ file = "crunch", volume = 0.35, pitch = { 0.55, 0.7 } },
 	},
 	rumble = {
-		{ file = "boom", volume = 0.45, pitch = { 0.3, 0.36 } },
-		{ file = "boom", volume = 0.35, pitch = { 0.34, 0.4 }, delay = 0.35 },
+		{ file = "whoosh", volume = 0.4, pitch = { 0.32, 0.38 } },
+		{ file = "whoosh", volume = 0.3, pitch = { 0.4, 0.45 }, delay = 0.35 },
 	},
 	whoosh = { { file = "whoosh", volume = 0.5, pitch = { 0.8, 1.1 } } },
 	deepWhoosh = { { file = "whoosh", volume = 0.7, pitch = { 0.4, 0.55 } } },
@@ -98,8 +101,8 @@ Sounds.CUES = {
 		{ file = "ping", volume = 0.25, pitch = { 0.5, 0.6 } },
 	},
 	zap = {
-		{ file = "snap", volume = 0.6, pitch = { 0.5, 0.6 } },
-		{ file = "boom", volume = 0.4, pitch = { 1.4, 1.6 } },
+		{ file = "snap", volume = 0.5, pitch = { 0.6, 0.7 } },
+		{ file = "ping", volume = 0.25, pitch = { 0.8, 0.9 } },
 	},
 	clang = {
 		{ file = "hit", volume = 0.8, pitch = { 0.45, 0.55 } },
@@ -148,6 +151,10 @@ Sounds.MAX_PLAYING = 24 -- sounds at once
 Sounds.REPEAT_SECONDS = 0.045 -- the same cue is not restarted sooner than this
 Sounds.HEARD_FROM = 260 -- studs: a cue in the world fades out by this far away
 Sounds.LONGEST_SECONDS = 4 -- the longest file, at normal speed
+-- Gift shows and other effects play at this share of their volume; digging,
+-- the chalk and the countdown's ticks (already quiet) play in full.
+Sounds.EFFECTS_VOLUME = 0.5
+Sounds.FULL_VOLUME = { dig = true, crumble = true, chalk = true, tick = true }
 
 local playing = 0
 local lastPlayed: { [string]: number } = {}
@@ -180,7 +187,7 @@ function Sounds.setMuted(value: boolean)
 	muted = value
 end
 
-local function startLayer(layer: Layer, at: Vector3?, scale: number, shift: number)
+local function startLayer(layer: Layer, at: Vector3?, scale: number, shift: number, level: number)
 	if playing >= Sounds.MAX_PLAYING then return end
 	local file = Sounds.FILES[layer.file]
 	if file == nil then return end
@@ -188,7 +195,7 @@ local function startLayer(layer: Layer, at: Vector3?, scale: number, shift: numb
 	local pitch = (low + (high - low) * math.random()) / math.sqrt(math.max(scale, 0.25)) * shift
 	local sound = Instance.new("Sound")
 	sound.SoundId = file
-	sound.Volume = math.min(2, layer.volume * math.sqrt(scale))
+	sound.Volume = math.min(2, layer.volume * math.sqrt(scale) * level)
 	sound.PlaybackSpeed = math.clamp(pitch, 0.2, 4)
 	local holder: Instance
 	if at then
@@ -230,13 +237,14 @@ function Sounds.play(name: string, at: Vector3?, scale: number?, pitch: number?)
 	lastPlayed[name] = now
 	local size = scale or 1
 	local shift = math.clamp(pitch or 1, 0.25, 4)
+	local level = if Sounds.FULL_VOLUME[name] then 1 else Sounds.EFFECTS_VOLUME
 	for _, layer in cue do
 		if layer.delay and layer.delay > 0 then
 			task.delay(layer.delay, function()
-				pcall(startLayer, layer, at, size, shift)
+				pcall(startLayer, layer, at, size, shift, level)
 			end)
 		else
-			pcall(startLayer, layer, at, size, shift)
+			pcall(startLayer, layer, at, size, shift, level)
 		end
 	end
 end
