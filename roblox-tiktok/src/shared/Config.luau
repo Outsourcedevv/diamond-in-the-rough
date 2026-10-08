@@ -7,12 +7,13 @@ local Config = {
 	GrowthMaxStone = 1500000, -- growth limit, or twice starting stone for larger starting mountains
 	StonePerCoin = 100, -- (live) rocks removed per TikTok coin, for gifts without their own rule
 	-- (live) Gift rules: gift name -> rocks removed per gift. Change them in the
-	-- settings panel (press Y) while playing.
+	-- gift settings (press Y, then Open gift settings) while playing.
 	GiftRules = {} :: { [string]: number },
 	-- (live) Diamond Climb and Chalkboard Count's own gift rules: gift name ->
 	-- platforms (or numbers) per gift, up if positive and down if negative.
 	-- Gifts without a rule go up by their coins (a Rose 2, 100 coins 20, a
-	-- Galaxy 63). Change them on the bridge's control page.
+	-- Galaxy 63). Change them in the gift settings (press Y, then Open gift
+	-- settings). A fresh save starts with these.
 	ClimbGiftRules = {
 		["ice cream cone"] = -2,
 		["finger heart"] = -4,

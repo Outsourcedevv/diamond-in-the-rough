@@ -20,7 +20,6 @@ local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
 local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
-local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
@@ -148,6 +147,7 @@ if saved then
 	end
 	settings.animRules = anims
 	settings.customGifts = GiftSettings.cleanCustom(settings.customGifts)
+	settings.giftBindings = GiftSettings.cleanBindings(settings.giftBindings)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
 		settings.leaderboards = { helpers = {}, griefers = {} }
@@ -994,35 +994,6 @@ local doubledGifts: { [TikTokFeed.Event]: boolean } = setmetatable({}, { __mode 
 
 -- TikTok ------------------------------------------------------------------------
 local function processTikTok(event: TikTokFeed.Event)
-	if (event.type == "climbRule" or event.type == "chalkRule") and event.gift then
-		-- The control page's Diamond Climb or Chalkboard Count rule for one gift
-		-- (cleared to go back to the coins).
-		local rules = if event.type == "climbRule" then settings.climbRules else settings.chalkRules
-		local limit = if event.type == "climbRule" then ClimbPath.TOP else ChalkBoard.GOAL.max
-		local name = string.lower(event.gift)
-		if event.clear == true or event.amount == nil then
-			rules[name] = nil
-		else
-			rules[name] = math.clamp(math.floor(event.amount), -limit, limit)
-		end
-		saveSettings()
-		return
-	end
-	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
-		local name = string.lower(event.gift)
-		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
-		-- The bridge's own keybind for this gift replaces its old one; keys
-		-- set in the game's GIFT KEYBINDS stay.
-		for key, binding in settings.giftBindings do
-			if string.lower(binding.gift) == name and binding.game ~= true then settings.giftBindings[key] = nil end
-		end
-		-- Only the free keys (G, H, P, Y and movement are the game's own).
-		if event.keybind and Keybinds.allowed(event.keybind) then
-			settings.giftBindings[event.keybind] = { gift = event.gift, coins = event.coins or 1 }
-		end
-		saveSettings()
-		return
-	end
 	-- Names and gift names come from TikTok (or a typed keybind), so they go
 	-- through Roblox's text filter before anyone sees them.
 	local who = boardName(event.name or event.user or "Someone") or "Viewer"
@@ -1181,15 +1152,6 @@ local function splitCombo(event: TikTokFeed.Event, doubled: boolean)
 end
 
 local function onTikTok(event: TikTokFeed.Event)
-	if event.type == "theme" then
-		-- From the bridge control page's theme buttons: it changes the
-		-- scenery straight away, without waiting behind queued gifts.
-		if event.theme then setTheme(event.theme) end
-		return
-	elseif event.type == "skin" then
-		if event.skin then setSkin(event.skin) end
-		return
-	end
 	-- While the diamond bird's bonus runs, a gift counts as if it were sent
 	-- twice: double the stone blasted or added, the effect and the leaderboard
 	-- coins. It is decided on arrival, so gifts still queued keep their bonus.
@@ -1493,16 +1455,6 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif (action == "setPerCoin" or action == "setPerLike" or action == "setPerFollow" or action == "setPerShare") and type(value) == "number" then
 		local field = ({ setPerCoin = "perCoin", setPerLike = "perLike", setPerFollow = "perFollow", setPerShare = "perShare" })[action]
 		settings[field] = math.clamp(math.floor(value), 0, 1500000)
-	elseif action == "setGiftRule" and type(value) == "table" and type(value.gift) == "string" then
-		local name = string.lower((string.gsub(string.sub(value.gift, 1, 40), "^%s*(.-)%s*$", "%1")))
-		if name == "" then
-			return
-		end
-		if type(value.rocks) == "number" then
-			settings.giftRules[name] = math.clamp(math.floor(value.rocks), -1500000, 1500000)
-		else
-			settings.giftRules[name] = nil
-		end
 	elseif action == "resetBest" then
 		settings.best = 0
 	elseif action == "placeStatue" and type(value) == "table" then
@@ -1580,23 +1532,6 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "setSkin" and type(value) == "string" then
 		setSkin(value)
 		return
-	elseif action == "setGiftBinding" and type(value) == "table" then
-		-- GIFT KEYBINDS in the Y panel: pressing the key in the game sends the gift.
-		local binding = Keybinds.clean(value.gift, value.coins)
-		local key = value.key
-		if binding == nil or not Keybinds.allowed(key) then
-			notice(player, "Pick a gift name, its coins and one of the free keys.")
-			return
-		end
-		if settings.giftBindings[key] == nil then
-			local count = 0
-			for _ in settings.giftBindings do count += 1 end
-			if count >= Keybinds.MAX then
-				notice(player, string.format("You can keep up to %d keybinds. Remove one first.", Keybinds.MAX))
-				return
-			end
-		end
-		settings.giftBindings[key] = { gift = binding.gift, coins = binding.coins, game = true }
 	elseif action == "setGiftSettings" and type(value) == "table" then
 		-- The full-screen gift settings: one gift's rules for each game and its key.
 		local problem = GiftSettings.apply(settings, value, { rough = 1500000, climb = ClimbPath.TOP, chalk = ChalkBoard.GOAL.max, wins = 1000 })
@@ -1607,9 +1542,6 @@ local function applySetting(player: Player, action: string, value: any)
 		notice(player, "Saved " .. string.sub(tostring(value.gift), 1, 40) .. ".")
 	elseif action == "removeCustomGift" and type(value) == "string" then
 		GiftSettings.remove(settings, value)
-	elseif action == "removeGiftBinding" and type(value) == "string" then
-		if settings.giftBindings[value] == nil then return end
-		settings.giftBindings[value] = nil
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
 		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1

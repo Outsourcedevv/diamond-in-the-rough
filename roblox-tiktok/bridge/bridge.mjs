@@ -5,12 +5,11 @@
 // can also poll http://localhost:8787/events.
 // Open http://localhost:8787 for the control page (connect + test gifts).
 import http from 'node:http';
-import { KEYS, STARTER, normalizeGifts, validateRule, fetchCatalogue, GAMES, defaultGameRules, validateGameRule, CONNECT_OPTIONS, learnGift, catalogueError, mergeGifts } from './catalogue.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createEventQueue, createGiftTracker, likeEvent, socialEvent, themeEvent, THEMES, skinEvent, SKINS } from './events.mjs';
-import { codeFor, ruleId, RELAY_URL, placeVersionUrl, placeFileType } from './cloud.mjs';
+import { createEventQueue, createGiftTracker, likeEvent, socialEvent, CONNECT_OPTIONS } from './events.mjs';
+import { codeFor, RELAY_URL, placeVersionUrl, placeFileType } from './cloud.mjs';
 import { randomBytes } from 'node:crypto';
 
 // Packaged as DiamondRushBridge.exe (see tools/build-exe.mjs): settings sit next
@@ -24,10 +23,6 @@ const configPath = path.join(here, 'config.json');
 const defaults = {
   tiktokUsername: '',
   port: 8787,
-  giftRules: {},
-  // Diamond Climb's and Chalkboard Count's own rules (see defaultGameRules).
-  climbRules: defaultGameRules(),
-  chalkRules: defaultGameRules(),
   // This PC's own secret: the game code comes from it (see cloud.mjs).
   secret: '',
 };
@@ -42,12 +37,14 @@ function loadConfig() {
     delete config.relay;
     delete config.openCloud;
     delete config.ownerCloud; // the Roblox messaging key is no longer used
+    // Gift rules used to be set on this page. The game's own gift settings
+    // (the gift button in the game) replaced them, so older saves drop them.
+    delete config.giftRules;
+    delete config.climbRules;
+    delete config.chalkRules;
   } catch {
     config = structuredClone(defaults);
   }
-  // Keybinds used to be set on this page; pressing them sent pretend gifts.
-  // They are gone, so older saves lose theirs (the game's own keybinds stay).
-  for (const rule of Object.values(config.giftRules ?? {})) if (rule && typeof rule === 'object') rule.keybind = '';
   // This PC's secret, made once. The game code is worked out from it.
   if (typeof config.secret !== 'string' || config.secret.length < 32) config.secret = randomBytes(24).toString('hex');
   return config;
@@ -76,64 +73,15 @@ function log(line) {
 
 function emit(event) {
   if (!event) return;
-  if(event.type === 'gift') {
-    const rule=config.giftRules?.[String(event.gift).toLowerCase()];
-    if(rule && event.rocks === undefined) event={...event,rocks:rule.rocks};
-  }
   const stamped = queue.push(event);
   const { seq, ...compact } = stamped;
   relayQueue.push(compact);
   if (relayQueue.length > 2000) relayQueue.splice(0, relayQueue.length - 2000);
-  if (event.type === 'giftRule' || event.type === 'climbRule' || event.type === 'chalkRule') return;
   recent.unshift({ at: Date.now(), ...stamped });
   recent.length = Math.min(recent.length, 30);
-  const what = event.type === 'gift' ? `${event.gift} x${event.count} (${event.coins} coins each)` : event.type === 'like' ? `${event.likes} likes` : event.type === 'theme' ? `map theme ${THEMES[event.theme]}` : event.type === 'skin' ? `mountain skin ${SKINS[event.skin]}` : event.type;
+  const what = event.type === 'gift' ? `${event.gift} x${event.count} (${event.coins} coins each)` : event.type === 'like' ? `${event.likes} likes` : event.type;
   log(`${event.name}: ${what}`);
 }
-
-const cataloguePath = path.join(here, 'gift-catalogue.json');
-let catalogue = STARTER;
-let catalogueStatus = 'Starter gifts. Gifts you receive on your LIVE are added automatically.';
-try { const cached=JSON.parse(fs.readFileSync(cataloguePath,'utf8')); const rows=normalizeGifts(cached); if(rows.length){catalogue=mergeGifts(STARTER,rows);catalogueStatus='Saved gift list';} } catch {}
-let catalogueLoading = null;
-async function refreshCatalogue(username = config.tiktokUsername) {
- if(catalogueLoading) return catalogueLoading;
- catalogueLoading=(async()=>{
-  username = String(username ?? '').trim().replace(/^@/, '');
-  if(!username) throw new Error('Enter your TikTok username first.');
-  const { TikTokLiveConnection }=await import('tiktok-live-connector');
-  let gifts;
-  try { gifts=await fetchCatalogue(TikTokLiveConnection, username); }
-  catch(error) { throw new Error(catalogueError(error)); }
-  if(!gifts.length) throw new Error('TikTok returned no gifts. Try refreshing while your account is LIVE.');
-  catalogue=mergeGifts(catalogue,gifts); catalogueStatus=`${gifts.length} gifts loaded from TikTok`;
-  fs.writeFileSync(cataloguePath,JSON.stringify(gifts,null,2));
-  config.tiktokUsername=username; saveConfig();
- })().finally(()=>{catalogueLoading=null;});
- return catalogueLoading;
-}
-// Gifts seen on the LIVE join the catalogue, so they can be given rules.
-function rememberGift(event) {
-  if (event?.type !== 'gift') return;
-  const updated = learnGift(catalogue, event.gift, event.coins);
-  if (!updated) return;
-  catalogue = updated;
-  try { fs.writeFileSync(cataloguePath, JSON.stringify(catalogue, null, 2)); } catch {}
-}
-function publishRule(rule) { emit({type:'giftRule',name:'Gift catalogue',...rule}); }
-for(const rule of Object.values(config.giftRules ?? {})) publishRule(rule);
-// The climb's and chalkboard's rules, as events for the game: one per rule,
-// and a "clear" for each of the game's own defaults the streamer removed (a
-// new save starts with them).
-function gameRuleEvents(game) {
-  const rules = config[`${game}Rules`] ?? {};
-  const events = Object.values(rules).map((rule) => ({ type: `${game}Rule`, name: 'Gift catalogue', gift: rule.gift, coins: rule.coins, amount: rule.amount }));
-  for (const [key, rule] of Object.entries(defaultGameRules())) {
-    if (!rules[key]) events.push({ type: `${game}Rule`, name: 'Gift catalogue', gift: rule.gift, clear: true });
-  }
-  return events;
-}
-for (const game of Object.keys(GAMES)) for (const event of gameRuleEvents(game)) emit(event);
 
 // TikTok ----------------------------------------------------------------------
 async function connectTikTok(username) {
@@ -153,9 +101,7 @@ async function connectTikTok(username) {
   connection = live;
   tiktokStatus = `connecting to @${username}…`;
   live.on(WebcastEvent.GIFT, (data) => {
-    const event = handleGift(data);
-    rememberGift(event);
-    emit(event);
+    emit(handleGift(data));
   });
   live.on(WebcastEvent.LIKE, (data) => emit(likeEvent(data)));
   live.on(WebcastEvent.FOLLOW, (data) => emit(socialEvent('follow', data)));
@@ -175,7 +121,6 @@ async function connectTikTok(username) {
     if (connection === live) {
       tiktokStatus = `connected to @${username}`;
       log(`Connected to @${username}'s LIVE`);
-      refreshCatalogue(username).catch(error=>{catalogueStatus=error.message;});
     }
   } catch (error) {
     if (connection !== live) return;
@@ -187,9 +132,9 @@ async function connectTikTok(username) {
 }
 
 // The relay (the published game) --------------------------------------------------
-// Everything the game needs goes to the relay under this PC's game code: the
-// events as they happen, and the gift rules and TikTok status so a game that
-// starts later knows them. No key: the relay checks this PC's secret.
+// The events go to the relay under this PC's game code as they happen, with
+// TikTok's status. No key: the relay checks this PC's secret. What each gift
+// does is set in the game itself (its gift settings), not here.
 function gameCode() {
   return codeFor(config.secret);
 }
@@ -201,19 +146,12 @@ let relaySending = false;
 let relayRetryAt = 0;
 let lastRelayPush = 0;
 let lastPushedStatus = '';
-// Every gift rule, as events. Their ids stay the same while the rules do.
-function relayRules() {
-  const rules = [];
-  for (const rule of Object.values(config.giftRules ?? {})) rules.push({ type: 'giftRule', name: 'Gift catalogue', ...rule });
-  for (const game of Object.keys(GAMES)) rules.push(...gameRuleEvents(game));
-  return rules.map((rule) => ({ id: ruleId(rule), ...rule }));
-}
 async function flushRelay() {
   const url = relayUrl();
   if (!url) { relayQueue.length = 0; relayStatus = 'off'; return; }
   if (relaySending || Date.now() < relayRetryAt) return;
   // Nothing new: still check in now and then (and when TikTok's status
-  // changes) so the relay keeps the rules and status fresh.
+  // changes) so the relay keeps the status fresh.
   if (relayQueue.length === 0 && tiktokStatus === lastPushedStatus && Date.now() - lastRelayPush < 15000) return;
   const batch = relayQueue.splice(0, 300);
   relaySending = true;
@@ -223,7 +161,8 @@ async function flushRelay() {
     const response = await fetch(`${url}/c/${gameCode()}/push`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-relay-secret': config.secret },
-      body: JSON.stringify({ events: batch, rules: relayRules(), tiktok: tiktokStatus }),
+      // No rules: an empty list clears any an older connector left there.
+      body: JSON.stringify({ events: batch, rules: [], tiktok: tiktokStatus }),
     });
     if (response.ok) {
       relayStatus = 'sending';
@@ -320,47 +259,11 @@ const server = http.createServer(async (request, response) => {
   if (request.method !== 'GET' && fromOtherSite(request)) {
     return sendJson(response, 403, { error: 'Only the control page on this PC can do that.' });
   }
-  if (request.method === 'GET' && url.pathname === '/catalogue') {
-    return sendJson(response,200,{gifts:catalogue,status:catalogueStatus,rules:config.giftRules ?? {},keys:KEYS,climbRules:config.climbRules ?? {},chalkRules:config.chalkRules ?? {}});
-  }
-  if (request.method === 'POST' && url.pathname === '/catalogue/refresh') {
-    try { const body=await readBody(request); await refreshCatalogue(body.username || config.tiktokUsername); return sendJson(response,200,{ok:true}); }
-    catch(error) { catalogueStatus=error.message; return sendJson(response,400,{error:error.message}); }
-  }
-  if (request.method === 'POST' && url.pathname === '/catalogue/rule') {
-    try {
-      const rule={...validateRule(await readBody(request)),keybind:''};
-      const conflict=Object.values(config.giftRules ?? {}).find(other=>other.keybind && other.keybind===rule.keybind && other.gift.toLowerCase()!==rule.gift.toLowerCase());
-      if(conflict) throw new Error(`${rule.keybind} is already assigned to ${conflict.gift}. Clear that binding first.`);
-      config.giftRules ??= {};
-      config.giftRules[rule.gift.toLowerCase()]=rule;
-      saveConfig();publishRule(rule);
-      return sendJson(response,200,{ok:true});
-    } catch(error) {return sendJson(response,400,{error:error.message});}
-  }
-  if (request.method === 'POST' && url.pathname === '/game-rule') {
-    try {
-      const rule = validateGameRule(await readBody(request));
-      const rules = (config[`${rule.game}Rules`] ??= {});
-      const key = rule.gift.toLowerCase();
-      if (rule.remove) {
-        delete rules[key];
-        emit({ type: `${rule.game}Rule`, name: 'Gift catalogue', gift: rule.gift, clear: true });
-      } else {
-        rules[key] = { gift: rule.gift, coins: rule.coins, amount: rule.amount };
-        emit({ type: `${rule.game}Rule`, name: 'Gift catalogue', gift: rule.gift, coins: rule.coins, amount: rule.amount });
-      }
-      saveConfig();
-      return sendJson(response, 200, { ok: true });
-    } catch (error) { return sendJson(response, 400, { error: error.message }); }
-  }
   if (request.method === 'GET' && url.pathname === '/events') {
     lastRobloxPoll = Date.now();
     const session = url.searchParams.get('session');
     const since = session === queue.session ? Number(url.searchParams.get('since')) || 0 : 0;
     const events = queue.since(since).map(({ seq, ...event }) => event);
-    if(!since) for(const [key,rule] of Object.entries(config.giftRules ?? {})) events.unshift({id:`rules:${queue.session}:${key}:${JSON.stringify(rule)}`,type:'giftRule',...rule});
-    if(!since) for(const game of Object.keys(GAMES)) for(const rule of gameRuleEvents(game)) events.unshift({id:`${game}Rules:${queue.session}:${JSON.stringify(rule)}`,...rule});
     return sendJson(response, 200, { session: queue.session, last: queue.last, tiktok: tiktokStatus, events });
   }
   if (request.method === 'GET' && url.pathname === '/status') {
@@ -412,18 +315,6 @@ const server = http.createServer(async (request, response) => {
     saveConfig();
     connectTikTok(config.tiktokUsername);
     return sendJson(response, 200, { ok: true });
-  }
-  if (request.method === 'POST' && url.pathname === '/theme') {
-    try {
-      emit(themeEvent((await readBody(request)).theme));
-      return sendJson(response, 200, { ok: true });
-    } catch (error) { return sendJson(response, 400, { error: error.message }); }
-  }
-  if (request.method === 'POST' && url.pathname === '/skin') {
-    try {
-      emit(skinEvent((await readBody(request)).skin));
-      return sendJson(response, 200, { ok: true });
-    } catch (error) { return sendJson(response, 400, { error: error.message }); }
   }
   // No pretend gifts: only real gifts from the LIVE reach the game (the
   // game's own Y panel still has test gifts for trying things out).

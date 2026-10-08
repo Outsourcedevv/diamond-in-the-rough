@@ -2,7 +2,7 @@
 -- Gift keybinds: keys the streamer can give a gift to, so pressing the key in
 -- the game sends that gift (no TikTok or connector needed). TikFinity can
 -- press the key when the gift arrives on the LIVE. Set from the gift settings
--- (GiftMenu), the Y panel or the connector; the server publishes them as the
+-- (GiftMenu); the server publishes them as the
 -- State attribute "GiftBindings" (JSON {"Shift+K": {gift, coins}}).
 local Keybinds = {}
 
@@ -64,15 +64,6 @@ function Keybinds.label(name: string): string
 	local key, ctrl, shift = Keybinds.split(name)
 	if key == nil then return name end
 	return (if ctrl then "Ctrl+" else "") .. (if shift then "Shift+" else "") .. (DIGITS[key] or KEYPAD[key] or key)
-end
-
--- A binding as the server keeps it, or nil if it is not a valid one.
-function Keybinds.clean(gift: any, coins: any): { gift: string, coins: number }?
-	if type(gift) ~= "string" or type(coins) ~= "number" or coins ~= coins then return nil end
-	local name = string.sub(string.gsub(gift, "^%s+", ""), 1, 40)
-	name = string.gsub(name, "%s+$", "")
-	if name == "" then return nil end
-	return { gift = name, coins = math.clamp(math.floor(coins), 1, 100000) }
 end
 
 return Keybinds

@@ -174,6 +174,19 @@ check(store.giftBindings.N.coins == 1100, "the key sends the gift at that price"
 GiftSettings.apply(store, { gift = "Galaxy", coins = 1000 }, limits)
 check(store.customGifts.Galaxy == nil, "the built-in price needs nothing kept")
 check(next(GiftSettings.cleanCustom({ [""] = 4, Good = 5.5, Bad = "x" })) == "Good", "saved custom gifts are cleaned")
+do
+	local cleaned = GiftSettings.cleanBindings({
+		K = { gift = " Rose ", coins = 1.5 }, ["Shift+F2"] = { gift = "Galaxy", coins = 1000 },
+		G = { gift = "Lion", coins = 29999 }, P = { gift = "Lion", coins = 29999 }, W = { gift = "Rose", coins = 1 },
+		J = { gift = "Rose" }, L = { coins = 5 }, M = "Rose", N = { gift = "", coins = 1 }, Q = { gift = "Rose", coins = 0 / 0 },
+	})
+	local keys = {}
+	for key in cleaned do table.insert(keys, key) end
+	table.sort(keys)
+	check(table.concat(keys, ",") == "K,Shift+F2", "saved keybinds keep only usable keys with a gift and coins: " .. table.concat(keys, ","))
+	check(cleaned.K.gift == "Rose" and cleaned.K.coins == 1, "a saved keybind's gift and coins are tidied")
+	check(next(GiftSettings.cleanBindings("nope")) == nil, "a broken keybind list is dropped")
+end
 
 -- The menu -------------------------------------------------------------------
 publish("GiftRules", {}); publish("ClimbRules", {}); publish("ChalkRules", {}); publish("GiftBindings", {}); publish("CustomGifts", {}); publish("WinRules", {}); publish("ResetGifts", {}); publish("AnimRules", {})

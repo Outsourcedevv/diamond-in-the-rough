@@ -129,6 +129,27 @@ function GiftSettings.remove(store: Store, gift: any)
 	end
 end
 
+-- Saved keybinds, cleaned up: only keys the game still lets a gift have (an
+-- older save could hold one the game now uses itself, like G or P), each with
+-- a gift name and its coins, and at most Keybinds.MAX of them.
+function GiftSettings.cleanBindings(raw: any): { [string]: any }
+	local out: { [string]: any } = {}
+	if type(raw) ~= "table" then return out end
+	local count = 0
+	for key, binding in raw do
+		if count >= Keybinds.MAX then break end
+		if Keybinds.allowed(key) and type(binding) == "table" and type(binding.gift) == "string"
+			and type(binding.coins) == "number" and binding.coins == binding.coins then
+			local gift = (string.gsub(string.sub(binding.gift, 1, 40), "^%s*(.-)%s*$", "%1"))
+			if gift ~= "" then
+				out[key] = { gift = gift, coins = math.clamp(math.floor(binding.coins), 1, 100000), game = true }
+				count += 1
+			end
+		end
+	end
+	return out
+end
+
 -- A saved list of the streamer's own gifts, cleaned up.
 function GiftSettings.cleanCustom(raw: any): { [string]: number }
 	local out: { [string]: number } = {}

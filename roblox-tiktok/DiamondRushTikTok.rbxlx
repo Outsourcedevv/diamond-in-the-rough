@@ -500,12 +500,13 @@ local Config = {
 	GrowthMaxStone = 1500000, -- growth limit, or twice starting stone for larger starting mountains
 	StonePerCoin = 100, -- (live) rocks removed per TikTok coin, for gifts without their own rule
 	-- (live) Gift rules: gift name -> rocks removed per gift. Change them in the
-	-- settings panel (press Y) while playing.
+	-- gift settings (press Y, then Open gift settings) while playing.
 	GiftRules = {} :: { [string]: number },
 	-- (live) Diamond Climb and Chalkboard Count's own gift rules: gift name ->
 	-- platforms (or numbers) per gift, up if positive and down if negative.
 	-- Gifts without a rule go up by their coins (a Rose 2, 100 coins 20, a
-	-- Galaxy 63). Change them on the bridge's control page.
+	-- Galaxy 63). Change them in the gift settings (press Y, then Open gift
+	-- settings). A fresh save starts with these.
 	ClimbGiftRules = {
 		["ice cream cone"] = -2,
 		["finger heart"] = -4,
@@ -2019,7 +2020,7 @@ return Inflate
 -- Gift keybinds: keys the streamer can give a gift to, so pressing the key in
 -- the game sends that gift (no TikTok or connector needed). TikFinity can
 -- press the key when the gift arrives on the LIVE. Set from the gift settings
--- (GiftMenu), the Y panel or the connector; the server publishes them as the
+-- (GiftMenu); the server publishes them as the
 -- State attribute "GiftBindings" (JSON {"Shift+K": {gift, coins}}).
 local Keybinds = {}
 
@@ -2081,15 +2082,6 @@ function Keybinds.label(name: string): string
 	local key, ctrl, shift = Keybinds.split(name)
 	if key == nil then return name end
 	return (if ctrl then "Ctrl+" else "") .. (if shift then "Shift+" else "") .. (DIGITS[key] or KEYPAD[key] or key)
-end
-
--- A binding as the server keeps it, or nil if it is not a valid one.
-function Keybinds.clean(gift: any, coins: any): { gift: string, coins: number }?
-	if type(gift) ~= "string" or type(coins) ~= "number" or coins ~= coins then return nil end
-	local name = string.sub(string.gsub(gift, "^%s+", ""), 1, 40)
-	name = string.gsub(name, "%s+$", "")
-	if name == "" then return nil end
-	return { gift = name, coins = math.clamp(math.floor(coins), 1, 100000) }
 end
 
 return Keybinds
@@ -5310,7 +5302,6 @@ local ClimbPath = require(Shared:WaitForChild("ClimbPath"))
 local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
-local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
@@ -5438,6 +5429,7 @@ if saved then
 	end
 	settings.animRules = anims
 	settings.customGifts = GiftSettings.cleanCustom(settings.customGifts)
+	settings.giftBindings = GiftSettings.cleanBindings(settings.giftBindings)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
 		settings.leaderboards = { helpers = {}, griefers = {} }
@@ -6284,35 +6276,6 @@ local doubledGifts: { [TikTokFeed.Event]: boolean } = setmetatable({}, { __mode 
 
 -- TikTok ------------------------------------------------------------------------
 local function processTikTok(event: TikTokFeed.Event)
-	if (event.type == "climbRule" or event.type == "chalkRule") and event.gift then
-		-- The control page's Diamond Climb or Chalkboard Count rule for one gift
-		-- (cleared to go back to the coins).
-		local rules = if event.type == "climbRule" then settings.climbRules else settings.chalkRules
-		local limit = if event.type == "climbRule" then ClimbPath.TOP else ChalkBoard.GOAL.max
-		local name = string.lower(event.gift)
-		if event.clear == true or event.amount == nil then
-			rules[name] = nil
-		else
-			rules[name] = math.clamp(math.floor(event.amount), -limit, limit)
-		end
-		saveSettings()
-		return
-	end
-	if event.type == "giftRule" and event.gift and event.rocks ~= nil then
-		local name = string.lower(event.gift)
-		settings.giftRules[name] = math.clamp(math.floor(event.rocks), -1500000, 1500000)
-		-- The bridge's own keybind for this gift replaces its old one; keys
-		-- set in the game's GIFT KEYBINDS stay.
-		for key, binding in settings.giftBindings do
-			if string.lower(binding.gift) == name and binding.game ~= true then settings.giftBindings[key] = nil end
-		end
-		-- Only the free keys (G, H, P, Y and movement are the game's own).
-		if event.keybind and Keybinds.allowed(event.keybind) then
-			settings.giftBindings[event.keybind] = { gift = event.gift, coins = event.coins or 1 }
-		end
-		saveSettings()
-		return
-	end
 	-- Names and gift names come from TikTok (or a typed keybind), so they go
 	-- through Roblox's text filter before anyone sees them.
 	local who = boardName(event.name or event.user or "Someone") or "Viewer"
@@ -6471,15 +6434,6 @@ local function splitCombo(event: TikTokFeed.Event, doubled: boolean)
 end
 
 local function onTikTok(event: TikTokFeed.Event)
-	if event.type == "theme" then
-		-- From the bridge control page's theme buttons: it changes the
-		-- scenery straight away, without waiting behind queued gifts.
-		if event.theme then setTheme(event.theme) end
-		return
-	elseif event.type == "skin" then
-		if event.skin then setSkin(event.skin) end
-		return
-	end
 	-- While the diamond bird's bonus runs, a gift counts as if it were sent
 	-- twice: double the stone blasted or added, the effect and the leaderboard
 	-- coins. It is decided on arrival, so gifts still queued keep their bonus.
@@ -6783,16 +6737,6 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif (action == "setPerCoin" or action == "setPerLike" or action == "setPerFollow" or action == "setPerShare") and type(value) == "number" then
 		local field = ({ setPerCoin = "perCoin", setPerLike = "perLike", setPerFollow = "perFollow", setPerShare = "perShare" })[action]
 		settings[field] = math.clamp(math.floor(value), 0, 1500000)
-	elseif action == "setGiftRule" and type(value) == "table" and type(value.gift) == "string" then
-		local name = string.lower((string.gsub(string.sub(value.gift, 1, 40), "^%s*(.-)%s*$", "%1")))
-		if name == "" then
-			return
-		end
-		if type(value.rocks) == "number" then
-			settings.giftRules[name] = math.clamp(math.floor(value.rocks), -1500000, 1500000)
-		else
-			settings.giftRules[name] = nil
-		end
 	elseif action == "resetBest" then
 		settings.best = 0
 	elseif action == "placeStatue" and type(value) == "table" then
@@ -6870,23 +6814,6 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "setSkin" and type(value) == "string" then
 		setSkin(value)
 		return
-	elseif action == "setGiftBinding" and type(value) == "table" then
-		-- GIFT KEYBINDS in the Y panel: pressing the key in the game sends the gift.
-		local binding = Keybinds.clean(value.gift, value.coins)
-		local key = value.key
-		if binding == nil or not Keybinds.allowed(key) then
-			notice(player, "Pick a gift name, its coins and one of the free keys.")
-			return
-		end
-		if settings.giftBindings[key] == nil then
-			local count = 0
-			for _ in settings.giftBindings do count += 1 end
-			if count >= Keybinds.MAX then
-				notice(player, string.format("You can keep up to %d keybinds. Remove one first.", Keybinds.MAX))
-				return
-			end
-		end
-		settings.giftBindings[key] = { gift = binding.gift, coins = binding.coins, game = true }
 	elseif action == "setGiftSettings" and type(value) == "table" then
 		-- The full-screen gift settings: one gift's rules for each game and its key.
 		local problem = GiftSettings.apply(settings, value, { rough = 1500000, climb = ClimbPath.TOP, chalk = ChalkBoard.GOAL.max, wins = 1000 })
@@ -6897,9 +6824,6 @@ local function applySetting(player: Player, action: string, value: any)
 		notice(player, "Saved " .. string.sub(tostring(value.gift), 1, 40) .. ".")
 	elseif action == "removeCustomGift" and type(value) == "string" then
 		GiftSettings.remove(settings, value)
-	elseif action == "removeGiftBinding" and type(value) == "string" then
-		if settings.giftBindings[value] == nil then return end
-		settings.giftBindings[value] = nil
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
 		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1
@@ -9700,6 +9624,27 @@ function GiftSettings.remove(store: Store, gift: any)
 			store.giftBindings[key] = nil
 		end
 	end
+end
+
+-- Saved keybinds, cleaned up: only keys the game still lets a gift have (an
+-- older save could hold one the game now uses itself, like G or P), each with
+-- a gift name and its coins, and at most Keybinds.MAX of them.
+function GiftSettings.cleanBindings(raw: any): { [string]: any }
+	local out: { [string]: any } = {}
+	if type(raw) ~= "table" then return out end
+	local count = 0
+	for key, binding in raw do
+		if count >= Keybinds.MAX then break end
+		if Keybinds.allowed(key) and type(binding) == "table" and type(binding.gift) == "string"
+			and type(binding.coins) == "number" and binding.coins == binding.coins then
+			local gift = (string.gsub(string.sub(binding.gift, 1, 40), "^%s*(.-)%s*$", "%1"))
+			if gift ~= "" then
+				out[key] = { gift = gift, coins = math.clamp(math.floor(binding.coins), 1, 100000), game = true }
+				count += 1
+			end
+		end
+	end
+	return out
 end
 
 -- A saved list of the streamer's own gifts, cleaned up.
@@ -12855,7 +12800,7 @@ local RunService = game:GetService("RunService")
 
 export type Event = {
 	id: string,
-	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "climbRule" | "chalkRule" | "theme" | "skin" | "status"
+	type: string, -- "gift" | "like" | "follow" | "share" (and "status" from the relay)
 	user: string?,
 	name: string?,
 	gift: string?,
@@ -12864,12 +12809,7 @@ export type Event = {
 	part: number?, -- set by the server when it plays a combo as separate gifts: which one this is
 	parts: number?, -- and how many there are
 	likes: number?,
-	rocks: number?,
-	keybind: string?,
-	amount: number?, -- "climbRule" and "chalkRule" events: platforms or numbers per gift, negative for down
-	clear: boolean?, -- and true when the rule is removed
-	theme: string?, -- "theme" events: the map theme the control page chose
-	skin: string?, -- "skin" events: stone and diamond, or hay and needle
+	rocks: number?, -- set only by the game's own rebuild tests, never from outside
 	tiktok: string?, -- "status" events: the connector's TikTok status line
 }
 
@@ -12878,8 +12818,12 @@ local TikTokFeed = {}
 local seen: { [string]: boolean } = {}
 local seenOrder: { string } = {}
 
+-- Only viewers' gifts, likes, follows and shares come from outside; gift rules
+-- and the rest are set in the game itself (the gift settings and Y panel).
+local ACCEPTED = { gift = true, like = true, follow = true, share = true }
+
 local function deliver(raw: any, onEvent: (Event) -> ())
-	if type(raw) ~= "table" or type(raw.id) ~= "string" or type(raw.type) ~= "string" then
+	if type(raw) ~= "table" or type(raw.id) ~= "string" or not ACCEPTED[raw.type] then
 		return
 	end
 	if seen[raw.id] then
@@ -12891,12 +12835,6 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 		seen[table.remove(seenOrder, 1) :: string] = nil
 	end
 	local event: Event = {
-		rocks = if type(raw.rocks) == "number" and raw.rocks == raw.rocks then math.clamp(raw.rocks, -1500000, 1500000) else nil,
-		keybind = if type(raw.keybind) == "string" then string.sub(raw.keybind, 1, 16) else nil,
-		amount = if type(raw.amount) == "number" and raw.amount == raw.amount then math.clamp(raw.amount, -100000, 100000) else nil,
-		clear = if raw.clear == true then true else nil,
-		theme = if type(raw.theme) == "string" then string.sub(raw.theme, 1, 16) else nil,
-		skin = if type(raw.skin) == "string" then string.sub(raw.skin, 1, 16) else nil,
 		tiktok = if type(raw.tiktok) == "string" then string.sub(raw.tiktok, 1, 80) else nil,
 		id = raw.id,
 		type = raw.type,
@@ -12997,8 +12935,7 @@ function TikTokFeed.start(urls: { string }, onEvent: (Event) -> (), onStatus: (s
 			if decoded and type(data) == "table" then
 				failures = 0
 				-- The game just started: the bridge's older events were already
-				-- played (or sent before Play), so only its gift rules apply
-				-- (the mountain's, the climb's and the chalkboard's).
+				-- played (or sent before Play), so they are skipped.
 				local fresh = session == ""
 				if data.session ~= session then
 					-- The bridge restarted: start again from its first event.
@@ -13007,9 +12944,7 @@ function TikTokFeed.start(urls: { string }, onEvent: (Event) -> (), onStatus: (s
 				end
 				if type(data.events) == "table" then
 					for _, raw in data.events do
-						if not fresh or (type(raw) == "table" and (raw.type == "giftRule" or raw.type == "climbRule" or raw.type == "chalkRule")) then
-							deliver(raw, onEvent)
-						end
+						if not fresh then deliver(raw, onEvent) end
 					end
 				end
 				if type(data.last) == "number" then
@@ -13879,77 +13814,6 @@ local perLikeBox = amountBox("setPerLike")
 local perFollowBox = amountBox("setPerFollow")
 local perShareBox = amountBox("setPerShare")
 
-panelLabel("GIFT CATALOGUE: localhost:8787 in your browser")
-panelLabel("GIFT RULES: positive removes, negative adds")
-panelOrder += 1
-local rulesList = make("Frame", {
-	LayoutOrder = panelOrder,
-	Size = UDim2.new(1, 0, 0, 0),
-	AutomaticSize = Enum.AutomaticSize.Y,
-	BackgroundTransparency = 1,
-	ZIndex = 11,
-}, panel)
-make("UIListLayout", { SortOrder = Enum.SortOrder.Name, Padding = UDim.new(0, 4) }, rulesList)
-local newGiftName = panelBox("", function() end)
-newGiftName.PlaceholderText = "Gift name, e.g. Rose"
-local newGiftRocks = panelBox("", function() end)
-newGiftRocks.PlaceholderText = "500 removes; -500 adds blocks"
-panelButtons({
-	{ "Add / change gift rule", function()
-		local rocks = tonumber((string.gsub(newGiftRocks.Text, "[,%s]", "")))
-		if newGiftName.Text ~= "" and rocks then
-			send("setGiftRule", { gift = newGiftName.Text, rocks = rocks })
-			newGiftName.Text = ""
-			newGiftRocks.Text = ""
-		end
-	end },
-})
-
-local function refreshRules()
-	for _, child in rulesList:GetChildren() do
-		if child:IsA("Frame") then
-			child:Destroy()
-		end
-	end
-	local ok, rules = pcall(function()
-		return game:GetService("HttpService"):JSONDecode(attr("GiftRules", "{}"))
-	end)
-	if not ok or type(rules) ~= "table" then
-		return
-	end
-	for name, rocks in rules do
-		local row = make("Frame", { Name = tostring(name), Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, rulesList)
-		make("TextLabel", {
-			Size = UDim2.new(1, -40, 1, 0),
-			BackgroundTransparency = 1,
-			Font = FONT_MEDIUM,
-			TextSize = 14,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = WHITE,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			Text = string.format("%s: %s %s rocks", tostring(name), if (tonumber(rocks) or 0) < 0 then "adds" else "removes", Format.commas(math.abs(tonumber(rocks) or 0))),
-			ZIndex = 12,
-		}, row)
-		local remove = make("TextButton", {
-			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.fromScale(1, 0),
-			Size = UDim2.fromOffset(34, 30),
-			BackgroundColor3 = DANGER,
-			Font = FONT,
-			TextSize = 14,
-			TextColor3 = WHITE,
-			Text = "X",
-			ZIndex = 12,
-		}, row)
-		rounded(remove, 8)
-		remove.Activated:Connect(function()
-			send("setGiftRule", { gift = tostring(name) })
-		end)
-	end
-end
-State:GetAttributeChangedSignal("GiftRules"):Connect(refreshRules)
-refreshRules()
-
 panelLabel("TEST GIFTS (no TikTok needed)")
 local testGifts = {
 	{ "Rose · 1", "Rose", 1, 1 },
@@ -13980,134 +13844,6 @@ for index = 1, #testGifts, 2 do
 	end
 	panelButtons(buttons)
 end
-
--- Gift keybinds: give any gift a key; pressing it in the game sends that gift,
--- so the streamer can play without the bridge. The bridge's catalogue can set
--- keybinds too; both show here.
-panelLabel("GIFT KEYBINDS (press the key in the game to send the gift)")
-panelOrder += 1
-local bindingList = make("Frame", {
-	LayoutOrder = panelOrder,
-	Size = UDim2.new(1, 0, 0, 0),
-	AutomaticSize = Enum.AutomaticSize.Y,
-	BackgroundTransparency = 1,
-	ZIndex = 11,
-}, panel)
-make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) }, bindingList)
-local bindingGift = panelBox("", function() end)
-bindingGift.PlaceholderText = "Gift name, e.g. Rose"
-local bindingCoins = panelBox("", function() end)
-bindingCoins.PlaceholderText = "Coins per gift, e.g. 1"
-local chosenKey: string? = nil
-local capturingKey = false
-local bindingButtons: { TextButton } = {}
-bindingButtons = panelButtons({
-	{ "Key: choose", function() end },
-	{ "Save keybind", function()
-		local coins = tonumber((string.gsub(bindingCoins.Text, "[^%d]", "")))
-		if chosenKey == nil or bindingGift.Text == "" or coins == nil then
-			addFeed("Type a gift name and its coins, then choose a key.", 0, "notice")
-			return
-		end
-		send("setGiftBinding", { key = chosenKey, gift = bindingGift.Text, coins = coins })
-		bindingGift.Text = ""
-		bindingCoins.Text = ""
-		chosenKey = nil
-		bindingButtons[1].Text = "Key: choose"
-	end },
-})
-local keyButton = bindingButtons[1]
-bindingButtons[2].BackgroundColor3 = SELECTED
-panelLabel("Free keys: B C F J K L M N Q R T U V X Z, 0 to 9, F1 to F8, the number pad, Insert, Home, End, Page Up/Down and Delete, also with Shift or Ctrl. The full-screen gift settings do this for every gift.")
-keyButton.Activated:Connect(function()
-	capturingKey = true
-	keyButton.Text = "Press a key..."
-end)
-UserInputService.InputBegan:Connect(function(input: InputObject)
-	if not capturingKey or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-	-- Wait for the real key while Shift or Ctrl is held.
-	if string.find(input.KeyCode.Name, "Shift", 1, true) or string.find(input.KeyCode.Name, "Control", 1, true) then return end
-	capturingKey = false
-	local name = Keybinds.combo(input.KeyCode.Name,
-		UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl),
-		UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
-	if Keybinds.allowed(name) then
-		chosenKey = name
-		keyButton.Text = "Key: " .. Keybinds.label(name)
-	else
-		chosenKey = nil
-		keyButton.Text = "Key: choose"
-		addFeed(Keybinds.label(name) .. " is used by the game. Pick one of the free keys.", 0, "notice")
-	end
-end)
-local function refreshBindings()
-	for _, child in bindingList:GetChildren() do
-		if child:IsA("Frame") then child:Destroy() end
-	end
-	local ok, bindings = pcall(function()
-		return game:GetService("HttpService"):JSONDecode(attr("GiftBindings", "{}"))
-	end)
-	if not ok or type(bindings) ~= "table" then return end
-	local keys = {}
-	for key in bindings do table.insert(keys, tostring(key)) end
-	table.sort(keys)
-	if #keys == 0 then
-		local row = make("Frame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, ZIndex = 11 }, bindingList)
-		make("TextLabel", {
-			Size = UDim2.fromScale(1, 1),
-			BackgroundTransparency = 1,
-			Font = FONT_MEDIUM,
-			TextSize = 14,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = MUTED,
-			Text = "No keybinds yet.",
-			ZIndex = 12,
-		}, row)
-		return
-	end
-	for index, key in keys do
-		local binding = bindings[key]
-		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, bindingList)
-		local cap = make("TextLabel", {
-			Size = UDim2.fromOffset(36, 30),
-			BackgroundColor3 = BUTTON,
-			Font = FONT,
-			TextSize = 14,
-			TextColor3 = WHITE,
-			Text = Keybinds.label(key),
-			ZIndex = 12,
-		}, row)
-		rounded(cap, 8)
-		make("TextLabel", {
-			Position = UDim2.fromOffset(44, 0),
-			Size = UDim2.new(1, -86, 1, 0),
-			BackgroundTransparency = 1,
-			Font = FONT_MEDIUM,
-			TextSize = 14,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			TextColor3 = WHITE,
-			Text = string.format("%s · %s coins", tostring(type(binding) == "table" and binding.gift or "?"),
-				Format.commas(tonumber(type(binding) == "table" and binding.coins or 0) or 0)),
-			ZIndex = 12,
-		}, row)
-		local remove = make("TextButton", {
-			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.fromScale(1, 0),
-			Size = UDim2.fromOffset(34, 30),
-			BackgroundColor3 = DANGER,
-			Font = FONT,
-			TextSize = 14,
-			TextColor3 = WHITE,
-			Text = "X",
-			ZIndex = 12,
-		}, row)
-		rounded(remove, 8)
-		remove.Activated:Connect(function() send("removeGiftBinding", key) end)
-	end
-end
-State:GetAttributeChangedSignal("GiftBindings"):Connect(refreshBindings)
-refreshBindings()
 
 panelLabel("DIAMOND CLIMB")
 panelLabel("While climbing, gifts send you up and adding gifts send you down.")
@@ -14947,10 +14683,12 @@ local function pressedCombo(input: InputObject): string
 		UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
 end
 
--- Gift keybinds work in-game for the streamer, outside text entry and menus:
--- TikFinity presses the key when the gift arrives on the LIVE.
+-- Gift keybinds work in-game for the streamer, outside text entry and the
+-- gift settings (where keys are being chosen): TikFinity presses the key when
+-- the gift arrives on the LIVE. They work with the Y panel open too, so no
+-- gift is lost while the streamer changes something there.
 UserInputService.InputBegan:Connect(function(input, processed)
-	if processed or not isAdmin or panel.Visible or GiftMenu.isOpen() or UserInputService:GetFocusedTextBox() then return end
+	if processed or not isAdmin or GiftMenu.isOpen() or UserInputService:GetFocusedTextBox() then return end
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
 	if not ok or type(bindings) ~= "table" then return end
@@ -21369,7 +21107,8 @@ HowToPlay.PAGES = {
 			"<b>Running your own copy in Roblox Studio:</b> start the connector the same way (or <b>Start Bridge.bat</b> in the bridge folder, which needs Node.js), then:",
 			"HTTP requests must be allowed (Home, Game Settings, Security, Allow HTTP Requests; already on in this game). Press Play, then <b>JOIN</b> Diamond in the Rough: the connector's page says <b>Roblox: connected</b>, and no game code is needed. Capture the Studio window in TikTok LIVE Studio or OBS.",
 			"",
-			"No connector? You can still send gifts yourself with test gifts and gift keybinds: see <b>Testing</b>.",
+			"What each gift does is set in the game: press <b>Y</b>, then <b>Open gift settings</b>.",
+			"No connector? Give gifts keys in the gift settings and let <b>TikFinity</b> press them, or send test gifts yourself: see <b>Testing</b>.",
 		}, "\n"),
 	},
 	{
@@ -21381,9 +21120,9 @@ HowToPlay.PAGES = {
 			"<b>REBUILD TEST GIFTS</b> add stone back, from +100 up to Grow to limit.",
 			"<b>Send a diamond bird now</b> calls the diamond bird straight away.",
 			"",
-			"<b>GIFT KEYBINDS</b>: type a gift name and its coins, press <b>Key</b>, then press the key you want, and press <b>Save keybind</b>. Pressing that key in the game now sends that gift, with or without the bridge.",
+			"<b>Open gift settings</b> (at the top of the panel): search any TikTok gift, choose what it does in each game, its wins, its animation and whether it resets the game, and press <b>Set key</b> to give it a key. Pressing that key in the game sends that gift, with or without the connector; TikFinity can press it for you. <b>Test gift</b> tries it out.",
 			"",
-			"The control page at localhost:8787 can't send pretend gifts: only real gifts from your LIVE come through it.",
+			"The connector can't send pretend gifts: only real gifts from your LIVE come through it.",
 		}, "\n"),
 	},
 	{
@@ -21396,7 +21135,7 @@ HowToPlay.PAGES = {
 			"<b>G</b>  games menu: join, or go back to the lobby",
 			"<b>P</b>  settings: field of view, and hiding the GAMES and SETTINGS buttons",
 			"<b>H</b>  this guide",
-			"<b>Y</b>  streamer panel: test gifts, keybinds, map and settings",
+			"<b>Y</b>  streamer panel: gift settings, test gifts, map and settings",
 			"",
 			"On a phone or tablet, tap to dig and use the on-screen buttons.",
 		}, "\n"),
@@ -21424,7 +21163,7 @@ HowToPlay.PAGES = {
 			"",
 			"<b>MOVEMENT</b> (bottom right): drag <b>Speed</b> and <b>Jump height</b> to suit you. Reset puts them back. Settings (<b>P</b>) can hide this card.",
 			"",
-			"<b>Gifts</b> send you up the tower, more platforms for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Some send you <b>down</b>: to start with an Ice Cream Cone, Finger Heart, Perfume, Confetti, Money Gun and TikTok Universe. The bridge's control page sets how far each gift sends you, up or down. From 100 coins the rides take over the camera, and every tier is crazier than the last. Follows and shares lift you one platform.",
+			"<b>Gifts</b> send you up the tower, more platforms for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Some send you <b>down</b>: to start with an Ice Cream Cone, Finger Heart, Perfume, Confetti, Money Gun and TikTok Universe. The gift settings (<b>Y</b>, then <b>Open gift settings</b>) set how far each gift sends you, up or down. From 100 coins the rides take over the camera, and every tier is crazier than the last. Follows and shares lift you one platform.",
 			"",
 			"Reach the top, then <b>hold it</b>: stay there while the countdown runs from 10 (it slows down near the end). A gift that sends you down ends the hold. Make it to 0 to win the climb. The next one starts from the bottom.",
 			"",
@@ -21440,7 +21179,7 @@ HowToPlay.PAGES = {
 			"",
 			"<b>WRITING</b> (bottom right): drag <b>Speed</b> to write faster or slower, and pick a <b>theme</b> for the classroom: Classic green, Blackboard, Neon night, Sakura or Royal diamond. Settings (<b>P</b>) can hide this card.",
 			"",
-			"<b>Gifts</b> write numbers for you, more for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Some take numbers <b>off</b>: to start with an Ice Cream Cone, Finger Heart, Perfume, Confetti, Money Gun and TikTok Universe. The bridge's control page sets how far each gift moves the count, up or down. Every gift has its own animation, bigger for bigger gifts. Follows and shares add one.",
+			"<b>Gifts</b> write numbers for you, more for bigger gifts: a Rose is 2, 100 coins is 20, a Galaxy is 63. Some take numbers <b>off</b>: to start with an Ice Cream Cone, Finger Heart, Perfume, Confetti, Money Gun and TikTok Universe. The gift settings (<b>Y</b>, then <b>Open gift settings</b>) set how far each gift moves the count, up or down. Every gift has its own animation, bigger for bigger gifts. Follows and shares add one.",
 			"",
 			"<b>The reset</b>: a <b>Galaxy</b> starts a 60 second countdown. When it runs out the board is wiped back to 0. Anyone who sends a different gift worth <b>1,000 coins or more</b> saves the board and stops the countdown.",
 			"",

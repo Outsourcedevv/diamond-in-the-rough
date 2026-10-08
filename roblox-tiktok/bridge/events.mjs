@@ -25,36 +25,10 @@ export function createEventQueue(limit = 1000) {
   };
 }
 
-// Rebuild test presets: blocks added -> the coins that pick the game's adding
-// effect (Pebble Drop up to Mountain Rising), smallest to biggest.
-export const REBUILD_TESTS = { 100: 1, 1000: 10, 10000: 100, 50000: 500, 100000: 1000, 1500000: 10000 };
-
-export function rebuildTestEvent(blocks) {
-  if (typeof blocks !== 'number' || !Object.hasOwn(REBUILD_TESTS, blocks)) {
-    throw new Error('Choose a supported rebuild test amount.');
-  }
-  return { type: 'gift', user: 'tester', name: 'Test viewer', gift: 'Rebuild test', coins: REBUILD_TESTS[blocks], count: 1, rocks: -blocks };
-}
-
-// The map themes the game can show: the alpine valley, sakura in blossom, or a ranch.
-export const THEMES = { default: 'Alpine', sakura: 'Sakura', farm: 'Farm', desert: 'Desert', haunted: 'Haunted' };
-
-export function themeEvent(theme) {
-  if (!Object.hasOwn(THEMES, theme)) {
-    throw new Error('Choose the alpine, sakura or farm theme.');
-  }
-  return { type: 'theme', name: 'Control page', theme };
-}
-
-// The mountain's skins: stone with a diamond, or a haystack with a needle.
-export const SKINS = { stone: 'Stone & diamond', hay: 'Hay & needle' };
-
-export function skinEvent(skin) {
-  if (!Object.hasOwn(SKINS, skin)) {
-    throw new Error('Choose stone and diamond, or hay and needle.');
-  }
-  return { type: 'skin', name: 'Control page', skin };
-}
+// How the bridge connects to a LIVE. enableExtendedGiftInfo fetches the gift
+// list through Euler Stream's signing, a paid feature, so it stays off: gift
+// messages already carry each gift's name and coins.
+export const CONNECT_OPTIONS = { processInitialData: false, enableExtendedGiftInfo: false };
 
 // The viewer. tiktok-live-connector 2.x sends TikTok's newer event layout
 // (the @handle is displayId, the number is id); older versions used uniqueId
@@ -108,22 +82,4 @@ export function likeEvent(data) {
 
 export function socialEvent(type, data) {
   return { type, ...who(data.user) };
-}
-
-// Open Cloud messages are limited to 1 kB: pack events into JSON lists that fit.
-export function packMessages(events, maxBytes = 900) {
-  const messages = [];
-  let batch = [];
-  for (const event of events) {
-    const { seq, ...compact } = event;
-    const candidate = [...batch, compact];
-    if (batch.length > 0 && Buffer.byteLength(JSON.stringify(candidate)) > maxBytes) {
-      messages.push(JSON.stringify(batch));
-      batch = [compact];
-    } else {
-      batch = candidate;
-    }
-  }
-  if (batch.length > 0) messages.push(JSON.stringify(batch));
-  return messages;
 }

@@ -637,77 +637,6 @@ local perLikeBox = amountBox("setPerLike")
 local perFollowBox = amountBox("setPerFollow")
 local perShareBox = amountBox("setPerShare")
 
-panelLabel("GIFT CATALOGUE: localhost:8787 in your browser")
-panelLabel("GIFT RULES: positive removes, negative adds")
-panelOrder += 1
-local rulesList = make("Frame", {
-	LayoutOrder = panelOrder,
-	Size = UDim2.new(1, 0, 0, 0),
-	AutomaticSize = Enum.AutomaticSize.Y,
-	BackgroundTransparency = 1,
-	ZIndex = 11,
-}, panel)
-make("UIListLayout", { SortOrder = Enum.SortOrder.Name, Padding = UDim.new(0, 4) }, rulesList)
-local newGiftName = panelBox("", function() end)
-newGiftName.PlaceholderText = "Gift name, e.g. Rose"
-local newGiftRocks = panelBox("", function() end)
-newGiftRocks.PlaceholderText = "500 removes; -500 adds blocks"
-panelButtons({
-	{ "Add / change gift rule", function()
-		local rocks = tonumber((string.gsub(newGiftRocks.Text, "[,%s]", "")))
-		if newGiftName.Text ~= "" and rocks then
-			send("setGiftRule", { gift = newGiftName.Text, rocks = rocks })
-			newGiftName.Text = ""
-			newGiftRocks.Text = ""
-		end
-	end },
-})
-
-local function refreshRules()
-	for _, child in rulesList:GetChildren() do
-		if child:IsA("Frame") then
-			child:Destroy()
-		end
-	end
-	local ok, rules = pcall(function()
-		return game:GetService("HttpService"):JSONDecode(attr("GiftRules", "{}"))
-	end)
-	if not ok or type(rules) ~= "table" then
-		return
-	end
-	for name, rocks in rules do
-		local row = make("Frame", { Name = tostring(name), Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, rulesList)
-		make("TextLabel", {
-			Size = UDim2.new(1, -40, 1, 0),
-			BackgroundTransparency = 1,
-			Font = FONT_MEDIUM,
-			TextSize = 14,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = WHITE,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			Text = string.format("%s: %s %s rocks", tostring(name), if (tonumber(rocks) or 0) < 0 then "adds" else "removes", Format.commas(math.abs(tonumber(rocks) or 0))),
-			ZIndex = 12,
-		}, row)
-		local remove = make("TextButton", {
-			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.fromScale(1, 0),
-			Size = UDim2.fromOffset(34, 30),
-			BackgroundColor3 = DANGER,
-			Font = FONT,
-			TextSize = 14,
-			TextColor3 = WHITE,
-			Text = "X",
-			ZIndex = 12,
-		}, row)
-		rounded(remove, 8)
-		remove.Activated:Connect(function()
-			send("setGiftRule", { gift = tostring(name) })
-		end)
-	end
-end
-State:GetAttributeChangedSignal("GiftRules"):Connect(refreshRules)
-refreshRules()
-
 panelLabel("TEST GIFTS (no TikTok needed)")
 local testGifts = {
 	{ "Rose · 1", "Rose", 1, 1 },
@@ -738,134 +667,6 @@ for index = 1, #testGifts, 2 do
 	end
 	panelButtons(buttons)
 end
-
--- Gift keybinds: give any gift a key; pressing it in the game sends that gift,
--- so the streamer can play without the bridge. The bridge's catalogue can set
--- keybinds too; both show here.
-panelLabel("GIFT KEYBINDS (press the key in the game to send the gift)")
-panelOrder += 1
-local bindingList = make("Frame", {
-	LayoutOrder = panelOrder,
-	Size = UDim2.new(1, 0, 0, 0),
-	AutomaticSize = Enum.AutomaticSize.Y,
-	BackgroundTransparency = 1,
-	ZIndex = 11,
-}, panel)
-make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) }, bindingList)
-local bindingGift = panelBox("", function() end)
-bindingGift.PlaceholderText = "Gift name, e.g. Rose"
-local bindingCoins = panelBox("", function() end)
-bindingCoins.PlaceholderText = "Coins per gift, e.g. 1"
-local chosenKey: string? = nil
-local capturingKey = false
-local bindingButtons: { TextButton } = {}
-bindingButtons = panelButtons({
-	{ "Key: choose", function() end },
-	{ "Save keybind", function()
-		local coins = tonumber((string.gsub(bindingCoins.Text, "[^%d]", "")))
-		if chosenKey == nil or bindingGift.Text == "" or coins == nil then
-			addFeed("Type a gift name and its coins, then choose a key.", 0, "notice")
-			return
-		end
-		send("setGiftBinding", { key = chosenKey, gift = bindingGift.Text, coins = coins })
-		bindingGift.Text = ""
-		bindingCoins.Text = ""
-		chosenKey = nil
-		bindingButtons[1].Text = "Key: choose"
-	end },
-})
-local keyButton = bindingButtons[1]
-bindingButtons[2].BackgroundColor3 = SELECTED
-panelLabel("Free keys: B C F J K L M N Q R T U V X Z, 0 to 9, F1 to F8, the number pad, Insert, Home, End, Page Up/Down and Delete, also with Shift or Ctrl. The full-screen gift settings do this for every gift.")
-keyButton.Activated:Connect(function()
-	capturingKey = true
-	keyButton.Text = "Press a key..."
-end)
-UserInputService.InputBegan:Connect(function(input: InputObject)
-	if not capturingKey or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-	-- Wait for the real key while Shift or Ctrl is held.
-	if string.find(input.KeyCode.Name, "Shift", 1, true) or string.find(input.KeyCode.Name, "Control", 1, true) then return end
-	capturingKey = false
-	local name = Keybinds.combo(input.KeyCode.Name,
-		UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl),
-		UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
-	if Keybinds.allowed(name) then
-		chosenKey = name
-		keyButton.Text = "Key: " .. Keybinds.label(name)
-	else
-		chosenKey = nil
-		keyButton.Text = "Key: choose"
-		addFeed(Keybinds.label(name) .. " is used by the game. Pick one of the free keys.", 0, "notice")
-	end
-end)
-local function refreshBindings()
-	for _, child in bindingList:GetChildren() do
-		if child:IsA("Frame") then child:Destroy() end
-	end
-	local ok, bindings = pcall(function()
-		return game:GetService("HttpService"):JSONDecode(attr("GiftBindings", "{}"))
-	end)
-	if not ok or type(bindings) ~= "table" then return end
-	local keys = {}
-	for key in bindings do table.insert(keys, tostring(key)) end
-	table.sort(keys)
-	if #keys == 0 then
-		local row = make("Frame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, ZIndex = 11 }, bindingList)
-		make("TextLabel", {
-			Size = UDim2.fromScale(1, 1),
-			BackgroundTransparency = 1,
-			Font = FONT_MEDIUM,
-			TextSize = 14,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = MUTED,
-			Text = "No keybinds yet.",
-			ZIndex = 12,
-		}, row)
-		return
-	end
-	for index, key in keys do
-		local binding = bindings[key]
-		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 11 }, bindingList)
-		local cap = make("TextLabel", {
-			Size = UDim2.fromOffset(36, 30),
-			BackgroundColor3 = BUTTON,
-			Font = FONT,
-			TextSize = 14,
-			TextColor3 = WHITE,
-			Text = Keybinds.label(key),
-			ZIndex = 12,
-		}, row)
-		rounded(cap, 8)
-		make("TextLabel", {
-			Position = UDim2.fromOffset(44, 0),
-			Size = UDim2.new(1, -86, 1, 0),
-			BackgroundTransparency = 1,
-			Font = FONT_MEDIUM,
-			TextSize = 14,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			TextColor3 = WHITE,
-			Text = string.format("%s · %s coins", tostring(type(binding) == "table" and binding.gift or "?"),
-				Format.commas(tonumber(type(binding) == "table" and binding.coins or 0) or 0)),
-			ZIndex = 12,
-		}, row)
-		local remove = make("TextButton", {
-			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.fromScale(1, 0),
-			Size = UDim2.fromOffset(34, 30),
-			BackgroundColor3 = DANGER,
-			Font = FONT,
-			TextSize = 14,
-			TextColor3 = WHITE,
-			Text = "X",
-			ZIndex = 12,
-		}, row)
-		rounded(remove, 8)
-		remove.Activated:Connect(function() send("removeGiftBinding", key) end)
-	end
-end
-State:GetAttributeChangedSignal("GiftBindings"):Connect(refreshBindings)
-refreshBindings()
 
 panelLabel("DIAMOND CLIMB")
 panelLabel("While climbing, gifts send you up and adding gifts send you down.")
@@ -1705,10 +1506,12 @@ local function pressedCombo(input: InputObject): string
 		UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
 end
 
--- Gift keybinds work in-game for the streamer, outside text entry and menus:
--- TikFinity presses the key when the gift arrives on the LIVE.
+-- Gift keybinds work in-game for the streamer, outside text entry and the
+-- gift settings (where keys are being chosen): TikFinity presses the key when
+-- the gift arrives on the LIVE. They work with the Y panel open too, so no
+-- gift is lost while the streamer changes something there.
 UserInputService.InputBegan:Connect(function(input, processed)
-	if processed or not isAdmin or panel.Visible or GiftMenu.isOpen() or UserInputService:GetFocusedTextBox() then return end
+	if processed or not isAdmin or GiftMenu.isOpen() or UserInputService:GetFocusedTextBox() then return end
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
 	if not ok or type(bindings) ~= "table" then return end
