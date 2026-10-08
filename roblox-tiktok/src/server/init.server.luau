@@ -71,6 +71,8 @@ local settings = {
 	-- Wins per gift (from the gift settings): added to, or taken from, the win
 	-- counter of whichever game is being played.
 	winRules = {} :: { [string]: number },
+	-- Reset gifts (gift settings): send the game being played back to the start.
+	resetGifts = {} :: { [string]: boolean },
 	giftBindings = {} :: { [string]: any },
 	-- Gifts the streamer added in the gift settings (name -> coins), for gifts
 	-- missing from the built-in list (see GiftCatalogue).
@@ -133,6 +135,11 @@ if saved then
 	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
 	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
 	settings.winRules = cleanRules(settings.winRules, 1000)
+	local resets: { [string]: boolean } = {}
+	for name, on in settings.resetGifts do
+		if type(name) == "string" and on == true then resets[string.lower(name)] = true end
+	end
+	settings.resetGifts = resets
 	settings.customGifts = GiftSettings.cleanCustom(settings.customGifts)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
@@ -165,6 +172,7 @@ local function publishSettings()
 	State:SetAttribute("ClimbRules", game:GetService("HttpService"):JSONEncode(settings.climbRules))
 	State:SetAttribute("ChalkRules", game:GetService("HttpService"):JSONEncode(settings.chalkRules))
 	State:SetAttribute("WinRules", game:GetService("HttpService"):JSONEncode(settings.winRules))
+	State:SetAttribute("ResetGifts", game:GetService("HttpService"):JSONEncode(settings.resetGifts))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
 	State:SetAttribute("CustomGifts", game:GetService("HttpService"):JSONEncode(settings.customGifts))
 	local statueList = {}
@@ -1037,6 +1045,22 @@ local function processTikTok(event: TikTokFeed.Event)
 				saveSettings()
 			end
 			text ..= string.format("  %s%d WIN%s", if change > 0 then "+" else "", change, if math.abs(change) == 1 then "" else "S")
+		end
+		-- A reset gift sends the game being played back to the start, and does
+		-- nothing else (no blast or climb on top of the fresh start).
+		if settings.resetGifts[string.lower(event.gift or "")] then
+			if chalkGame.writer() ~= nil then
+				chalkGame.resetNow()
+				text ..= "  RESET: back to 0"
+			elseif climbGame.climber() ~= nil then
+				climbGame.restart()
+				text ..= "  RESET: back to platform 0"
+			elseif phase ~= "Won" and phase ~= "Rebuilding" then
+				newRound()
+				text ..= "  RESET: a full mountain again"
+			end
+			Notify:FireAllClients("feed", { text = text, stone = 0, kind = event.type })
+			return
 		end
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))

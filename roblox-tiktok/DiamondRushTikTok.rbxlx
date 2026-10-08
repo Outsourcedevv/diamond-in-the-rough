@@ -5304,6 +5304,8 @@ local settings = {
 	-- Wins per gift (from the gift settings): added to, or taken from, the win
 	-- counter of whichever game is being played.
 	winRules = {} :: { [string]: number },
+	-- Reset gifts (gift settings): send the game being played back to the start.
+	resetGifts = {} :: { [string]: boolean },
 	giftBindings = {} :: { [string]: any },
 	-- Gifts the streamer added in the gift settings (name -> coins), for gifts
 	-- missing from the built-in list (see GiftCatalogue).
@@ -5366,6 +5368,11 @@ if saved then
 	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
 	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
 	settings.winRules = cleanRules(settings.winRules, 1000)
+	local resets: { [string]: boolean } = {}
+	for name, on in settings.resetGifts do
+		if type(name) == "string" and on == true then resets[string.lower(name)] = true end
+	end
+	settings.resetGifts = resets
 	settings.customGifts = GiftSettings.cleanCustom(settings.customGifts)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
@@ -5398,6 +5405,7 @@ local function publishSettings()
 	State:SetAttribute("ClimbRules", game:GetService("HttpService"):JSONEncode(settings.climbRules))
 	State:SetAttribute("ChalkRules", game:GetService("HttpService"):JSONEncode(settings.chalkRules))
 	State:SetAttribute("WinRules", game:GetService("HttpService"):JSONEncode(settings.winRules))
+	State:SetAttribute("ResetGifts", game:GetService("HttpService"):JSONEncode(settings.resetGifts))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
 	State:SetAttribute("CustomGifts", game:GetService("HttpService"):JSONEncode(settings.customGifts))
 	local statueList = {}
@@ -6271,6 +6279,22 @@ local function processTikTok(event: TikTokFeed.Event)
 			end
 			text ..= string.format("  %s%d WIN%s", if change > 0 then "+" else "", change, if math.abs(change) == 1 then "" else "S")
 		end
+		-- A reset gift sends the game being played back to the start, and does
+		-- nothing else (no blast or climb on top of the fresh start).
+		if settings.resetGifts[string.lower(event.gift or "")] then
+			if chalkGame.writer() ~= nil then
+				chalkGame.resetNow()
+				text ..= "  RESET: back to 0"
+			elseif climbGame.climber() ~= nil then
+				climbGame.restart()
+				text ..= "  RESET: back to platform 0"
+			elseif phase ~= "Won" and phase ~= "Rebuilding" then
+				newRound()
+				text ..= "  RESET: a full mountain again"
+			end
+			Notify:FireAllClients("feed", { text = text, stone = 0, kind = event.type })
+			return
+		end
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
 		amount = likes * settings.perLike
@@ -7141,6 +7165,7 @@ export type Game = {
 	setting: (player: Player, action: string, value: any) -> boolean,
 	gift: (who: string, event: { [string]: any }, rocks: number, doubled: boolean, rule: number?) -> string,
 	addWins: (amount: number) -> number,
+	resetNow: () -> number,
 	removing: (player: Player) -> (),
 }
 
@@ -7390,6 +7415,21 @@ function ChalkGame.start(options: Options): Game
 		publish()
 		options.save()
 		return progress.wins
+	end
+
+	-- A reset gift (gift settings): the board is wiped back to 0 straight away.
+	-- Returns how many numbers were lost.
+	function self.resetNow(): number
+		if winning then return 0 end
+		cancelReset()
+		cancelHold()
+		local lost = progress.count
+		if lost > 0 then
+			notify:FireAllClients("chalkReset", { state = "wiped", lost = lost })
+			notify:FireAllClients("chalkWipe", { reason = "reset" })
+		end
+		setCount(0)
+		return lost
 	end
 
 	function self.gift(who: string, event: { [string]: any }, rocks: number, doubled: boolean, rule: number?): string
@@ -9406,6 +9446,8 @@ return Farm
 --   chalk: numbers per gift in Chalkboard Count (negative counts down)
 --   wins:  wins per gift, added to (or, negative, taken from) the win
 --          counter of whichever game is being played
+--   reset: true to send whichever game is being played back to the start
+--          (a full mountain, platform 0, or a count of 0)
 --   key:   a keybind name ("K", "Shift+K"), or "" for none
 -- A missing or non-number amount means "the game's default" (worked out from
 -- the gift's coins). A gift that isn't in the built-in list is kept as one of
@@ -9422,6 +9464,7 @@ export type Store = {
 	climbRules: { [string]: any },
 	chalkRules: { [string]: any },
 	winRules: { [string]: any },
+	resetGifts: { [string]: any },
 	giftBindings: { [string]: any },
 	customGifts: { [string]: number },
 }
@@ -9481,6 +9524,7 @@ function GiftSettings.apply(store: Store, value: any, limits: Limits): string?
 	store.climbRules[lower] = amount(value.climb, limits.climb)
 	store.chalkRules[lower] = amount(value.chalk, limits.chalk)
 	store.winRules[lower] = amount(value.wins, limits.wins)
+	store.resetGifts[lower] = if value.reset == true then true else nil
 
 	-- One key per gift: the gift's old key goes, and the new key leaves any
 	-- other gift it was on.
@@ -9512,6 +9556,7 @@ function GiftSettings.remove(store: Store, gift: any)
 	store.climbRules[lower] = nil
 	store.chalkRules[lower] = nil
 	store.winRules[lower] = nil
+	store.resetGifts[lower] = nil
 	for key, binding in store.giftBindings do
 		if type(binding) == "table" and type(binding.gift) == "string" and string.lower(binding.gift) == lower then
 			store.giftBindings[key] = nil
@@ -20542,6 +20587,10 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local climbBox = section("DIAMOND CLIMB: platforms per gift", "Positive sends the climber up; negative sends them down. Empty: worked out from the coins.", "auto (from the coins)")
 	local chalkBox = section("CHALKBOARD COUNT: numbers per gift", "Positive counts up; negative counts down. Empty: worked out from the coins.", "auto (from the coins)")
 	local winsBox = section("WINS per gift", "Adds wins (e.g. 1) or takes them away (e.g. -1) on the win counter of whichever game you're playing. Empty: no change.", "no change")
+	add(label(right, "RESET", 15, GOLD, FONT, 20))
+	add(label(right, "On: this gift sends the game you're playing back to the start (a full mountain, platform 0, or a count of 0), and does nothing else.", 13, MUTED, FONT_MEDIUM, 34))
+	local resetToggle = add(button(right, "Reset: off"))
+	resetToggle.Size = UDim2.new(1, 0, 0, 38)
 	add(label(right, "KEYBIND (for TikFinity)", 15, GOLD, FONT, 20))
 	add(label(right, "Press the button, then the key. Shift or Ctrl with a key works too. Pressing it in the game sends this gift.", 13, MUTED, FONT_MEDIUM, 34))
 	local keyRow = add(make("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1 }, right))
@@ -20566,10 +20615,15 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	-- The chosen gift and its key (while editing).
 	local chosen: Gift? = nil
 	local chosenKey = ""
+	local chosenReset = false
+	local function showReset()
+		resetToggle.Text = if chosenReset then "Reset: ON (back to the start)" else "Reset: off"
+		resetToggle.BackgroundColor3 = if chosenReset then DANGER else BUTTON
+	end
 	local capturing = false
 
 	local function rules()
-		return decode("GiftRules"), decode("ClimbRules"), decode("ChalkRules"), decode("GiftBindings"), decode("CustomGifts"), decode("WinRules")
+		return decode("GiftRules"), decode("ClimbRules"), decode("ChalkRules"), decode("GiftBindings"), decode("CustomGifts"), decode("WinRules"), decode("ResetGifts")
 	end
 	local function keyFor(bindings: { [string]: any }, name: string): string
 		local lower = string.lower(name)
@@ -20587,8 +20641,10 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		chosen = gift
 		capturing = false
 		status.Text = ""
-		local rough, climb, chalk, bindings, _, wins = rules()
+		local rough, climb, chalk, bindings, _, wins, resets = rules()
 		if gift == nil then
+			chosenReset = false
+			showReset()
 			giftName.Text = "Pick a gift"
 			giftCoins.Text = "Choose one from the list, or search for a gift that's missing to add it."
 			coinsBox.Visible = false
@@ -20608,6 +20664,8 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		climbBox.Text = if type(climb[lower]) == "number" then tostring(climb[lower]) else ""
 		chalkBox.Text = if type(chalk[lower]) == "number" then tostring(chalk[lower]) else ""
 		winsBox.Text = if type(wins[lower]) == "number" then tostring(wins[lower]) else ""
+		chosenReset = resets[lower] == true
+		showReset()
 		chosenKey = keyFor(bindings, gift.name)
 		showKey()
 	end
@@ -20617,7 +20675,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		for _, child in list:GetChildren() do
 			if child:IsA("GuiObject") then child:Destroy() end
 		end
-		local rough, climb, chalk, bindings, custom, wins = rules()
+		local rough, climb, chalk, bindings, custom, wins, resets = rules()
 		local all = GiftCatalogue.all(custom :: any)
 		local shown = GiftCatalogue.search(all, search.Text)
 		local query = (string.gsub(search.Text, "^%s*(.-)%s*$", "%1"))
@@ -20699,7 +20757,8 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 				TextTruncate = Enum.TextTruncate.AtEnd,
 				Text = string.format("Rough %s · Climb %s · Chalk %s%s%s",
 					GiftMenu.ruleText(rough[lower]), GiftMenu.ruleText(climb[lower]), GiftMenu.ruleText(chalk[lower]),
-					if type(wins[lower]) == "number" and wins[lower] ~= 0 then " · Wins " .. GiftMenu.ruleText(wins[lower]) else "",
+					(if type(wins[lower]) == "number" and wins[lower] ~= 0 then " · Wins " .. GiftMenu.ruleText(wins[lower]) else "")
+						.. (if resets[lower] == true then " · RESET" else ""),
 					if key ~= "" then " · [" .. Keybinds.label(key) .. "]" else ""),
 			}, row)
 			row.Activated:Connect(function()
@@ -20710,7 +20769,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	end
 
 	search:GetPropertyChangedSignal("Text"):Connect(draw)
-	for _, name in { "GiftRules", "ClimbRules", "ChalkRules", "GiftBindings", "CustomGifts", "WinRules" } do
+	for _, name in { "GiftRules", "ClimbRules", "ChalkRules", "GiftBindings", "CustomGifts", "WinRules", "ResetGifts" } do
 		state:GetAttributeChangedSignal(name):Connect(function()
 			if open then draw() end
 		end)
@@ -20720,6 +20779,11 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		if chosen == nil then return end
 		capturing = true
 		showKey()
+	end)
+	resetToggle.Activated:Connect(function()
+		if chosen == nil then return end
+		chosenReset = not chosenReset
+		showReset()
 	end)
 	clearKey.Activated:Connect(function()
 		capturing = false
@@ -20759,6 +20823,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 			climb = GiftMenu.parseAmount(climbBox.Text),
 			chalk = GiftMenu.parseAmount(chalkBox.Text),
 			wins = GiftMenu.parseAmount(winsBox.Text),
+			reset = chosenReset,
 			key = chosenKey,
 		}
 	end
@@ -20778,6 +20843,8 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	reset.Activated:Connect(function()
 		if chosen == nil then return end
 		roughBox.Text, climbBox.Text, chalkBox.Text, winsBox.Text = "", "", "", ""
+		chosenReset = false
+		showReset()
 		chosenKey = ""
 		capturing = false
 		showKey()
