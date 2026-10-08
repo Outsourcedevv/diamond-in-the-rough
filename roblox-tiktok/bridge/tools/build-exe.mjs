@@ -3,9 +3,8 @@
 // Uses Node's single executable applications (SEA). Run from bridge/:
 //   node tools/build-exe.mjs [path to node-vXX-win-x64/node.exe] [output]
 // The node.exe must be the same version as the Node running this script.
-// The .exe has no Roblox key. The game's owner puts roblox-cloud.txt next to
-// it and opens it once: it then writes a "For streamers" copy with the key
-// hidden inside (see sealBinary in cloud.mjs).
+// The same .exe is for everyone: it reaches the published game through the
+// relay (RELAY_URL in cloud.mjs) and holds no keys.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

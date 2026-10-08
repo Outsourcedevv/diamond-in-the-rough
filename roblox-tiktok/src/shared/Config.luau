@@ -64,10 +64,10 @@ local Config = {
 
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
-	-- The published game: each streamer's connector sends their gifts through
-	-- Roblox Open Cloud on this topic plus their game code (bridge/cloud.mjs
-	-- uses the same prefix), and they type the code in the Y panel.
-	MessagingTopicPrefix = "DiamondRush_",
+	-- The published game: each streamer's connector sends their gifts to the
+	-- Diamond Rush relay (relay/worker.js on Cloudflare) under their game code,
+	-- and they type the code in the Y panel. bridge/cloud.mjs has the same address.
+	RelayUrl = "",
 	GameCodeMaxLength = 12,
 	-- Where streamers get the TikTok connector. Roblox does not allow links
 	-- that lead off Roblox inside the game, so name the place and put the

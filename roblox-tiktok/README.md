@@ -237,29 +237,17 @@ With the defaults, clearing the whole mountain takes 2,500 coins of gifts. The d
 
 ## The published game
 
-A published Roblox server can't reach anyone's PC, so each streamer's connector sends their gifts through Roblox **Open Cloud** (MessagingService), straight to the game. No server needs hosting.
+A published Roblox server can't reach anyone's PC, so each streamer's connector sends their gifts to the **Diamond Rush relay**, a small free Cloudflare Worker you host once, and their game reads them from there. There are no Roblox keys anywhere: nothing in the connector is secret.
 
 ```
-TikTok LIVE  ->  DiamondRushBridge.exe (the streamer's PC)  ->  Roblox Open Cloud  ->  that streamer's game server
+TikTok LIVE  ->  DiamondRushBridge.exe (the streamer's PC)  ->  relay (Cloudflare)  <-  that streamer's game server
 ```
 
-**As the game's owner, once:**
+**As the game's owner, once:** set up the relay (about 10 minutes in the browser, see [relay/README.md](relay/README.md)), put its address in `RELAY_URL` in `bridge/cloud.mjs` and `RelayUrl` in `src/shared/Config.luau`, rebuild DiamondRushBridge.exe and the place, and publish. HTTP requests are already allowed in the place file (Game Settings → Security → Allow HTTP Requests).
 
-1. Publish the place (File → Publish to Roblox).
-2. At [create.roblox.com](https://create.roblox.com) go to **Open Cloud → API Keys → Create API Key**:
-   - Add **Messaging Service** with the **publish** permission for this experience only.
-   - Set **Accepted IP Addresses** to `0.0.0.0/0` (streamers are everywhere) and no expiration.
-   - Copy the key.
-3. On the experience's page use **⋯ → Copy Universe ID**.
-4. Open **your own** DiamondRushBridge.exe. On its page, open **Game owner: Roblox key**, paste the Universe ID and the key, and press **Save and make the streamers' copy**. Your PC keeps the key (in its `config.json`), and a **For streamers** folder appears next to the .exe with a copy that has the key hidden inside it (scrambled). Share only that folder, zipped or as a Drive folder. Do it again whenever you change the key. (A `roblox-cloud.txt` next to the .exe with `universe:` and `key:` lines also works.)
+**As a streamer, each time:** open DiamondRushBridge.exe and connect your TikTok username. The control page shows your **game code**, such as `ABCD EFGH`. In the game, press **Y**, scroll to **GAME CODE** and type it in. Your server then receives only your gifts, within about a second. The code stays the same on that PC (it comes from a secret in `config.json`; deleting that file gives a new code). Only that connector can send gifts under it; someone who knows the code could at most watch the gifts go by.
 
-The key can only publish messages to this one game. It is hidden from casual snooping, but someone determined could still dig it out of the program and send pretend gifts to a game code they know. If that ever happens, delete the key, make a new one, paste it into your copy's **Game owner** box and share the new **For streamers** folder.
-
-**Updating the published game when Studio's publish gets stuck:** your own copy's page has **Game owner: update the published game**. Make a second Open Cloud key with **universe-places → write** for this game (keep it to yourself: it can replace your game, and it is never put in the streamers' copy). Paste your game's **Place ID** (the number in its roblox.com/games/… link) and that key, choose `DiamondRushTikTok.rbxlx` and press **Upload to Roblox**. Then restart the servers from the Creator Dashboard (**⋯ → Restart Servers for Updates**).
-
-**As a streamer, each time:** open DiamondRushBridge.exe and connect your TikTok username. The control page shows your **game code**, such as `ABCD EFGH`. In the game, press **Y**, scroll to **GAME CODE** and type it in. Your server then receives only your gifts, a second or two after they're sent. The code stays the same on that PC (it comes from a secret in `config.json`; deleting that file gives a new code). Keep it off your stream.
-
-Roblox lets one game code's topic receive about 30 messages a minute, so the connector sends one message every 2.5 seconds and packs gifts into it. In a gift storm it folds repeats together (a viewer's ten Roses become one gift of ten), so nothing is lost. Studio keeps working at the same time.
+**Updating the published game when Studio's publish gets stuck:** the control page has **Game owner only: update the published game**. Make an Open Cloud key with **universe-places → write** for this game (keep it to yourself: it can replace your game; it stays in your `config.json`). Paste the Universe ID, the Place ID (the number in the game's roblox.com/games/… link) and that key, choose `DiamondRushTikTok.rbxlx` and press **Upload to Roblox**. Then restart the servers from the Creator Dashboard (**⋯ → Restart Servers for Updates**).
 
 **Where streamers get the connector:** Roblox does not allow links that lead off Roblox inside a game, so the game tells streamers to join your Discord to download it (the wording is `ConnectorMessage` in `src/shared/Config.luau`; it shows in the How to Play guide and the Y panel). Put your Discord invite under **Social Links** on the game's page, and the download in that Discord.
 
@@ -274,9 +262,9 @@ To show the Blender mountains and trees in the published game, also turn on **En
 - **TikTok "could not connect"**: check the username (no @ needed). TikTok sometimes rate-limits; wait a minute.
 - **Nothing happens on gifts but test gifts work**: make sure the control page says *connected to @yourname*.
 - **The game says "no game code set"**: press **Y**, scroll to **GAME CODE** and type the code from the control page.
-- **The game says "waiting for DiamondRushBridge.exe" or "connector not heard from"**: open the connector and check the code in the **Y** panel matches the one on its page. Its page should say Roblox: *ready* or *sending to the game*.
-- **The control page says "not set up (this connector has no Roblox key…)"**: this copy has no key. Streamers: get the newest download. Owner: use **Game owner: Roblox key** on your own copy's page.
-- **The control page says "Roblox refused the connector's key"**: the key was deleted or expired. Make a new one and share a new download.
+- **The game says "waiting for DiamondRushBridge.exe"**: open the connector and check the code in the **Y** panel matches the one on its page. Its page should say Roblox: *ready*.
+- **The game says "can't reach the relay"** or **"no relay address"**: the relay isn't set up or its address isn't in `Config.RelayUrl` (see [relay/README.md](relay/README.md)). HTTP requests must be allowed.
+- **The control page says "can't reach the relay" or "Roblox Studio only"**: this connector has no relay address or can't get online. Get the newest download.
 - **No mountain in Studio's Server view**: that is expected. Each player's client draws the rock; switch back to the Client view. Use **Play** (F5), not **Run** (F8), which has no client.
 - **No Blender mountains or trees in the published game**: Roblox only lets a published game build meshes once Mesh / Image APIs are turned on. See [Blender scenery](#blender-scenery) for that, or for importing the pack instead.
 - **The world looks flat or old-fashioned**: open the place file from this folder. It sets Future lighting and the 2022 material pack, which scripts cannot change. In an older copy, set **Lighting → LightingStyle** to Realistic and **MaterialService → Use2022Materials** on.

@@ -506,10 +506,10 @@ local Config = {
 
 	-- TikTok ------------------------------------------------------------------
 	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
-	-- The published game: each streamer's connector sends their gifts through
-	-- Roblox Open Cloud on this topic plus their game code (bridge/cloud.mjs
-	-- uses the same prefix), and they type the code in the Y panel.
-	MessagingTopicPrefix = "DiamondRush_",
+	-- The published game: each streamer's connector sends their gifts to the
+	-- Diamond Rush relay (relay/worker.js on Cloudflare) under their game code,
+	-- and they type the code in the Y panel. bridge/cloud.mjs has the same address.
+	RelayUrl = "",
 	GameCodeMaxLength = 12,
 	-- Where streamers get the TikTok connector. Roblox does not allow links
 	-- that lead off Roblox inside the game, so name the place and put the
@@ -6197,7 +6197,7 @@ local function useCode()
 		if RunService:IsStudio() and settings.gameCode == "" then return end
 		status = shownStatus(status)
 		State:SetAttribute("TikTok", if settings.gameCode == "" then status else status .. " (code " .. settings.gameCode .. ")")
-	end)
+	end, Config.RelayUrl)
 end
 useCode()
 
@@ -12228,17 +12228,14 @@ return Store
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
 -- Receives TikTok Live events from the streamer's connector (DiamondRushBridge.exe).
---  * The published game: the connector publishes to MessagingService through
---    Roblox Open Cloud, on the topic for the streamer's game code (see
---    bridge/cloud.mjs). Once they type the code in the Y panel, this server
---    listens to that topic only, so only their gifts arrive.
+--  * The published game: the connector sends the events to the Diamond Rush
+--    relay (relay/worker.js) under the streamer's game code. Once they type
+--    the code in the Y panel, this server asks the relay for that code's
+--    events, so only their gifts arrive. No Roblox key is involved.
 --  * In Roblox Studio the game also polls the connector on this PC over HTTP.
 -- Both paths can run at once; every event has a unique id and runs once.
 local HttpService = game:GetService("HttpService")
-local MessagingService = game:GetService("MessagingService")
 local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Config = require(ReplicatedStorage:WaitForChild("DiamondRush"):WaitForChild("Config"))
 
 export type Event = {
 	id: string,
@@ -12303,72 +12300,57 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 end
 
 -- The published game ---------------------------------------------------------
--- The streamer's game code and the topic it is sent on. Goes up whenever the
--- code changes, so an older watcher stops.
+-- The game asks the relay for its code's events, and the relay holds each
+-- request for a few seconds until something arrives, so gifts land within
+-- about a second. Goes up whenever the code changes, so an older loop stops.
 local codeGeneration = 0
-local subscription: RBXScriptConnection? = nil
-TikTokFeed.QUIET_SECONDS = 150 -- the connector says how TikTok is doing every minute
+TikTokFeed.RELAY_WAIT = 8 -- seconds the relay may hold a request
 
-function TikTokFeed.topicFor(code: string): string
-	return Config.MessagingTopicPrefix .. code
+local function relayLoop(generation: number, url: string, code: string, onEvent: (Event) -> (), onStatus: (string) -> ())
+	local since = 0
+	local failures = 0
+	while generation == codeGeneration do
+		local address = string.format("%s/c/%s/events?since=%d&wait=%d", url, code, since, if since == 0 then 0 else TikTokFeed.RELAY_WAIT)
+		local ok, body = pcall(HttpService.GetAsync, HttpService, address, true)
+		local decoded, data = false, nil
+		if ok then
+			decoded, data = pcall(HttpService.JSONDecode, HttpService, body)
+		end
+		if generation ~= codeGeneration then return end
+		if decoded and type(data) == "table" and type(data.events) == "table" then
+			failures = 0
+			for _, raw in data.events do
+				deliver(raw, onEvent)
+			end
+			if type(data.last) == "number" then since = math.max(since, data.last) end
+			onStatus(if type(data.tiktok) == "string" and data.tiktok ~= "" then string.sub(data.tiktok, 1, 80) else "waiting for DiamondRushBridge.exe")
+			task.wait(0.1)
+		else
+			failures += 1
+			if not ok then warn("[DiamondRush] relay: " .. tostring(body)) end
+			onStatus(if not HttpService.HttpEnabled then "Turn on HTTP: Game Settings > Security > Allow HTTP Requests"
+				elseif failures > 2 then "can't reach the relay, retrying" else "connecting…")
+			task.wait(math.min(2 * failures, 15))
+		end
+	end
 end
 
--- Listens for the connector's events under the streamer's game code, from the
--- Y panel. An empty code stops listening.
-function TikTokFeed.useCode(code: string, onEvent: (Event) -> (), onStatus: (string) -> ())
+-- Reads the connector's events under the streamer's game code, from the Y
+-- panel, through the relay at `url` (Config.RelayUrl). An empty code stops.
+function TikTokFeed.useCode(code: string, onEvent: (Event) -> (), onStatus: (string) -> (), url: string?)
 	local clean = string.upper((string.gsub(code, "[^%w]", "")))
+	local relay = (string.gsub(url or "", "/+$", ""))
 	codeGeneration += 1
-	local generation = codeGeneration
-	if subscription then
-		subscription:Disconnect()
-		subscription = nil
-	end
 	if clean == "" then
 		onStatus("no game code set (press Y)")
 		return
 	end
-	onStatus("waiting for DiamondRushBridge.exe")
-	local heard: number? = nil -- when the connector was last heard from
-	task.spawn(function()
-		local tries = 0
-		while generation == codeGeneration do
-			local ok, result = pcall(function()
-				return MessagingService:SubscribeAsync(TikTokFeed.topicFor(clean), function(message)
-					local decoded, data = pcall(HttpService.JSONDecode, HttpService, message.Data)
-					if not decoded or type(data) ~= "table" then return end
-					heard = os.clock()
-					for _, raw in data do
-						if type(raw) == "table" and raw.type == "status" then
-							if type(raw.tiktok) == "string" then onStatus(string.sub(raw.tiktok, 1, 80)) end
-						else
-							deliver(raw, onEvent)
-						end
-					end
-				end)
-			end)
-			if ok then
-				if generation == codeGeneration then
-					subscription = result
-				else
-					result:Disconnect()
-				end
-				break
-			end
-			tries += 1
-			warn("[DiamondRush] couldn't listen for the connector: " .. tostring(result))
-			onStatus("can't reach Roblox's messaging, retrying")
-			task.wait(math.min(5 * tries, 30))
-		end
-		-- No word from the connector for a while: say so.
-		while generation == codeGeneration do
-			task.wait(10)
-			local last = heard
-			if generation == codeGeneration and last ~= nil and os.clock() - last > TikTokFeed.QUIET_SECONDS then
-				onStatus("connector not heard from (is DiamondRushBridge.exe open, with this game code?)")
-				heard = nil
-			end
-		end
-	end)
+	if relay == "" then
+		onStatus("no relay address (Config.RelayUrl)")
+		return
+	end
+	onStatus("connecting…")
+	task.spawn(relayLoop, codeGeneration, relay, clean, onEvent, onStatus)
 end
 
 -- onStatus receives a short line for the screen, such as
