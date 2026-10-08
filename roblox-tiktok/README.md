@@ -30,21 +30,21 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
   - A big countdown shows **10 → 0**, but it really takes **15 seconds**: the numbers tick fast at first and slow down near the end.
   - If you fall or leave, the diamond drops.
 - **Scenery.** An alpine valley in smooth terrain, with grassy meadows and animated grass, a lake with a dock, a log-cabin mining camp with a porch, warm windows, a campfire and lanterns, and a timber fire lookout on a hillside to the left of the mountain, with braced log legs, a ladder, a lamp-lit lookout under a shingle roof and a red flag (alpine only; it is put away in the sakura theme). The valley is ringed by huge snow-capped mountains made in Blender and filled with about 200 pines (snow-dusted higher up), birches, oaks, mossy boulders, rock outcrops, bushes, wildflower patches, fallen logs and stumps. The game builds these meshes itself when it starts, so there is nothing to import (see [Blender scenery](#blender-scenery)). Where Roblox does not allow that (a published game without Mesh / Image APIs turned on), built-in low-poly trees, terrain boulders and terrain peaks are used instead. The place uses Future lighting and Roblox's 2022 material pack, with atmosphere haze, sun rays, bloom and a gentle colour grade.
-- **Sakura theme.** The map can switch between the alpine valley (the default), a sakura spring, a farm, a desert canyon and a haunted night (below). Sakura adds about 50 cherry trees in blossom across the meadows and round the camp, each with fallen petals beneath it, a vermilion torii gate where the trail leaves the camp (framing the mountain from the spawn, in place of the festoon lights) stone lanterns at the camp and on the dock, and a Shinto shrine on a flat meadow to one side of the mountain, facing the camp. The shrine has a stone plinth with steps, vermilion pillars, paper screens, a curved copper roof with crossed finials, a sacred straw rope with paper streamers, a bell, an offering box, a golden mirror on its altar and its own small torii on the approach. The light turns to a lower golden sun through a soft pink haze, with fresh green meadows and blush-tinted clouds, and cherry petals drift down around everyone playing. Choose it in the **Y** panel under **MAP THEME** (**Alpine**, **Sakura**, **Farm**, **Desert** or **Haunted**) It changes for everyone straight away, without restarting, and the game remembers the choice. The looks are in `src/server/Scenery.luau` (`LOOKS`) and the sakura scenery in `src/server/Sakura.luau`.
-- **Farm theme.** The third map theme turns the valley into a ranch. A timber board fence runs all the way round the mountain's arena, open only where the trail comes in from the camp, under a log gate arch. Beyond the fence, on open ground in view of the spawn, stands a red gambrel-roofed barn with white trim, big X-braced doors, a hayloft, a cupola and weathervane and a concrete silo, with a cornfield and a scarecrow beside it, a windpump, a little red tractor, stacked and round hay bales, and cows grazing round a water trough. The light is a warm harvest-time sun through a golden haze. The fence is solid but low enough to hop. Choose it in the **Y** panel under **MAP THEME** (**Farm**) It hides the alpine festoon lights and watchtower, and works with either mountain skin (hay and a needle suits it). The farm scenery is in `src/server/Farm.luau`. The barn (with its silo), the sakura shrine (with its torii) and the alpine lookout are built 1.5 times their drawn size so they stand out from the camp; change `Farm.BARN_SCALE`, `Sakura.SHRINE_SCALE` or `Watchtower.SCALE` to resize them, and the ground they need is found to match.
+- **Sakura theme.** The map can switch between the alpine valley (the default), a sakura spring, a farm, a desert canyon and a haunted night (below). Sakura adds about 50 cherry trees in blossom across the meadows and round the camp, each with fallen petals beneath it, a vermilion torii gate where the trail leaves the camp (framing the mountain from the spawn, in place of the festoon lights) stone lanterns at the camp and on the dock, and a Shinto shrine on a flat meadow to one side of the mountain, facing the camp. The shrine has a stone plinth with steps, vermilion pillars, paper screens, a curved copper roof with crossed finials, a sacred straw rope with paper streamers, a bell, an offering box, a golden mirror on its altar and its own small torii on the approach. The light turns to a lower golden sun through a soft pink haze, with fresh green meadows and blush-tinted clouds, and cherry petals drift down around everyone playing. Choose it in the **Y** panel under **MAP THEME** (**Alpine**, **Sakura**, **Farm**, **Desert** or **Haunted**). It changes for everyone straight away, without restarting, and the game remembers the choice. The looks are in `src/server/Scenery.luau` (`LOOKS`) and the sakura scenery in `src/server/Sakura.luau`.
+- **Farm theme.** The third map theme turns the valley into a ranch. A timber board fence runs all the way round the mountain's arena, open only where the trail comes in from the camp, under a log gate arch. Beyond the fence, on open ground in view of the spawn, stands a red gambrel-roofed barn with white trim, big X-braced doors, a hayloft, a cupola and weathervane and a concrete silo, with a cornfield and a scarecrow beside it, a windpump, a little red tractor, stacked and round hay bales, and cows grazing round a water trough. The light is a warm harvest-time sun through a golden haze. The fence is solid but low enough to hop. Choose it in the **Y** panel under **MAP THEME** (**Farm**). It hides the alpine festoon lights and watchtower, and works with either mountain skin (hay and a needle suits it). The farm scenery is in `src/server/Farm.luau`. The barn (with its silo), the sakura shrine (with its torii) and the alpine lookout are built 1.5 times their drawn size so they stand out from the camp; change `Farm.BARN_SCALE`, `Sakura.SHRINE_SCALE` or `Watchtower.SCALE` to resize them, and the ground they need is found to match.
 - **Desert canyon theme.** The valley turns to red sand under a hot, high sun and a dusty amber haze, with bleached peaks and a turquoise oasis. Layered sandstone mesas and buttes stand round the valley, saguaro and barrel cacti and tumbleweeds dot the sand, and palms lean over the lake. Where the trail leaves the camp, a sandstone gate with fire bowls frames the mountain. To one side of the mountain, facing the camp, is a stepped sandstone pyramid with a steep stair up its front to a temple with a gold capstone, obelisks and fire bowls at its foot; the pyramid and stair can be climbed. The pine forest, birches, bushes, flowers, logs and stumps are hidden while the desert shows (the rocks and cliffs stay). The scenery is in `src/server/Desert.luau`.
 - **Haunted night theme.** Midnight under a big full moon, with cold blue mist, dark grass and stone, and glowing lanterns. An iron cemetery gate between stone pillars, its doors swung open and a green lantern hanging from its spiked arch, stands where the trail leaves the camp. To one side of the mountain is a stone mausoleum with columns and a green glow leaking round its iron door, beside a graveyard of crooked headstones and crosses behind a spiked iron fence, with will-o'-wisps drifting over the graves and the lake. Bare dead trees stand across the meadows, and carved jack-o'-lanterns glow at the gate, the camp, the crypt steps and the graveyard. The dark pines stay; the flowers, birches and oaks are hidden. The ambient light stays bright enough to see the rock you dig. The scenery is in `src/server/Haunted.luau`; which of the valley's trees each theme hides is in `src/shared/SceneryThemes.luau`.
-- **Haystack skin.** The mountain itself can be reskinned as a haystack with a **needle** hidden in it instead of a diamond: the same game, the same rules, only the look changes. The rock turns to straw (sun-bleached on top, greener fresh hay low down, packed hay and golden bales inside) and the gem becomes a steel needle with a red thread through its eye, found, clicked and held exactly like the diamond. The display follows: **HAY LEFT**, **NEEDLE UNCOVERED**, **NEEDLE SECURED!** and the lobby's status line. Choose it in the **Y** panel under **MOUNTAIN SKIN** (**Stone & diamond** or **Hay & needle**) It works with either map theme, changes for everyone straight away and is remembered. The palettes are in `src/shared/RockStyle.luau` (`HAY_LAYERS`), the needle in `src/shared/DiamondShape.luau` and the words in `src/shared/Skin.luau`.
+- **Haystack skin.** The mountain itself can be reskinned as a haystack with a **needle** hidden in it instead of a diamond: the same game, the same rules, only the look changes. The rock turns to straw (sun-bleached on top, greener fresh hay low down, packed hay and golden bales inside) and the gem becomes a steel needle with a red thread through its eye, found, clicked and held exactly like the diamond. The display follows: **HAY LEFT**, **NEEDLE UNCOVERED**, **NEEDLE SECURED!** and the lobby's status line. Choose it in the **Y** panel under **MOUNTAIN SKIN** (**Stone & diamond** or **Hay & needle**). It works with either map theme, changes for everyone straight away and is remembered. The palettes are in `src/shared/RockStyle.luau` (`HAY_LAYERS`), the needle in `src/shared/DiamondShape.luau` and the words in `src/shared/Skin.luau`.
 - **Leaderboards.** Two giant 3D wooden boards stand behind the mountain, either side of the summit, angled towards the camp: **TOP HELPERS** (blue border, a pickaxe on the roof) ranks viewers by the coins they sent in gifts that break the mountain, and **TOP GRIEFERS** (red border, boulders on the roof) by the coins they sent in gifts that add stone (gifts with a negative rule). Each shows the top 10 on a shingle-roofed board with log posts. Totals are saved between streams, viewer names are text-filtered, and test gifts never count.
 - **Gold statues.** Honour a big gifter with a gold statue holding a diamond aloft on a marble pedestal. An engraved brass plaque shows their name and coins. Statues are placed and removed from the settings panel and saved to the player who built them (see [single player](#the-published-game)).
 - **Win counter.** It sits under the stone count and is fully customisable: title, number, an optional goal (e.g. `WINS: 3/10`), text colour and background colour. It is saved between streams.
 - **Win screen.** It shows for 4 seconds with **This round's time** and **Best round's time** (and NEW BEST TIME when you beat it). Then the mountain rebuilds from base to peak in 16 waves, with flying stones snapping into place and a final glint at the summit. Gifts arriving during the rebuild are saved and applied when digging resumes.
 - **Settings and field of view.** Every player has a **SETTINGS** button at the top left (or press **P**, which frees the mouse in first person; it used to be O, but O is Roblox's zoom-out key and Roblox swallowed it). Its **Field of view** slider runs from 50 to 100 (70 by default) with **Reset** and **Done**. **Hide buttons** tucks away the **GAMES** tab and the **SETTINGS** button so they stay off the stream; **G** and **P** still open them, and the game remembers the choice for that player. The hands are refitted to the field of view, so they keep the same size and place on screen and the dig swing looks the same at any setting. The field of view applies only in the game (the lobby keeps the normal view) and lasts for the session.
-- **Clean display.** The on-screen display uses one style throughout: Gotham type, dark see-through panels with a fine edge, white text, a pale blue accent and gold for wins, and no emojis (in the game or on the control page) except the gift icons in the gift settings. There are no lettered signs in the world (their text renders badly in Roblox); only the leaderboards and statue plaques carry text.
+- **Clean display.** The on-screen display uses one style throughout: Gotham type, dark see-through panels with a fine edge, white text, a pale blue accent and gold for wins, and no emojis (in the game) except the gift icons in the gift settings. There are no lettered signs in the world (their text renders badly in Roblox); only the leaderboards and statue plaques carry text.
 - **Aim at stone.** A small dot marks the centre of the screen. The surface rock directly under it gets a white outline; the outline follows the same target used for digging and disappears when aiming away or opening settings.
 - **Dig with your hands.** First-person view with two hands: hold the left mouse button on the mountain and your hands take turns, four swings a second: each draws back, drives forward into the rock with the fingers clawed, and rakes the rubble down and back. The rock breaks as each hand lands (25 rocks a strike, about 100 a second), so what you see and what you dig stay in step. A swing always finishes once begun, so letting go never snaps a hand back. The hands are drawn small and close to the camera, so they never sink into the rock when you stand right against it. Connected, hinged fingers curl during the scoop; sleeves meet the palms, and the real avatar arms are hidden locally to prevent duplicate floating limbs; the animation pauses when you aim away from reachable stone.
 
-## Gift settings and TikFinity (no connector needed)
+## Gift settings and TikFinity
 
 In the game, press **Y** and click **Open gift settings (full screen)**. About 125 TikTok gifts are listed with an emoji icon, their coins and a search bar. TikTok's own gift pictures are its artwork and can't be put in a Roblox game, hence the emoji. Prices differ by country, so any gift's coins can be changed, and a gift that's missing can be added with its coins. Pick a gift to set:
 
@@ -58,9 +58,7 @@ In the game, press **Y** and click **Open gift settings (full screen)**. About 1
 
 Leave an amount empty to work it out from the gift's coins. **Save**, and **Test gift** to see it. Pressing a gift's key in the game sends that gift.
 
-**With TikFinity:** in TikFinity, add an action that **simulates a keystroke** (the gift's key, with Shift or Ctrl if you chose them) and an event that runs it when that gift is received. Keep the Roblox window focused while you stream, and every gift on your LIVE reaches the game through its key. Gifts sent by keys show as "A viewer sent …" in the feed and don't count on the leaderboards (the key doesn't say who sent it).
-
-**With the connector:** gifts from the connector use these same settings. The connector only passes on what happens on your LIVE (gifts, likes, follows and shares); what each gift does is set in the game. Its control page has no gift settings, test buttons or keys, so it can't send pretend gifts.
+**With TikFinity:** this is how gifts on your LIVE reach the game. In TikFinity, add an action that **simulates a keystroke** (the gift's key, with Shift or Ctrl if you chose them) and an event that runs it when that gift is received. Keep the Roblox window focused while you stream, and every gift on your LIVE reaches the game through its key. To make likes, follows or shares do something, have TikFinity press a gift's key for them. Gifts sent by keys show as "A viewer sent …" in the feed and don't count on the leaderboards (the key doesn't say who sent it).
 
 ## Adding stone
 
@@ -82,33 +80,23 @@ Run `luau tests/gift-performance.luau` for a CPU checkpoint timing report and `p
 
 ## What you need
 
-- A Windows PC with **Roblox Studio** (free from [create.roblox.com](https://create.roblox.com)).
-- **Node.js LTS** (free from [nodejs.org](https://nodejs.org/en/download)). You only install it once.
+- **Roblox Studio** (free from [create.roblox.com](https://create.roblox.com)) to open and publish the game.
+- **TikFinity** on the PC you stream from, to press the gifts' keys.
 - This folder: on GitHub click **Code → Download ZIP**, then extract it.
 
 ## Set up (once)
 
-1. Install Node.js LTS.
-2. Open the `bridge` folder and double-click **Start Bridge.bat**.
-   - On the first run it installs the TikTok connector, which takes about a minute.
-   - A black window stays open (that is the bridge), and the **control page** opens in your browser at http://localhost:8787.
-   - The control page opens on a 3D sakura shrine: scroll down to reach the controls. Without a graphics card that supports WebGL, it shows a drawn version instead.
-3. Double-click **DiamondRushTikTok.rbxlx** to open the game in Roblox Studio.
-4. Press **Play** (F5) in Studio. You arrive in the royal lobby: press **JOIN** on **Diamond in the Rough** in the games menu on the left.
-   - The control page should now say **Roblox: connected**.
-   - The bottom-right of the game says what the TikTok connection is doing.
-5. Press **Y** in the game and try the **TEST GIFTS** buttons. The mountain should blow up.
-
-If Studio says HTTP requests are off, use **Home → Game Settings → Security → Allow HTTP Requests**. It is already turned on in this file.
+1. Double-click **DiamondRushTikTok.rbxlx** to open the game in Roblox Studio.
+2. Press **Play** (F5). You arrive in the royal lobby: press **JOIN** on **Diamond in the Rough** in the games menu on the left.
+3. Press **Y** and try the **TEST GIFTS** buttons. The mountain should blow up.
+4. Press **Open gift settings**, give your gifts their keys, and set up TikFinity to press them (see [Gift settings and TikFinity](#gift-settings-and-tikfinity)).
 
 ## Every stream
 
-1. Go **LIVE on TikTok** first.
-2. Start the bridge (**Start Bridge.bat**).
-3. Type your TikTok username on the control page and press **Connect**.
-   - It remembers your username, so next time it connects by itself.
-4. Open the game in Roblox Studio, press **Play**, then **JOIN** Diamond in the Rough from the games menu.
-5. Capture the Studio window in TikTok LIVE Studio or OBS.
+1. Go **LIVE on TikTok**, with TikFinity running.
+2. Open the game (the published game, or Studio and **Play**), then **JOIN** a game from the games menu.
+3. Click on the Roblox window so it's focused, and keep it that way: TikFinity's key presses only reach the window in front.
+4. Capture the Roblox window in TikTok LIVE Studio or OBS.
 
 ## The lobby and the games menu
 
@@ -121,7 +109,7 @@ The **GAMES** menu on the left of the screen lists the games:
 - **Chalkboard Count** shows the count on the board, the goal and how many times it was reached. Press **JOIN** to go to the classroom (see [Chalkboard Count](#chalkboard-count)).
 - The last card says **Coming soon**, ready for a future game.
 
-Beside the carpet stands a **How to Play** board (drawn, with no lettering). Walk up and press **E**, or click it, and a guide opens on screen with six pages: **Connect TikTok** (the bridge, the control page, HTTP requests and joining), **Testing** (the Y panel's test gifts, rebuild tests, the bird button and the gift settings), **Controls**, **How to win**, **Diamond Climb** and **Chalkboard**. The games menu's **How to play** button and the **H** key open it too, anywhere.
+Beside the carpet stands a **How to Play** board (drawn, with no lettering). Walk up and press **E**, or click it, and a guide opens on screen with six pages: **Connect TikTok** (setting up TikFinity and gift keys), **Testing** (the Y panel's test gifts, rebuild tests, the bird button and the gift settings), **Controls**, **How to win**, **Diamond Climb** and **Chalkboard**. The games menu's **How to play** button and the **H** key open it too, anywhere.
 
 Press **Hide** to hide the menu. The **GAMES** tab on the left, or the **G** key, brings it back. The key matters in the game, where the mouse is locked to first person. While you play, the menu has **Back to lobby**. You can't go back while you are holding the diamond.
 
@@ -177,7 +165,7 @@ In the **Y** panel:
 
 - **Rocks per coin** sets what any gift without its own rule does (default 100 rocks per coin).
 - **Rocks per like / follow / share** set those amounts.
-- **Open gift settings (full screen)** gives any gift its own amount in each game, its win change, animation, reset and key: see [Gift settings and TikFinity](#gift-settings-and-tikfinity-no-connector-needed).
+- **Open gift settings (full screen)** gives any gift its own amount in each game, its win change, animation, reset and key: see [Gift settings and TikFinity](#gift-settings-and-tikfinity).
 
 Everything is saved with your other settings.
 
@@ -205,7 +193,7 @@ An imported pack is used instead of building the meshes in game.
 
 ## Leaderboards and gold statues
 
-The two leaderboards fill up by themselves as viewers send gifts. A gift counts for **Top Helpers** when it removes rock and for **Top Griefers** when its gift rule adds stone; either way the board adds the gift's coin value. In the **Y** panel:
+The two leaderboards count gifts whose sender is known. Gifts sent by a key (TikFinity) and test gifts don't say who sent them, so they don't count. A gift counts for **Top Helpers** when it removes rock and for **Top Griefers** when its gift rule adds stone; either way the board adds the gift's coin value. In the **Y** panel:
 
 - **Preview with sample names** fills both boards with made-up viewers for 20 seconds, so you can check them before going live.
 - **Reset top helpers** / **Reset top griefers** clear a board (click twice to confirm), for example at the start of a new stream.
@@ -255,50 +243,26 @@ With the defaults, clearing the whole mountain takes 2,500 coins of gifts. The d
 
 ## The published game
 
-A published Roblox server can't reach anyone's PC, so each streamer's connector sends their gifts to the **Diamond Rush relay**, a small free Cloudflare Worker you host once, and their game reads them from there. There are no Roblox keys anywhere: nothing in the connector is secret.
+Publish from Studio (**File → Publish to Roblox**). Gifts reach the published game the same way as in Studio: TikFinity presses the keys on the streamer's PC, so there is nothing else to host or set up.
 
-```
-TikTok LIVE  ->  DiamondRushBridge.exe (the streamer's PC)  ->  relay (Cloudflare)  <-  that streamer's game server
-```
-
-**As the game's owner, once:** set up the relay (about 10 minutes in the browser, see [relay/README.md](relay/README.md)), put its address in `RELAY_URL` in `bridge/cloud.mjs` and `RelayUrl` in `src/shared/Config.luau`, rebuild DiamondRushBridge.exe and the place, and publish. HTTP requests are already allowed in the place file (Game Settings → Security → Allow HTTP Requests).
-
-**As a streamer, each time:** open DiamondRushBridge.exe and connect your TikTok username. The control page shows your **game code**, such as `ABCD EFGH`. In the game, press **Y**, scroll to **GAME CODE** and type it in. Your server then receives only your gifts, within about a second. The code stays the same on that PC (it comes from a secret in `config.json`; deleting that file gives a new code). Only that connector can send gifts under it; someone who knows the code could at most watch the gifts go by.
-
-**Updating the published game when Studio's publish gets stuck:** the control page has **Game owner only: update the published game**. Make an Open Cloud key with **universe-places → write** for this game (keep it to yourself: it can replace your game; it stays in your `config.json`). Paste the Universe ID, the Place ID (the number in the game's roblox.com/games/… link) and that key, choose `DiamondRushTikTok.rbxlx` and press **Upload to Roblox**. Then restart the servers from the Creator Dashboard (**⋯ → Restart Servers for Updates**).
-
-**Where streamers get the connector:** Roblox does not allow links that lead off Roblox inside a game, so the game tells streamers to join your Discord to download it (the wording is `ConnectorMessage` in `src/shared/Config.luau`; it shows in the How to Play guide and the Y panel). Put your Discord invite under **Social Links** on the game's page, and the download in that Discord.
-
-The game is **single player** (`SinglePlayer = true` in `src/shared/Config.luau`). Whoever plays is treated as the streamer and gets the **Y** panel, test gifts and gift settings (with their keys). **Each player has their own save**: statues, wins, the win counter's look, best time, leaderboards, map theme, skin, gift rules, keybinds and game code. The server waits for its player, then loads that player's save (stored as `player_<user id>`). A player's first visit starts from the game's older shared save, so nothing built before this change is lost. Set the published game's maximum players to 1: a second player in the same server would be saving into the first player's save. Set `SinglePlayer = false` to go back to one shared save and owner-and-Admins only.
+The game is **single player** (`SinglePlayer = true` in `src/shared/Config.luau`). Whoever plays is treated as the streamer and gets the **Y** panel, test gifts and gift settings (with their keys). **Each player has their own save**: statues, wins, the win counter's look, best time, leaderboards, map theme, skin, gift settings and their keys. The server waits for its player, then loads that player's save (stored as `player_<user id>`). A player's first visit starts from the game's older shared save, so nothing built before this change is lost. Set the published game's maximum players to 1: a second player in the same server would be saving into the first player's save. Set `SinglePlayer = false` to go back to one shared save and owner-and-Admins only.
 
 To show the Blender mountains and trees in the published game, also turn on **Enable Mesh / Image APIs** (see [Blender scenery](#blender-scenery)).
 
 ## Troubleshooting
 
-- **"Bridge app not running"** in the game: start **Start Bridge.bat** and keep its window open.
-- **TikTok "is not live right now"**: go live first. The bridge retries every 20 seconds by itself.
-- **TikTok "could not connect"**: check the username (no @ needed). TikTok sometimes rate-limits; wait a minute.
-- **Nothing happens on gifts but test gifts work**: make sure the control page says *connected to @yourname*.
-- **The game says "no game code set"**: press **Y**, scroll to **GAME CODE** and type the code from the control page.
-- **The game says "waiting for DiamondRushBridge.exe"**: open the connector and check the code in the **Y** panel matches the one on its page. Its page should say Roblox: *ready*.
-- **The game says "can't reach the relay"** or **"no relay address"**: the relay isn't set up or its address isn't in `Config.RelayUrl` (see [relay/README.md](relay/README.md)). HTTP requests must be allowed.
-- **The control page says "can't reach the relay" or "Roblox Studio only"**: this connector has no relay address or can't get online. Get the newest download.
+- **Gifts on the LIVE do nothing, but pressing the key yourself works**: click on the Roblox window so it's focused (TikFinity's key presses only reach the window in front), and check the key in TikFinity matches the gift settings, with Shift or Ctrl if you chose them.
+- **Pressing a gift's key does nothing**: keys work in the game, not while typing in a box or with the gift settings open. Check the gift has that key in the gift settings (the list shows each gift's key in brackets).
 - **No mountain in Studio's Server view**: that is expected. Each player's client draws the rock; switch back to the Client view. Use **Play** (F5), not **Run** (F8), which has no client.
 - **No Blender mountains or trees in the published game**: Roblox only lets a published game build meshes once Mesh / Image APIs are turned on. See [Blender scenery](#blender-scenery) for that, or for importing the pack instead.
 - **The world looks flat or old-fashioned**: open the place file from this folder. It sets Future lighting and the 2022 material pack, which scripts cannot change. In an older copy, set **Lighting → LightingStyle** to Realistic and **MaterialService → Use2022Materials** on.
-
-## The connector as one .exe
-
-Streamers don't need Node.js if you give them `DiamondRushBridge.exe`. It holds the bridge, its packages, the control page and Node.js itself, and opens the control page when started. Its settings (`config.json`: the TikTok username and the secret behind the game code) are saved next to the .exe.
-
-To build it (from `bridge/`, with Node 22): download the matching Windows Node.js ZIP from nodejs.org (the same version as `node -v`), extract it, then run `node tools/build-exe.mjs path\to\node-v22.x.x-win-x64\node.exe`. The .exe lands in `bridge/build/` (about 86 MB, about 33 MB zipped). It is not code-signed, so Windows shows "Windows protected your PC" the first time: **More info → Run anyway**. Share it as a link (Discord's free upload limit is 10 MB).
 
 ## For developers
 
 The source is a [Rojo](https://rojo.space) project:
 
 - `src/shared`: config, the rock grid, rock shapes and looks, the network codec, the diamond shape, the hold countdown curve, formatting, and the Blender scenery meshes with their unpacker.
-- `src/server`: rounds, the authoritative mountain grid, the diamond, scenery, the royal lobby (`Lobby`), Diamond Climb's tower (`Climb`) and game (`ClimbGame`), Chalkboard Count's classroom (`Classroom`) and game (`ChalkGame`), the TikTok feed and saving.
+- `src/server`: rounds, the authoritative mountain grid, the diamond, scenery, the royal lobby (`Lobby`), Diamond Climb's tower (`Climb`) and game (`ClimbGame`), Chalkboard Count's classroom (`Classroom`) and game (`ChalkGame`), the gift settings (`GiftSettings`) and saving.
 - `src/client`: the mountain renderer (`MountainView`), the scenery mesh builder (`SceneryView`), the games menu (`LobbyView`), Diamond Climb's display and landings (`ClimbView`) and gift rides (`ClimbEffects`), Chalkboard Count's camera, chalk and display (`ChalkView`), first-person hands, effects, the on-screen display and the settings panel. `src/shared/ClimbPath.luau` lays out the climb's platforms for both, and `src/shared/ChalkBoard.luau` the board, the chalk digits, the gift amounts and the themes.
 
 Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o DiamondRushTikTok.rbxlx`), or use `rojo serve` with the Studio plugin while editing. `python3 tools/build_place.py --check` fails if the committed place is out of date; `--sourcemap` writes a `sourcemap.json` for luau-lsp.
@@ -317,10 +281,7 @@ Rebuild the place with `python3 tools/build_place.py` (or `rojo build -o Diamond
 The Blender scenery pack is generated by `art/scenery_assets.py` (no hand-made files): every mesh is closed, vertex-coloured, under Roblox's 20,000-triangle limit, and modelled at real size. Rebuild it with `pip install bpy` (Python 3.11), then `python art/scenery_assets.py`, or with `blender --background --python art/scenery_assets.py`. This writes `src/shared/ScenePackData.luau`, the `.fbx`, `art/manifest.json` and the preview renders. `ScenePackData` holds each mesh as quantised, delta-coded geometry with a colour palette, compressed with DEFLATE and stored as base64: about 290 KB for 72,000 triangles. `python3 tests/scenery.py --dump` writes the game's layout so the build also renders `art/previews/game_view.png`.
 
 In the game, the server's `ScenePack.luau` lays the pack out and sends the placements to each player. Each player's `SceneryView.luau` then unpacks the meshes (`Inflate.luau`, `MeshPack.luau`) and builds them with EditableMesh, one per mesh, shared by all its copies. An imported `.fbx` takes priority: `ScenePack` finds it and sizes each copy from a reference tree, so it works whatever units or up-axis the importer used. `tests/scene-pack.py` checks the unpacker against Python's zlib, and checks every mesh: closed, facing outward, and with the right sizes and colours. `tests/scenery.py` checks the valley when the meshes are built in game, when they are imported, and without them.
-- Bridge tests: `npm test` inside `bridge/`.
-- The control page (`bridge/control.html`) draws its 3D sakura shrine with three.js, which the bridge serves from `bridge/vendor/` (MIT licence in `vendor/three.LICENSE`) so it works offline. The stone, paint, tile, bark and blossom textures are painted from noise when the page opens, so there are no image files to ship.
-
-TikTok events come from the community [tiktok-live-connector](https://github.com/zerodytrash/TikTok-Live-Connector) package, which is not an official TikTok API.
+- The gift settings menu and its keys: `python3 tests/gift-menu.py [path/to/luau]`.
 
 ### How 250,000 rocks stay fast
 

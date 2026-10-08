@@ -30,5 +30,3 @@ desktop.ini
 *.pem
 *.key
 
-# Cached TikTok catalogue
-roblox-tiktok/bridge/gift-catalogue.json
