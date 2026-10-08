@@ -67,7 +67,7 @@ local Config = {
 	-- The published game: each streamer's connector sends their gifts to the
 	-- Diamond Rush relay (relay/worker.js on Cloudflare) under their game code,
 	-- and they type the code in the Y panel. bridge/cloud.mjs has the same address.
-	RelayUrl = "",
+	RelayUrl = "https://diamond-rush-relay.diamondbridgeconnector.workers.dev",
 	GameCodeMaxLength = 12,
 	-- Where streamers get the TikTok connector. Roblox does not allow links
 	-- that lead off Roblox inside the game, so name the place and put the
