@@ -140,6 +140,11 @@ function ChalkGame.start(options: Options): Game
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if humanoid == nil then return end
+		-- The writer is drawn bigger at the board (so they reach the number);
+		-- everyone else is their usual size.
+		local size = if writing(player) then ChalkBoard.WRITER_SCALE else 1
+		local model = character :: Model
+		if math.abs(model:GetScale() - size) > 1e-3 then model:ScaleTo(size) end
 		if writing(player) then
 			humanoid.WalkSpeed = 0
 			humanoid.UseJumpPower = false
@@ -233,11 +238,12 @@ function ChalkGame.start(options: Options): Game
 			carry = 0
 			return
 		end
+		-- Fast writing adds many numbers a frame (100,000 a second is ~1,700).
 		carry += dt * progress.speed
 		local whole = math.floor(carry)
 		if whole > 0 then
 			carry -= whole
-			add(math.min(whole, 5))
+			add(whole)
 		end
 	end)
 	-- Saves the count every few seconds while it changes.
@@ -277,7 +283,11 @@ function ChalkGame.start(options: Options): Game
 		-- A new character already moves the usual way; only the writer changes.
 		if not writing(player) then return end
 		local humanoid = character:WaitForChild("Humanoid", 10)
-		if humanoid and character.Parent ~= nil then applyMove(player) end
+		if humanoid and character.Parent ~= nil then
+			applyMove(player)
+			-- Scaled about their middle: back on the floor at the board.
+			character:PivotTo(ChalkBoard.standFrame())
+		end
 	end
 
 	-- The writer's game says they pressed (true) or let go (false).
@@ -289,7 +299,7 @@ function ChalkGame.start(options: Options): Game
 	-- Settings from the writer's card and the streamer panel. True if handled.
 	function self.setting(player: Player, action: string, value: any): boolean
 		if action == "setChalkSpeed" and type(value) == "number" and value == value then
-			progress.speed = math.clamp(math.floor(value * 2 + 0.5) / 2, ChalkBoard.SPEED.min, ChalkBoard.SPEED.max)
+			progress.speed = math.clamp(if value < 10 then math.floor(value * 2 + 0.5) / 2 else math.floor(value + 0.5), ChalkBoard.SPEED.min, ChalkBoard.SPEED.max)
 		elseif action == "setChalkTheme" and type(value) == "string" and ChalkBoard.THEMES[value] then
 			progress.theme = value
 			Classroom.setTheme(built, value)
