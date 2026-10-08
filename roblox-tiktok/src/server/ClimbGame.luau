@@ -92,6 +92,7 @@ export type Game = {
 	setStrength: (value: any) -> boolean,
 	restart: () -> (),
 	gift: (who: string, move: number, info: { [string]: any }) -> (number, number),
+	addWins: (amount: number) -> number,
 	removing: (player: Player) -> (),
 }
 
@@ -290,6 +291,15 @@ function ClimbGame.start(options: Options): Game
 		publish()
 		options.save()
 		return true
+	end
+
+	-- A gift that gives (or takes) wins: the climb's win count changes by
+	-- `amount`, never below 0. Returns the new count.
+	function self.addWins(amount: number): number
+		progress.wins = math.clamp(progress.wins + math.floor(amount), 0, 999999)
+		publish()
+		options.save()
+		return progress.wins
 	end
 
 	-- From the streamer panel: back to the bottom (wins and best stay).

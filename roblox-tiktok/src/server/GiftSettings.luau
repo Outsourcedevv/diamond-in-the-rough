@@ -4,6 +4,8 @@
 --   rough: rocks per gift in Diamond in the Rough (negative adds stone)
 --   climb: platforms per gift in Diamond Climb (negative goes down)
 --   chalk: numbers per gift in Chalkboard Count (negative counts down)
+--   wins:  wins per gift, added to (or, negative, taken from) the win
+--          counter of whichever game is being played
 --   key:   a keybind name ("K", "Shift+K"), or "" for none
 -- A missing or non-number amount means "the game's default" (worked out from
 -- the gift's coins). A gift that isn't in the built-in list is kept as one of
@@ -14,11 +16,12 @@ local GiftCatalogue = require(Shared:WaitForChild("GiftCatalogue"))
 
 local GiftSettings = {}
 
-export type Limits = { rough: number, climb: number, chalk: number }
+export type Limits = { rough: number, climb: number, chalk: number, wins: number }
 export type Store = {
 	giftRules: { [string]: any },
 	climbRules: { [string]: any },
 	chalkRules: { [string]: any },
+	winRules: { [string]: any },
 	giftBindings: { [string]: any },
 	customGifts: { [string]: number },
 }
@@ -77,6 +80,7 @@ function GiftSettings.apply(store: Store, value: any, limits: Limits): string?
 	store.giftRules[lower] = amount(value.rough, limits.rough)
 	store.climbRules[lower] = amount(value.climb, limits.climb)
 	store.chalkRules[lower] = amount(value.chalk, limits.chalk)
+	store.winRules[lower] = amount(value.wins, limits.wins)
 
 	-- One key per gift: the gift's old key goes, and the new key leaves any
 	-- other gift it was on.
@@ -107,6 +111,7 @@ function GiftSettings.remove(store: Store, gift: any)
 	store.giftRules[lower] = nil
 	store.climbRules[lower] = nil
 	store.chalkRules[lower] = nil
+	store.winRules[lower] = nil
 	for key, binding in store.giftBindings do
 		if type(binding) == "table" and type(binding.gift) == "string" and string.lower(binding.gift) == lower then
 			store.giftBindings[key] = nil

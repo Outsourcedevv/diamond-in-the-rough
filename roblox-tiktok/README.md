@@ -51,6 +51,7 @@ In the game, press **Y** and click **Open gift settings (full screen)**. About 1
 - **Diamond in the Rough:** rocks per gift (negative adds stone),
 - **Diamond Climb:** platforms per gift (negative sends the climber down),
 - **Chalkboard Count:** numbers per gift (negative counts down),
+- **Wins:** wins per gift, e.g. `1` or `-1` (or more), added to or taken from the win counter of whichever game is being played (never below 0),
 - **a keybind:** press **Set key**, then a key: letters like K, numbers, F1 to F8, the number pad, Insert, Home, End, Page Up/Down or Delete, on their own or with **Shift** or **Ctrl**, so there are hundreds to give out.
 
 Leave an amount empty to work it out from the gift's coins. **Save**, and **Test gift** to see it. Pressing a gift's key in the game sends that gift.
