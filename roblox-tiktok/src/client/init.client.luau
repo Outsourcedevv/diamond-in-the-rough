@@ -557,6 +557,20 @@ local function send(action: string, value: any)
 	Request:FireServer(action, value)
 end
 
+-- The full-screen gift settings: every gift, what it does in each game and
+-- its key (for TikFinity).
+local GiftMenu = require(script:WaitForChild("GiftMenu"))
+GiftMenu.start(send, State)
+panelLabel("GIFTS")
+local openGifts = panelButtons({
+	{ "Open gift settings (full screen)", function()
+		panel.Visible = false
+		GiftMenu.setOpen(true)
+	end },
+})
+openGifts[1].BackgroundColor3 = SELECTED
+openGifts[1].TextSize = 16
+
 panelLabel("WIN COUNTER TITLE")
 local titleBox = panelBox("", function(text)
 	send("setTitle", text)
@@ -761,17 +775,19 @@ bindingButtons = panelButtons({
 })
 local keyButton = bindingButtons[1]
 bindingButtons[2].BackgroundColor3 = SELECTED
-local freeKeys = {}
-for _, key in Keybinds.KEYS do table.insert(freeKeys, Keybinds.label(key)) end
-panelLabel("Free keys: " .. table.concat(freeKeys, " "))
+panelLabel("Free keys: B C F J K L M N Q R T U V X Z, 0 to 9, F1 to F8, the number pad, Insert, Home, End, Page Up/Down and Delete, also with Shift or Ctrl. The full-screen gift settings do this for every gift.")
 keyButton.Activated:Connect(function()
 	capturingKey = true
 	keyButton.Text = "Press a key..."
 end)
 UserInputService.InputBegan:Connect(function(input: InputObject)
 	if not capturingKey or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	-- Wait for the real key while Shift or Ctrl is held.
+	if string.find(input.KeyCode.Name, "Shift", 1, true) or string.find(input.KeyCode.Name, "Control", 1, true) then return end
 	capturingKey = false
-	local name = input.KeyCode.Name
+	local name = Keybinds.combo(input.KeyCode.Name,
+		UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl),
+		UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
 	if Keybinds.allowed(name) then
 		chosenKey = name
 		keyButton.Text = "Key: " .. Keybinds.label(name)
@@ -1345,6 +1361,11 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	if processed or input.KeyCode ~= Enum.KeyCode.Y or not isAdmin or not gui.Enabled then
 		return
 	end
+	-- Y also closes the gift settings.
+	if GiftMenu.isOpen() then
+		GiftMenu.setOpen(false)
+		return
+	end
 	panel.Visible = not panel.Visible
 	if panel.Visible then
 		refreshPanelFields()
@@ -1357,10 +1378,11 @@ RunService.RenderStepped:Connect(function()
 	if not gui.Enabled then
 		panel.Visible = false
 		settingsCard.Visible = false
+		GiftMenu.setOpen(false)
 		return
 	end
 	-- First person locks the mouse; free it while the panel or settings are open.
-	if panel.Visible or settingsOpen() then
+	if panel.Visible or settingsOpen() or GiftMenu.isOpen() then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		UserInputService.MouseIconEnabled = true
 	end
@@ -1549,7 +1571,7 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	local phase = attr("Phase", "Digging")
 	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
 		and player:GetAttribute("InGame") == true and not LobbyView.isOpen() and not HowToPlay.isOpen()
-		and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
+		and not panel.Visible and not settingsOpen() and not GiftMenu.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	aimDot.Visible = active
 	UserInputService.MouseIconEnabled = not active
@@ -1617,7 +1639,7 @@ local function digTarget(): number?
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	local target = aimTarget
-	local allowed = digging and not panel.Visible and not settingsOpen() and not HowToPlay.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
+	local allowed = digging and not panel.Visible and not settingsOpen() and not GiftMenu.isOpen() and not HowToPlay.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	local key = if allowed and target then view:keyForPart(target) else nil
 	if key == nil or root == nil or not root:IsA("BasePart") or (root.Position - (target :: BasePart).Position).Magnitude > 16 then
@@ -1651,11 +1673,20 @@ FirstPerson.onStrike(function()
 	end
 end)
 
--- Catalogue keybinds work in-game for the streamer, outside text entry and menus.
+-- The key held with Shift and/or Ctrl, as a binding name ("Shift+K").
+local function pressedCombo(input: InputObject): string
+	return Keybinds.combo(input.KeyCode.Name,
+		UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl),
+		UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
+end
+
+-- Gift keybinds work in-game for the streamer, outside text entry and menus:
+-- TikFinity presses the key when the gift arrives on the LIVE.
 UserInputService.InputBegan:Connect(function(input, processed)
-	if processed or not isAdmin or panel.Visible or UserInputService:GetFocusedTextBox() then return end
+	if processed or not isAdmin or panel.Visible or GiftMenu.isOpen() or UserInputService:GetFocusedTextBox() then return end
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
 	if not ok or type(bindings) ~= "table" then return end
-	local binding = bindings[input.KeyCode.Name]
-	if binding then send("testGift", { coins = binding.coins, count = 1, name = binding.gift }) end
+	local binding = bindings[pressedCombo(input)]
+	if binding then send("testGift", { coins = binding.coins, count = 1, name = binding.gift, keybind = true }) end
 end)

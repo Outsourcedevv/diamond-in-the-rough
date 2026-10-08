@@ -806,6 +806,156 @@ return Format
       </Item>
       <Item class="ModuleScript" referent="11">
         <Properties>
+          <string name="Name">GiftCatalogue</string>
+          <string name="Source"><![CDATA[--!strict
+-- TikTok LIVE gifts and their coin prices, for the full-screen gift settings
+-- (GiftMenu). TikTok changes its gifts and prices now and then, and some differ
+-- by country, so the streamer can add any gift that is missing (with its
+-- coins) from the menu; those are kept as the "CustomGifts" of their save.
+local GiftCatalogue = {}
+
+export type Gift = { name: string, coins: number }
+
+GiftCatalogue.GIFTS = {
+	-- 1 coin
+	{ name = "Rose", coins = 1 },
+	{ name = "TikTok", coins = 1 },
+	{ name = "GG", coins = 1 },
+	{ name = "Heart Me", coins = 1 },
+	{ name = "Ice Cream Cone", coins = 1 },
+	{ name = "Thumbs Up", coins = 1 },
+	{ name = "Heart", coins = 1 },
+	{ name = "Cake Slice", coins = 1 },
+	{ name = "Glow Stick", coins = 1 },
+	{ name = "Love you", coins = 1 },
+	{ name = "Love you so much", coins = 1 },
+	{ name = "Super GG", coins = 1 },
+	-- 5 to 49 coins
+	{ name = "Finger Heart", coins = 5 },
+	{ name = "Panda", coins = 5 },
+	{ name = "Tiny Diny", coins = 5 },
+	{ name = "Rosa", coins = 10 },
+	{ name = "Friendship Necklace", coins = 10 },
+	{ name = "Perfume", coins = 20 },
+	{ name = "Love Bang", coins = 25 },
+	{ name = "Doughnut", coins = 30 },
+	{ name = "Butterfly", coins = 88 },
+	-- around 100 coins
+	{ name = "Paper Crane", coins = 99 },
+	{ name = "Little Crown", coins = 99 },
+	{ name = "Cap", coins = 99 },
+	{ name = "Hat and Mustache", coins = 99 },
+	{ name = "Hand Hearts", coins = 100 },
+	{ name = "Confetti", coins = 100 },
+	{ name = "Mishka Bear", coins = 100 },
+	{ name = "Heart Eyes", coins = 100 },
+	{ name = "Marvelous Confetti", coins = 100 },
+	{ name = "Bouquet", coins = 100 },
+	{ name = "Heart Rain", coins = 149 },
+	{ name = "Sunglasses", coins = 199 },
+	{ name = "Party Popper", coins = 199 },
+	{ name = "Hearts", coins = 199 },
+	{ name = "Rose Hand", coins = 199 },
+	-- 299 to 999 coins
+	{ name = "Corgi", coins = 299 },
+	{ name = "Boxing Gloves", coins = 299 },
+	{ name = "Fruit Friends", coins = 299 },
+	{ name = "Rock Star", coins = 499 },
+	{ name = "Hands Up", coins = 499 },
+	{ name = "Money Rain", coins = 500 },
+	{ name = "Money Gun", coins = 500 },
+	{ name = "Gem Gun", coins = 500 },
+	{ name = "Swan", coins = 699 },
+	{ name = "Train", coins = 899 },
+	{ name = "Travel with You", coins = 999 },
+	{ name = "Lucky Airdrop Box", coins = 999 },
+	-- 1,000 coins and up
+	{ name = "Galaxy", coins = 1000 },
+	{ name = "Gold Mine", coins = 1000 },
+	{ name = "Glowing Jellyfish", coins = 1000 },
+	{ name = "Fireworks", coins = 1088 },
+	{ name = "Diamond Ring", coins = 1500 },
+	{ name = "Whale Diving", coins = 2150 },
+	{ name = "Animal Band", coins = 2500 },
+	{ name = "Motorcycle", coins = 2988 },
+	{ name = "Rhythmic Bear", coins = 2999 },
+	{ name = "Meteor Shower", coins = 3000 },
+	{ name = "Private Jet", coins = 4888 },
+	{ name = "Leon the Kitten", coins = 4888 },
+	{ name = "Unicorn Fantasy", coins = 5000 },
+	{ name = "Flying Jets", coins = 5000 },
+	{ name = "Sports Car", coins = 7000 },
+	{ name = "Interstellar", coins = 10000 },
+	{ name = "Sunset Speedway", coins = 10000 },
+	{ name = "Falcon", coins = 10999 },
+	{ name = "Rosa Nebula", coins = 15000 },
+	{ name = "Castle Fantasy", coins = 20000 },
+	{ name = "TikTok Shuttle", coins = 20000 },
+	{ name = "Dragon Flame", coins = 26999 },
+	{ name = "Lion", coins = 29999 },
+	{ name = "Leon and Lion", coins = 34000 },
+	{ name = "Thunder Falcon", coins = 39999 },
+	{ name = "Fire Phoenix", coins = 41999 },
+	{ name = "Pegasus", coins = 42999 },
+	{ name = "TikTok Universe", coins = 44999 },
+} :: { Gift }
+
+-- The built-in gifts plus the streamer's own (name -> coins), cheapest first,
+-- one per name (a custom gift with a built-in name sets its coins).
+function GiftCatalogue.all(custom: { [string]: number }?): { Gift }
+	local byName: { [string]: Gift } = {}
+	local list: { Gift } = {}
+	for _, gift in GiftCatalogue.GIFTS do
+		local copy = { name = gift.name, coins = gift.coins }
+		byName[string.lower(gift.name)] = copy
+		table.insert(list, copy)
+	end
+	local extra: { [string]: number } = custom or {}
+	for name, coins in extra do
+		if type(name) == "string" and name ~= "" and type(coins) == "number" then
+			local known = byName[string.lower(name)]
+			if known then
+				known.coins = coins
+			else
+				local gift = { name = name, coins = coins }
+				byName[string.lower(name)] = gift
+				table.insert(list, gift)
+			end
+		end
+	end
+	table.sort(list, function(a, b)
+		if a.coins ~= b.coins then return a.coins < b.coins end
+		return string.lower(a.name) < string.lower(b.name)
+	end)
+	return list
+end
+
+-- The gifts whose name contains `query` (any case; empty matches all).
+function GiftCatalogue.search(list: { Gift }, query: string): { Gift }
+	local needle = string.lower((string.gsub(query, "^%s*(.-)%s*$", "%1")))
+	if needle == "" then return list end
+	local found: { Gift } = {}
+	for _, gift in list do
+		if string.find(string.lower(gift.name), needle, 1, true) then table.insert(found, gift) end
+	end
+	return found
+end
+
+-- The built-in gift called `name` (any case), or nil.
+function GiftCatalogue.find(name: string): Gift?
+	local lower = string.lower(name)
+	for _, gift in GiftCatalogue.GIFTS do
+		if string.lower(gift.name) == lower then return gift end
+	end
+	return nil
+end
+
+return GiftCatalogue
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="12">
+        <Properties>
           <string name="Name">GiftTier</string>
           <string name="Source"><![CDATA[--!strict
 local GiftTier = {}
@@ -821,7 +971,7 @@ return GiftTier
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="12">
+      <Item class="ModuleScript" referent="13">
         <Properties>
           <string name="Name">Grid</string>
           <string name="Source"><![CDATA[--!strict
@@ -1502,7 +1652,7 @@ return Grid
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="13">
+      <Item class="ModuleScript" referent="14">
         <Properties>
           <string name="Name">HoldTimer</string>
           <string name="Source"><![CDATA[--!strict
@@ -1533,7 +1683,7 @@ return HoldTimer
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="14">
+      <Item class="ModuleScript" referent="15">
         <Properties>
           <string name="Name">Inflate</string>
           <string name="Source"><![CDATA[--!strict
@@ -1757,26 +1907,34 @@ return Inflate
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="15">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">Keybinds</string>
           <string name="Source"><![CDATA[--!strict
 -- Gift keybinds: keys the streamer can give a gift to, so pressing the key in
--- the game sends that gift (no TikTok or bridge needed). Set from the Y
--- panel's GIFT KEYBINDS or from the bridge's catalogue; the server publishes
--- them as the State attribute "GiftBindings" (JSON {KeyName: {gift, coins}}).
+-- the game sends that gift (no TikTok or connector needed). TikFinity can
+-- press the key when the gift arrives on the LIVE. Set from the gift settings
+-- (GiftMenu), the Y panel or the connector; the server publishes them as the
+-- State attribute "GiftBindings" (JSON {"Shift+K": {gift, coins}}).
 local Keybinds = {}
 
-Keybinds.MAX = 24 -- bindings kept at once
+Keybinds.MAX = 300 -- bindings kept at once
 
 -- Keys that can carry a gift. Movement (W A S D, Space), the game's own keys
 -- (E for prompts, G games, H how to play, P settings, Y the streamer panel)
--- and Roblox's zoom keys (I, O) are left out, so a binding never fights them.
+-- and Roblox's own keys (I and O zoom, F9 to F12) are left out, so a binding
+-- never fights them. Any of them can also be held with Shift or Ctrl (or both),
+-- which gives TikFinity hundreds of keys to press, one per gift.
 Keybinds.KEYS = {
 	"B", "C", "F", "J", "K", "L", "M", "N", "Q", "R", "T", "U", "V", "X", "Z",
 	"One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Zero",
-	"F6", "F7", "F8",
+	"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8",
+	"KeypadZero", "KeypadOne", "KeypadTwo", "KeypadThree", "KeypadFour",
+	"KeypadFive", "KeypadSix", "KeypadSeven", "KeypadEight", "KeypadNine",
+	"KeypadPlus", "KeypadMinus", "KeypadMultiply", "KeypadDivide", "KeypadPeriod",
+	"Insert", "Home", "End", "PageUp", "PageDown", "Delete",
 }
+Keybinds.MODIFIERS = { "Ctrl", "Shift" }
 local allowed: { [string]: boolean } = {}
 for _, key in Keybinds.KEYS do allowed[key] = true end
 
@@ -1784,15 +1942,40 @@ local DIGITS = {
 	One = "1", Two = "2", Three = "3", Four = "4", Five = "5",
 	Six = "6", Seven = "7", Eight = "8", Nine = "9", Zero = "0",
 }
+local KEYPAD = {
+	KeypadZero = "Num 0", KeypadOne = "Num 1", KeypadTwo = "Num 2", KeypadThree = "Num 3", KeypadFour = "Num 4",
+	KeypadFive = "Num 5", KeypadSix = "Num 6", KeypadSeven = "Num 7", KeypadEight = "Num 8", KeypadNine = "Num 9",
+	KeypadPlus = "Num +", KeypadMinus = "Num -", KeypadMultiply = "Num *", KeypadDivide = "Num /", KeypadPeriod = "Num .",
+	PageUp = "Page Up", PageDown = "Page Down",
+}
 
--- True for a KeyCode name (e.g. "K", "One", "F6") a gift can be bound to.
-function Keybinds.allowed(key: any): boolean
-	return type(key) == "string" and allowed[key] == true
+-- A binding's name from a key and the modifiers held: "K", "Shift+K",
+-- "Ctrl+Shift+K".
+function Keybinds.combo(key: string, ctrl: boolean?, shift: boolean?): string
+	return (if ctrl then "Ctrl+" else "") .. (if shift then "Shift+" else "") .. key
 end
 
--- How a key is written on screen: "1" for One, otherwise its name.
-function Keybinds.label(key: string): string
-	return DIGITS[key] or key
+-- The key and modifiers of a binding name, or nil if it isn't one.
+function Keybinds.split(name: string): (string?, boolean, boolean)
+	local ctrl, shift = false, false
+	local rest = name
+	if string.sub(rest, 1, 5) == "Ctrl+" then ctrl = true; rest = string.sub(rest, 6) end
+	if string.sub(rest, 1, 6) == "Shift+" then shift = true; rest = string.sub(rest, 7) end
+	if not allowed[rest] then return nil, false, false end
+	return rest, ctrl, shift
+end
+
+-- True for a binding name (e.g. "K", "One", "F6", "Shift+K") a gift can use.
+function Keybinds.allowed(key: any): boolean
+	if type(key) ~= "string" then return false end
+	return (Keybinds.split(key)) ~= nil
+end
+
+-- How a binding is written on screen: "1" for One, "Num 1", "Shift+K".
+function Keybinds.label(name: string): string
+	local key, ctrl, shift = Keybinds.split(name)
+	if key == nil then return name end
+	return (if ctrl then "Ctrl+" else "") .. (if shift then "Shift+" else "") .. (DIGITS[key] or KEYPAD[key] or key)
 end
 
 -- A binding as the server keeps it, or nil if it is not a valid one.
@@ -1808,7 +1991,7 @@ return Keybinds
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="16">
+      <Item class="ModuleScript" referent="17">
         <Properties>
           <string name="Name">MeshPack</string>
           <string name="Source"><![CDATA[--!strict
@@ -2016,7 +2199,7 @@ return MeshPack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">MountainCodec</string>
           <string name="Source"><![CDATA[--!strict
@@ -2139,7 +2322,7 @@ return MountainCodec
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="18">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">PartShapes</string>
           <string name="Source"><![CDATA[--!strict
@@ -2219,7 +2402,7 @@ return PartShapes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="19">
+      <Item class="ModuleScript" referent="20">
         <Properties>
           <string name="Name">RockStyle</string>
           <string name="Source"><![CDATA[--!strict
@@ -2396,7 +2579,7 @@ return RockStyle
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="20">
+      <Item class="ModuleScript" referent="21">
         <Properties>
           <string name="Name">ScenePackData</string>
           <string name="Source"><![CDATA[--!strict
@@ -4909,7 +5092,7 @@ H44kTFtpTKosYs80HUUjx6lJBM1IIhU0wjFDne44YDAzkYybTsIMTzUjZp3NIMZikzorJ1U5ftJ0mVVJ
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="21">
+      <Item class="ModuleScript" referent="22">
         <Properties>
           <string name="Name">SceneryThemes</string>
           <string name="Source"><![CDATA[--!strict
@@ -4953,7 +5136,7 @@ return SceneryThemes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="22">
+      <Item class="ModuleScript" referent="23">
         <Properties>
           <string name="Name">Skin</string>
           <string name="Source"><![CDATA[--!strict
@@ -4992,11 +5175,11 @@ return Skin
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="23">
+  <Item class="ServerScriptService" referent="24">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="24">
+    <Item class="Script" referent="25">
       <Properties>
         <string name="Name">DiamondRushServer</string>
         <token name="RunContext">0</token>
@@ -5026,6 +5209,7 @@ local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
+local GiftSettings = require(script.GiftSettings)
 local Store = require(script.Store)
 local ClimbGame = require(script.ClimbGame)
 local ChalkGame = require(script.ChalkGame)
@@ -5070,6 +5254,9 @@ local settings = {
 	climbRules = table.clone(Config.ClimbGiftRules) :: { [string]: number },
 	chalkRules = table.clone(Config.ChalkGiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
+	-- Gifts the streamer added in the gift settings (name -> coins), for gifts
+	-- missing from the built-in list (see GiftCatalogue).
+	customGifts = {} :: { [string]: number },
 	-- Players who hid the GAMES tab and SETTINGS button (by user id).
 	hiddenButtons = {} :: { [string]: boolean },
 	-- Players who hid Diamond Climb's movement card or Chalkboard Count's
@@ -5127,6 +5314,7 @@ if saved then
 	settings.giftRules = cleanRules(settings.giftRules, 1500000)
 	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
 	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
+	settings.customGifts = GiftSettings.cleanCustom(settings.customGifts)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
 		settings.leaderboards = { helpers = {}, griefers = {} }
@@ -5158,6 +5346,7 @@ local function publishSettings()
 	State:SetAttribute("ClimbRules", game:GetService("HttpService"):JSONEncode(settings.climbRules))
 	State:SetAttribute("ChalkRules", game:GetService("HttpService"):JSONEncode(settings.chalkRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
+	State:SetAttribute("CustomGifts", game:GetService("HttpService"):JSONEncode(settings.customGifts))
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
@@ -6227,11 +6416,11 @@ filterText = filtered
 
 -- Rebuild test presets: blocks added -> the coins that pick its effect tier.
 local REBUILD_TEST_COINS: { [number]: number } = { [100] = 1, [1000] = 10, [10000] = 100, [50000] = 500, [100000] = 1000, [1500000] = 10000 }
-local function testGift(coins: number, count: number, name: string, rocks: number?)
+local function testGift(coins: number, count: number, name: string, rocks: number?, from: string?)
 	onTikTok({
 		id = "test-" .. tostring(os.clock()),
 		type = "gift",
-		name = "Test",
+		name = from or "Test",
 		gift = name,
 		rocks = rocks,
 		coins = coins,
@@ -6527,13 +6716,25 @@ local function applySetting(player: Player, action: string, value: any)
 			end
 		end
 		settings.giftBindings[key] = { gift = binding.gift, coins = binding.coins, game = true }
+	elseif action == "setGiftSettings" and type(value) == "table" then
+		-- The full-screen gift settings: one gift's rules for each game and its key.
+		local problem = GiftSettings.apply(settings, value, { rough = 1500000, climb = ClimbPath.TOP, chalk = ChalkBoard.GOAL.max })
+		if problem then
+			notice(player, problem)
+			return
+		end
+		notice(player, "Saved " .. string.sub(tostring(value.gift), 1, 40) .. ".")
+	elseif action == "removeCustomGift" and type(value) == "string" then
+		GiftSettings.remove(settings, value)
 	elseif action == "removeGiftBinding" and type(value) == "string" then
 		if settings.giftBindings[value] == nil then return end
 		settings.giftBindings[value] = nil
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
 		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1
-		testGift(coins, count, if type(value.name) == "string" then string.sub(value.name, 1, 40) else "Test gift")
+		-- A gift keybind (pressed by TikFinity when the gift arrives) is a real
+		-- gift from the LIVE, so the feed says so rather than "Test".
+		testGift(coins, count, if type(value.name) == "string" then string.sub(value.name, 1, 40) else "Test gift", nil, if value.keybind == true then "A viewer" else nil)
 		return
 	else
 		return
@@ -6779,7 +6980,7 @@ State:SetAttribute("TikTok", "Starting…")
 newRound()
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="25">
+      <Item class="ModuleScript" referent="26">
         <Properties>
           <string name="Name">ChalkGame</string>
           <string name="Source"><![CDATA[--!strict
@@ -7175,7 +7376,7 @@ return ChalkGame
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="26">
+      <Item class="ModuleScript" referent="27">
         <Properties>
           <string name="Name">Classroom</string>
           <string name="Source"><![CDATA[--!strict
@@ -7438,7 +7639,7 @@ return Classroom
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="27">
+      <Item class="ModuleScript" referent="28">
         <Properties>
           <string name="Name">Climb</string>
           <string name="Source"><![CDATA[--!strict
@@ -7596,7 +7797,7 @@ return Climb
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="28">
+      <Item class="ModuleScript" referent="29">
         <Properties>
           <string name="Name">ClimbGame</string>
           <string name="Source"><![CDATA[--!strict
@@ -7944,7 +8145,7 @@ return ClimbGame
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="29">
+      <Item class="ModuleScript" referent="30">
         <Properties>
           <string name="Name">Desert</string>
           <string name="Source"><![CDATA[--!strict
@@ -8327,7 +8528,7 @@ return Desert
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="30">
+      <Item class="ModuleScript" referent="31">
         <Properties>
           <string name="Name">DiamondBird</string>
           <string name="Source"><![CDATA[--!strict
@@ -8589,7 +8790,7 @@ return DiamondBird
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="31">
+      <Item class="ModuleScript" referent="32">
         <Properties>
           <string name="Name">Farm</string>
           <string name="Source"><![CDATA[--!strict
@@ -9107,7 +9308,134 @@ return Farm
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="32">
+      <Item class="ModuleScript" referent="33">
+        <Properties>
+          <string name="Name">GiftSettings</string>
+          <string name="Source"><![CDATA[--!strict
+-- One gift's settings from the full-screen gift settings (GiftMenu): what it
+-- does in each game and the key that sends it (for TikFinity), in one go.
+--   rough: rocks per gift in Diamond in the Rough (negative adds stone)
+--   climb: platforms per gift in Diamond Climb (negative goes down)
+--   chalk: numbers per gift in Chalkboard Count (negative counts down)
+--   key:   a keybind name ("K", "Shift+K"), or "" for none
+-- A missing or non-number amount means "the game's default" (worked out from
+-- the gift's coins). A gift that isn't in the built-in list is kept as one of
+-- the streamer's own gifts, with its coins.
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("DiamondRush")
+local Keybinds = require(Shared:WaitForChild("Keybinds"))
+local GiftCatalogue = require(Shared:WaitForChild("GiftCatalogue"))
+
+local GiftSettings = {}
+
+export type Limits = { rough: number, climb: number, chalk: number }
+export type Store = {
+	giftRules: { [string]: any },
+	climbRules: { [string]: any },
+	chalkRules: { [string]: any },
+	giftBindings: { [string]: any },
+	customGifts: { [string]: number },
+}
+
+GiftSettings.MAX_CUSTOM = 200
+
+local function amount(value: any, limit: number): number?
+	if type(value) ~= "number" or value ~= value then return nil end
+	return math.clamp(math.floor(value), -limit, limit)
+end
+
+-- Applies `value` ({ gift, coins, rough, climb, chalk, key }) to the store.
+-- Returns nil when done, or a short reason it couldn't be.
+function GiftSettings.apply(store: Store, value: any, limits: Limits): string?
+	if type(value) ~= "table" or type(value.gift) ~= "string" then return "Pick a gift." end
+	local name = (string.gsub(string.sub(value.gift, 1, 40), "^%s*(.-)%s*$", "%1"))
+	if name == "" then return "Type the gift's name." end
+	local lower = string.lower(name)
+	local known = GiftCatalogue.find(name)
+	local coins = if type(value.coins) == "number" and value.coins == value.coins then math.clamp(math.floor(value.coins), 1, 100000) else nil
+	if known == nil then
+		-- One of the streamer's own gifts: it needs its coins.
+		local existing: string? = nil
+		local oldCoins: number? = nil
+		for other, otherCoins in store.customGifts do
+			if string.lower(other) == lower then existing, oldCoins = other, otherCoins end
+		end
+		if coins == nil and oldCoins == nil then return "Type how many coins the gift costs." end
+		if existing == nil then
+			local count = 0
+			for _ in store.customGifts do count += 1 end
+			if count >= GiftSettings.MAX_CUSTOM then return string.format("You can add up to %d gifts of your own.", GiftSettings.MAX_CUSTOM) end
+		elseif existing ~= name then
+			store.customGifts[existing] = nil
+		end
+		store.customGifts[name] = coins or oldCoins :: number
+	end
+	local key = value.key
+	if type(key) == "string" and key ~= "" and not Keybinds.allowed(key) then
+		return Keybinds.label(key) .. " is used by the game. Pick another key."
+	end
+
+	store.giftRules[lower] = amount(value.rough, limits.rough)
+	store.climbRules[lower] = amount(value.climb, limits.climb)
+	store.chalkRules[lower] = amount(value.chalk, limits.chalk)
+
+	-- One key per gift: the gift's old key goes, and the new key leaves any
+	-- other gift it was on.
+	for other, binding in store.giftBindings do
+		if type(binding) == "table" and type(binding.gift) == "string" and string.lower(binding.gift) == lower then
+			store.giftBindings[other] = nil
+		end
+	end
+	if type(key) == "string" and key ~= "" then
+		local count = 0
+		for _ in store.giftBindings do count += 1 end
+		if store.giftBindings[key] == nil and count >= Keybinds.MAX then
+			return string.format("You can keep up to %d keybinds. Remove one first.", Keybinds.MAX)
+		end
+		local giftCoins = coins or (if known then known.coins else nil) or store.customGifts[name] or 1
+		store.giftBindings[key] = { gift = if known then known.name else name, coins = giftCoins, game = true }
+	end
+	return nil
+end
+
+-- Removes one of the streamer's own gifts, with its rules and key.
+function GiftSettings.remove(store: Store, gift: any)
+	if type(gift) ~= "string" then return end
+	local lower = string.lower(gift)
+	for name in store.customGifts do
+		if string.lower(name) == lower then store.customGifts[name] = nil end
+	end
+	store.giftRules[lower] = nil
+	store.climbRules[lower] = nil
+	store.chalkRules[lower] = nil
+	for key, binding in store.giftBindings do
+		if type(binding) == "table" and type(binding.gift) == "string" and string.lower(binding.gift) == lower then
+			store.giftBindings[key] = nil
+		end
+	end
+end
+
+-- A saved list of the streamer's own gifts, cleaned up.
+function GiftSettings.cleanCustom(raw: any): { [string]: number }
+	local out: { [string]: number } = {}
+	if type(raw) ~= "table" then return out end
+	local count = 0
+	for name, coins in raw do
+		if type(name) == "string" and type(coins) == "number" and coins == coins and count < GiftSettings.MAX_CUSTOM then
+			local clean = (string.gsub(string.sub(name, 1, 40), "^%s*(.-)%s*$", "%1"))
+			if clean ~= "" then
+				out[clean] = math.clamp(math.floor(coins), 1, 100000)
+				count += 1
+			end
+		end
+	end
+	return out
+end
+
+return GiftSettings
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="34">
         <Properties>
           <string name="Name">Haunted</string>
           <string name="Source"><![CDATA[--!strict
@@ -9550,7 +9878,7 @@ return Haunted
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="33">
+      <Item class="ModuleScript" referent="35">
         <Properties>
           <string name="Name">Leaderboards</string>
           <string name="Source"><![CDATA[--!strict
@@ -9883,7 +10211,7 @@ return Leaderboards
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="34">
+      <Item class="ModuleScript" referent="36">
         <Properties>
           <string name="Name">Lobby</string>
           <string name="Source"><![CDATA[--!strict
@@ -10192,7 +10520,7 @@ return Lobby
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="35">
+      <Item class="ModuleScript" referent="37">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
@@ -10512,7 +10840,7 @@ return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="36">
+      <Item class="ModuleScript" referent="38">
         <Properties>
           <string name="Name">Sakura</string>
           <string name="Source"><![CDATA[--!strict
@@ -10902,7 +11230,7 @@ return Sakura
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="37">
+      <Item class="ModuleScript" referent="39">
         <Properties>
           <string name="Name">ScenePack</string>
           <string name="Source"><![CDATA[--!strict
@@ -11056,7 +11384,7 @@ return ScenePack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="38">
+      <Item class="ModuleScript" referent="40">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -11990,7 +12318,7 @@ return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="39">
+      <Item class="ModuleScript" referent="41">
         <Properties>
           <string name="Name">Statue</string>
           <string name="Source"><![CDATA[--!strict
@@ -12123,7 +12451,7 @@ return Statue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="40">
+      <Item class="ModuleScript" referent="42">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -12223,7 +12551,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="41">
+      <Item class="ModuleScript" referent="43">
         <Properties>
           <string name="Name">TikTokFeed</string>
           <string name="Source"><![CDATA[--!strict
@@ -12415,7 +12743,7 @@ return TikTokFeed
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="42">
+      <Item class="ModuleScript" referent="44">
         <Properties>
           <string name="Name">Watchtower</string>
           <string name="Source"><![CDATA[--!strict
@@ -12613,15 +12941,15 @@ return Watchtower
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="43">
+  <Item class="StarterPlayer" referent="45">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="44">
+    <Item class="StarterPlayerScripts" referent="46">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="45">
+      <Item class="LocalScript" referent="47">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -13183,6 +13511,20 @@ local function send(action: string, value: any)
 	Request:FireServer(action, value)
 end
 
+-- The full-screen gift settings: every gift, what it does in each game and
+-- its key (for TikFinity).
+local GiftMenu = require(script:WaitForChild("GiftMenu"))
+GiftMenu.start(send, State)
+panelLabel("GIFTS")
+local openGifts = panelButtons({
+	{ "Open gift settings (full screen)", function()
+		panel.Visible = false
+		GiftMenu.setOpen(true)
+	end },
+})
+openGifts[1].BackgroundColor3 = SELECTED
+openGifts[1].TextSize = 16
+
 panelLabel("WIN COUNTER TITLE")
 local titleBox = panelBox("", function(text)
 	send("setTitle", text)
@@ -13387,17 +13729,19 @@ bindingButtons = panelButtons({
 })
 local keyButton = bindingButtons[1]
 bindingButtons[2].BackgroundColor3 = SELECTED
-local freeKeys = {}
-for _, key in Keybinds.KEYS do table.insert(freeKeys, Keybinds.label(key)) end
-panelLabel("Free keys: " .. table.concat(freeKeys, " "))
+panelLabel("Free keys: B C F J K L M N Q R T U V X Z, 0 to 9, F1 to F8, the number pad, Insert, Home, End, Page Up/Down and Delete, also with Shift or Ctrl. The full-screen gift settings do this for every gift.")
 keyButton.Activated:Connect(function()
 	capturingKey = true
 	keyButton.Text = "Press a key..."
 end)
 UserInputService.InputBegan:Connect(function(input: InputObject)
 	if not capturingKey or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	-- Wait for the real key while Shift or Ctrl is held.
+	if string.find(input.KeyCode.Name, "Shift", 1, true) or string.find(input.KeyCode.Name, "Control", 1, true) then return end
 	capturingKey = false
-	local name = input.KeyCode.Name
+	local name = Keybinds.combo(input.KeyCode.Name,
+		UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl),
+		UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
 	if Keybinds.allowed(name) then
 		chosenKey = name
 		keyButton.Text = "Key: " .. Keybinds.label(name)
@@ -13971,6 +14315,11 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	if processed or input.KeyCode ~= Enum.KeyCode.Y or not isAdmin or not gui.Enabled then
 		return
 	end
+	-- Y also closes the gift settings.
+	if GiftMenu.isOpen() then
+		GiftMenu.setOpen(false)
+		return
+	end
 	panel.Visible = not panel.Visible
 	if panel.Visible then
 		refreshPanelFields()
@@ -13983,10 +14332,11 @@ RunService.RenderStepped:Connect(function()
 	if not gui.Enabled then
 		panel.Visible = false
 		settingsCard.Visible = false
+		GiftMenu.setOpen(false)
 		return
 	end
 	-- First person locks the mouse; free it while the panel or settings are open.
-	if panel.Visible or settingsOpen() then
+	if panel.Visible or settingsOpen() or GiftMenu.isOpen() then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		UserInputService.MouseIconEnabled = true
 	end
@@ -14175,7 +14525,7 @@ RunService:BindToRenderStep("DiamondRushAim", Enum.RenderPriority.Camera.Value +
 	local phase = attr("Phase", "Digging")
 	local active = camera ~= nil and humanoid ~= nil and humanoid.Health > 0
 		and player:GetAttribute("InGame") == true and not LobbyView.isOpen() and not HowToPlay.isOpen()
-		and not panel.Visible and not settingsOpen() and phase ~= "Won" and phase ~= "Rebuilding"
+		and not panel.Visible and not settingsOpen() and not GiftMenu.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	aimDot.Visible = active
 	UserInputService.MouseIconEnabled = not active
@@ -14243,7 +14593,7 @@ local function digTarget(): number?
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	local target = aimTarget
-	local allowed = digging and not panel.Visible and not settingsOpen() and not HowToPlay.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
+	local allowed = digging and not panel.Visible and not settingsOpen() and not GiftMenu.isOpen() and not HowToPlay.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	local key = if allowed and target then view:keyForPart(target) else nil
 	if key == nil or root == nil or not root:IsA("BasePart") or (root.Position - (target :: BasePart).Position).Magnitude > 16 then
@@ -14277,17 +14627,26 @@ FirstPerson.onStrike(function()
 	end
 end)
 
--- Catalogue keybinds work in-game for the streamer, outside text entry and menus.
+-- The key held with Shift and/or Ctrl, as a binding name ("Shift+K").
+local function pressedCombo(input: InputObject): string
+	return Keybinds.combo(input.KeyCode.Name,
+		UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl),
+		UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
+end
+
+-- Gift keybinds work in-game for the streamer, outside text entry and menus:
+-- TikFinity presses the key when the gift arrives on the LIVE.
 UserInputService.InputBegan:Connect(function(input, processed)
-	if processed or not isAdmin or panel.Visible or UserInputService:GetFocusedTextBox() then return end
+	if processed or not isAdmin or panel.Visible or GiftMenu.isOpen() or UserInputService:GetFocusedTextBox() then return end
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
 	if not ok or type(bindings) ~= "table" then return end
-	local binding = bindings[input.KeyCode.Name]
-	if binding then send("testGift", { coins = binding.coins, count = 1, name = binding.gift }) end
+	local binding = bindings[pressedCombo(input)]
+	if binding then send("testGift", { coins = binding.coins, count = 1, name = binding.gift, keybind = true }) end
 end)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="46">
+        <Item class="ModuleScript" referent="48">
           <Properties>
             <string name="Name">BirdView</string>
             <string name="Source"><![CDATA[--!strict
@@ -14434,7 +14793,7 @@ return BirdView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="47">
+        <Item class="ModuleScript" referent="49">
           <Properties>
             <string name="Name">CameraShake</string>
             <string name="Source"><![CDATA[--!strict
@@ -14476,7 +14835,7 @@ return CameraShake
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="48">
+        <Item class="ModuleScript" referent="50">
           <Properties>
             <string name="Name">ChalkEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -15153,7 +15512,7 @@ return ChalkEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="49">
+        <Item class="ModuleScript" referent="51">
           <Properties>
             <string name="Name">ChalkView</string>
             <string name="Source"><![CDATA[--!strict
@@ -15914,7 +16273,7 @@ return ChalkView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="50">
+        <Item class="ModuleScript" referent="52">
           <Properties>
             <string name="Name">ClimbEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -17320,7 +17679,7 @@ return ClimbEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="51">
+        <Item class="ModuleScript" referent="53">
           <Properties>
             <string name="Name">ClimbView</string>
             <string name="Source"><![CDATA[--!strict
@@ -18081,7 +18440,7 @@ return ClimbView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="52">
+        <Item class="ModuleScript" referent="54">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -18568,7 +18927,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="53">
+        <Item class="ModuleScript" referent="55">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -19847,7 +20206,492 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="54">
+        <Item class="ModuleScript" referent="56">
+          <Properties>
+            <string name="Name">GiftMenu</string>
+            <string name="Source"><![CDATA[--!strict
+-- The full-screen gift settings (streamer only): every TikTok gift with a
+-- search bar; pick one to set what it does in each game and the key that
+-- sends it. TikFinity can press that key whenever the gift arrives on the
+-- LIVE, so the game reacts to real gifts without any connector.
+-- GiftMenu.start(send, state, notice) builds it; open it with GiftMenu.setOpen.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
+local GiftCatalogue = require(Shared:WaitForChild("GiftCatalogue"))
+local Keybinds = require(Shared:WaitForChild("Keybinds"))
+
+local GiftMenu = {}
+
+type Gift = { name: string, coins: number }
+
+local WHITE = Color3.fromRGB(255, 255, 255)
+local GOLD = Color3.fromRGB(246, 200, 92)
+local MUTED = Color3.fromRGB(168, 174, 190)
+local BACK = Color3.fromRGB(12, 14, 20)
+local CARD = Color3.fromRGB(24, 27, 38)
+local ROW = Color3.fromRGB(32, 36, 50)
+local BUTTON = Color3.fromRGB(46, 50, 68)
+local SELECTED = Color3.fromRGB(64, 128, 236)
+local DANGER = Color3.fromRGB(176, 64, 72)
+local FONT = Enum.Font.GothamBold
+local FONT_MEDIUM = Enum.Font.GothamMedium
+local FONT_HEAVY = Enum.Font.GothamBlack
+
+local open = false
+local onOpenChanged: { (boolean) -> () } = {}
+
+function GiftMenu.isOpen(): boolean
+	return open
+end
+
+-- What a rule shows in the list: "+5", "-20", or "auto" (from the coins).
+function GiftMenu.ruleText(value: number?): string
+	if value == nil then return "auto" end
+	return if value > 0 then "+" .. tostring(value) else tostring(value)
+end
+
+-- A typed amount: a whole number (negative allowed), or nil for "auto".
+function GiftMenu.parseAmount(text: string): number?
+	local clean = string.gsub(text, "[%s,]", "")
+	if clean == "" then return nil end
+	local number = tonumber(clean)
+	if number == nil or number ~= number then return nil end
+	return math.floor(number)
+end
+
+local function make(className: string, properties: { [string]: any }, parent: Instance?): any
+	local instance = Instance.new(className)
+	for key, value in properties do
+		(instance :: any)[key] = value
+	end
+	if parent then instance.Parent = parent end
+	return instance
+end
+
+local function rounded(parent: Instance, radius: number)
+	make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+end
+
+local function label(parent: Instance, text: string, size: number, colour: Color3, font: Enum.Font?, height: number?): TextLabel
+	return make("TextLabel", {
+		Size = UDim2.new(1, 0, 0, height or size + 6),
+		BackgroundTransparency = 1,
+		Font = font or FONT_MEDIUM,
+		TextSize = size,
+		TextColor3 = colour,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+		Text = text,
+	}, parent)
+end
+
+local function box(parent: Instance, placeholder: string): TextBox
+	local input = make("TextBox", {
+		Size = UDim2.new(1, 0, 0, 38),
+		BackgroundColor3 = ROW,
+		Font = FONT_MEDIUM,
+		TextSize = 17,
+		TextColor3 = WHITE,
+		PlaceholderColor3 = Color3.fromRGB(120, 126, 142),
+		PlaceholderText = placeholder,
+		ClearTextOnFocus = false,
+		Text = "",
+	}, parent)
+	rounded(input, 8)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, input)
+	return input
+end
+
+local function button(parent: Instance, text: string, colour: Color3?): TextButton
+	local b = make("TextButton", {
+		Size = UDim2.new(0, 150, 0, 38),
+		BackgroundColor3 = colour or BUTTON,
+		Font = FONT,
+		TextSize = 15,
+		TextColor3 = WHITE,
+		Text = text,
+		AutoButtonColor = true,
+	}, parent)
+	rounded(b, 8)
+	return b
+end
+
+function GiftMenu.setOpen(value: boolean)
+	if value == open then return end
+	open = value
+	for _, listener in onOpenChanged do task.spawn(listener, value) end
+end
+
+-- `send(action, value)` asks the server; `state` holds the published settings.
+function GiftMenu.start(send: (string, any) -> (), state: Instance)
+	local player = Players.LocalPlayer
+	local function decode(name: string): { [string]: any }
+		local ok, data = pcall(HttpService.JSONDecode, HttpService, (state:GetAttribute(name) :: any) or "{}")
+		return if ok and type(data) == "table" then data else {}
+	end
+
+	local gui = make("ScreenGui", {
+		Name = "GiftSettings",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 40, -- above every other card and menu
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Enabled = false,
+	}, player:WaitForChild("PlayerGui"))
+	-- A full-screen button underneath, so clicks never fall through to the game.
+	local screen = make("TextButton", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = BACK,
+		BackgroundTransparency = 0.04,
+		AutoButtonColor = false,
+		Text = "",
+		Modal = true,
+	}, gui)
+	local page = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(1, -48, 1, -48),
+		BackgroundTransparency = 1,
+	}, screen)
+	make("UISizeConstraint", { MaxSize = Vector2.new(1400, 900) }, page)
+
+	-- Header: title, how to use it with TikFinity, close.
+	local header = make("Frame", { Size = UDim2.new(1, 0, 0, 86), BackgroundTransparency = 1 }, page)
+	local title = label(header, "GIFT SETTINGS", 30, GOLD, FONT_HEAVY, 36)
+	title.Size = UDim2.new(1, -170, 0, 36)
+	local help = label(header, "Pick a gift to set what it does in each game. Give it a key, and in TikFinity add an action that presses that key when the gift arrives: keep the Roblox window focused while you stream.", 14, MUTED, FONT_MEDIUM, 44)
+	help.Position = UDim2.fromOffset(0, 40)
+	help.Size = UDim2.new(1, -170, 0, 44)
+	local close = button(header, "Close", DANGER)
+	close.AnchorPoint = Vector2.new(1, 0)
+	close.Position = UDim2.new(1, 0, 0, 0)
+	close.Activated:Connect(function() GiftMenu.setOpen(false) end)
+
+	-- Left: search and the gift list.
+	local left = make("Frame", {
+		Position = UDim2.fromOffset(0, 96),
+		Size = UDim2.new(0.56, -10, 1, -96),
+		BackgroundColor3 = CARD,
+	}, page)
+	rounded(left, 12)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12) }, left)
+	local search = box(left, "Search gifts, e.g. Rose, Galaxy, Lion…")
+	search.Size = UDim2.new(1, 0, 0, 44)
+	search.TextSize = 18
+	local count = label(left, "", 13, MUTED, FONT_MEDIUM, 18)
+	count.Position = UDim2.fromOffset(2, 50)
+	local list = make("ScrollingFrame", {
+		Position = UDim2.fromOffset(0, 72),
+		Size = UDim2.new(1, 0, 1, -72),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		CanvasSize = UDim2.new(),
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 10,
+		ScrollBarImageColor3 = MUTED,
+		VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+	}, left)
+	local listLayout = make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }, list)
+	listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		list.CanvasSize = UDim2.fromOffset(0, listLayout.AbsoluteContentSize.Y + 6)
+	end)
+
+	-- Right: the chosen gift's settings.
+	local right = make("ScrollingFrame", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 96),
+		Size = UDim2.new(0.44, -10, 1, -96),
+		BackgroundColor3 = CARD,
+		BorderSizePixel = 0,
+		CanvasSize = UDim2.new(),
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 10,
+		ScrollBarImageColor3 = MUTED,
+		VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+	}, page)
+	rounded(right, 12)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 14), PaddingBottom = UDim.new(0, 16) }, right)
+	local rightLayout = make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8) }, right)
+	rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		right.CanvasSize = UDim2.fromOffset(0, rightLayout.AbsoluteContentSize.Y + 30)
+	end)
+	local order = 0
+	local function add<T>(instance: T): T
+		order += 1;
+		(instance :: any).LayoutOrder = order
+		return instance
+	end
+	local giftName = add(label(right, "Pick a gift", 26, WHITE, FONT_HEAVY, 32))
+	local giftCoins = add(label(right, "", 15, MUTED, FONT_MEDIUM, 20))
+	local coinsBox = add(box(right, "Coins per gift (for a gift you add)"))
+	local function section(heading: string, hint: string, placeholder: string): TextBox
+		add(label(right, heading, 15, GOLD, FONT, 20))
+		add(label(right, hint, 13, MUTED, FONT_MEDIUM, 34))
+		return add(box(right, placeholder))
+	end
+	local roughBox = section("DIAMOND IN THE ROUGH: rocks per gift", "Positive breaks that many rocks off the mountain; negative adds stone. Empty: worked out from the coins.", "auto (from the coins)")
+	local climbBox = section("DIAMOND CLIMB: platforms per gift", "Positive sends the climber up; negative sends them down. Empty: worked out from the coins.", "auto (from the coins)")
+	local chalkBox = section("CHALKBOARD COUNT: numbers per gift", "Positive counts up; negative counts down. Empty: worked out from the coins.", "auto (from the coins)")
+	add(label(right, "KEYBIND (for TikFinity)", 15, GOLD, FONT, 20))
+	add(label(right, "Press the button, then the key. Shift or Ctrl with a key works too. Pressing it in the game sends this gift.", 13, MUTED, FONT_MEDIUM, 34))
+	local keyRow = add(make("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1 }, right))
+	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8) }, keyRow)
+	local keyButton = button(keyRow, "Set key")
+	keyButton.Size = UDim2.new(0.6, -4, 1, 0)
+	local clearKey = button(keyRow, "No key")
+	clearKey.Size = UDim2.new(0.4, -4, 1, 0)
+	local actions = add(make("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1 }, right))
+	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8) }, actions)
+	local save = button(actions, "Save", SELECTED)
+	save.Size = UDim2.new(0.4, -6, 1, 0)
+	save.TextSize = 17
+	local test = button(actions, "Test gift")
+	test.Size = UDim2.new(0.3, -6, 1, 0)
+	local reset = button(actions, "Reset")
+	reset.Size = UDim2.new(0.3, -6, 1, 0)
+	local removeCustom = add(button(right, "Remove this gift", DANGER))
+	removeCustom.Size = UDim2.new(1, 0, 0, 34)
+	local status = add(label(right, "", 14, GOLD, FONT_MEDIUM, 22))
+
+	-- The chosen gift and its key (while editing).
+	local chosen: Gift? = nil
+	local chosenCustom = false
+	local chosenKey = ""
+	local capturing = false
+
+	local function rules()
+		return decode("GiftRules"), decode("ClimbRules"), decode("ChalkRules"), decode("GiftBindings"), decode("CustomGifts")
+	end
+	local function keyFor(bindings: { [string]: any }, name: string): string
+		local lower = string.lower(name)
+		for key, binding in bindings do
+			if type(binding) == "table" and type(binding.gift) == "string" and string.lower(binding.gift) == lower then return key end
+		end
+		return ""
+	end
+	local function showKey()
+		keyButton.Text = if capturing then "Press a key…" elseif chosenKey ~= "" then "Key: " .. Keybinds.label(chosenKey) else "Set key"
+		keyButton.BackgroundColor3 = if capturing then SELECTED else BUTTON
+	end
+
+	local function choose(gift: Gift?, custom: boolean)
+		chosen = gift
+		chosenCustom = custom
+		capturing = false
+		status.Text = ""
+		local rough, climb, chalk, bindings = rules()
+		if gift == nil then
+			giftName.Text = "Pick a gift"
+			giftCoins.Text = "Choose one from the list, or search for a gift that's missing to add it."
+			coinsBox.Visible = false
+			removeCustom.Visible = false
+			for _, input in { roughBox, climbBox, chalkBox } do input.Text = "" end
+			chosenKey = ""
+			showKey()
+			return
+		end
+		local lower = string.lower(gift.name)
+		giftName.Text = gift.name
+		giftCoins.Text = string.format("%s coin%s", tostring(gift.coins), if gift.coins == 1 then "" else "s")
+		coinsBox.Visible = custom
+		coinsBox.Text = tostring(gift.coins)
+		removeCustom.Visible = custom and GiftCatalogue.find(gift.name) == nil
+		roughBox.Text = if type(rough[lower]) == "number" then tostring(rough[lower]) else ""
+		climbBox.Text = if type(climb[lower]) == "number" then tostring(climb[lower]) else ""
+		chalkBox.Text = if type(chalk[lower]) == "number" then tostring(chalk[lower]) else ""
+		chosenKey = keyFor(bindings, gift.name)
+		showKey()
+	end
+
+	-- The list, drawn again whenever the search or the settings change.
+	local function draw()
+		for _, child in list:GetChildren() do
+			if child:IsA("GuiObject") then child:Destroy() end
+		end
+		local rough, climb, chalk, bindings, custom = rules()
+		local all = GiftCatalogue.all(custom :: any)
+		local shown = GiftCatalogue.search(all, search.Text)
+		local query = (string.gsub(search.Text, "^%s*(.-)%s*$", "%1"))
+		local exact = false
+		for _, gift in shown do
+			if string.lower(gift.name) == string.lower(query) then exact = true end
+		end
+		local rowOrder = 0
+		if query ~= "" and not exact then
+			-- A gift that isn't in the list yet: add it.
+			rowOrder += 1
+			local addRow = make("TextButton", {
+				LayoutOrder = rowOrder,
+				Size = UDim2.new(1, 0, 0, 46),
+				BackgroundColor3 = SELECTED,
+				Font = FONT,
+				TextSize = 16,
+				TextColor3 = WHITE,
+				Text = string.format("+  Add \"%s\" as a gift", string.sub(query, 1, 40)),
+			}, list)
+			rounded(addRow, 8)
+			addRow.Activated:Connect(function()
+				choose({ name = string.sub(query, 1, 40), coins = 1 }, true)
+				status.Text = "Type its coins, set what it does, then Save."
+			end)
+		end
+		count.Text = string.format("%d gift%s", #shown, if #shown == 1 then "" else "s")
+		for _, gift in shown do
+			rowOrder += 1
+			local lower = string.lower(gift.name)
+			local key = keyFor(bindings, gift.name)
+			local isChosen = chosen ~= nil and string.lower((chosen :: Gift).name) == lower
+			local row = make("TextButton", {
+				LayoutOrder = rowOrder,
+				Size = UDim2.new(1, 0, 0, 46),
+				BackgroundColor3 = if isChosen then SELECTED else ROW,
+				AutoButtonColor = true,
+				Text = "",
+			}, list)
+			rounded(row, 8)
+			make("TextLabel", {
+				Position = UDim2.fromOffset(12, 0),
+				Size = UDim2.new(0.42, -12, 1, 0),
+				BackgroundTransparency = 1,
+				Font = FONT,
+				TextSize = 16,
+				TextColor3 = WHITE,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				Text = gift.name,
+			}, row)
+			make("TextLabel", {
+				Position = UDim2.new(0.42, 0, 0, 0),
+				Size = UDim2.new(0.14, 0, 1, 0),
+				BackgroundTransparency = 1,
+				Font = FONT_MEDIUM,
+				TextSize = 14,
+				TextColor3 = GOLD,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Text = tostring(gift.coins) .. " c",
+			}, row)
+			make("TextLabel", {
+				Position = UDim2.new(0.56, 0, 0, 0),
+				Size = UDim2.new(0.44, -12, 1, 0),
+				BackgroundTransparency = 1,
+				Font = FONT_MEDIUM,
+				TextSize = 13,
+				TextColor3 = MUTED,
+				TextXAlignment = Enum.TextXAlignment.Right,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				Text = string.format("Rough %s · Climb %s · Chalk %s%s",
+					GiftMenu.ruleText(rough[lower]), GiftMenu.ruleText(climb[lower]), GiftMenu.ruleText(chalk[lower]),
+					if key ~= "" then " · [" .. Keybinds.label(key) .. "]" else ""),
+			}, row)
+			row.Activated:Connect(function()
+				choose(gift, (custom :: any)[gift.name] ~= nil)
+				draw()
+			end)
+		end
+	end
+
+	search:GetPropertyChangedSignal("Text"):Connect(draw)
+	for _, name in { "GiftRules", "ClimbRules", "ChalkRules", "GiftBindings", "CustomGifts" } do
+		state:GetAttributeChangedSignal(name):Connect(function()
+			if open then draw() end
+		end)
+	end
+
+	keyButton.Activated:Connect(function()
+		if chosen == nil then return end
+		capturing = true
+		showKey()
+	end)
+	clearKey.Activated:Connect(function()
+		capturing = false
+		chosenKey = ""
+		showKey()
+	end)
+	UserInputService.InputBegan:Connect(function(input: InputObject)
+		if not open or not capturing or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		local key = input.KeyCode.Name
+		-- Wait for the real key while Shift or Ctrl is being held down.
+		if string.find(key, "Shift", 1, true) or string.find(key, "Control", 1, true) then return end
+		capturing = false
+		local combo = Keybinds.combo(key,
+			UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl),
+			UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
+		if Keybinds.allowed(combo) then
+			chosenKey = combo
+			status.Text = ""
+		else
+			status.Text = Keybinds.label(combo) .. " is used by the game. Try a letter like K, a number, F1–F8 or the number pad."
+		end
+		showKey()
+	end)
+
+	local function current(): { [string]: any }?
+		local gift = chosen
+		if gift == nil then return nil end
+		local coins = gift.coins
+		if chosenCustom then
+			coins = tonumber((string.gsub(coinsBox.Text, "[^%d]", ""))) or 0
+			if coins < 1 then
+				status.Text = "Type how many coins the gift costs."
+				return nil
+			end
+		end
+		return {
+			gift = gift.name,
+			coins = coins,
+			rough = GiftMenu.parseAmount(roughBox.Text),
+			climb = GiftMenu.parseAmount(climbBox.Text),
+			chalk = GiftMenu.parseAmount(chalkBox.Text),
+			key = chosenKey,
+		}
+	end
+	save.Activated:Connect(function()
+		local value = current()
+		if value == nil then return end
+		send("setGiftSettings", value)
+		status.Text = "Saved."
+		if chosen and chosenCustom then (chosen :: Gift).coins = value.coins end
+	end)
+	test.Activated:Connect(function()
+		local value = current()
+		if value == nil then return end
+		send("testGift", { coins = value.coins, count = 1, name = value.gift })
+		status.Text = "Sent a test " .. value.gift .. " (test gifts never count on the leaderboards)."
+	end)
+	reset.Activated:Connect(function()
+		if chosen == nil then return end
+		roughBox.Text, climbBox.Text, chalkBox.Text = "", "", ""
+		chosenKey = ""
+		capturing = false
+		showKey()
+		status.Text = "Back to auto with no key: press Save to keep it."
+	end)
+	removeCustom.Activated:Connect(function()
+		local gift = chosen
+		if gift == nil then return end
+		send("removeCustomGift", gift.name)
+		choose(nil, false)
+	end)
+
+	table.insert(onOpenChanged, function(value: boolean)
+		gui.Enabled = value
+		capturing = false
+		if value then
+			draw()
+			if chosen == nil then choose(nil, false) end
+		end
+	end)
+	choose(nil, false)
+end
+
+return GiftMenu
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="57">
           <Properties>
             <string name="Name">HoldCountdown</string>
             <string name="Source"><![CDATA[--!strict
@@ -19934,7 +20778,7 @@ return HoldCountdown
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="55">
+        <Item class="ModuleScript" referent="58">
           <Properties>
             <string name="Name">HowToPlay</string>
             <string name="Source"><![CDATA[--!strict
@@ -20246,7 +21090,7 @@ return HowToPlay
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="56">
+        <Item class="ModuleScript" referent="59">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
@@ -20825,7 +21669,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="57">
+        <Item class="ModuleScript" referent="60">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -21326,7 +22170,7 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="58">
+        <Item class="ModuleScript" referent="61">
           <Properties>
             <string name="Name">PetalView</string>
             <string name="Source"><![CDATA[--!strict
@@ -21428,7 +22272,7 @@ return PetalView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="59">
+        <Item class="ModuleScript" referent="62">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -21556,7 +22400,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="60">
+        <Item class="ModuleScript" referent="63">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -21700,7 +22544,7 @@ return SceneryView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="61">
+        <Item class="ModuleScript" referent="64">
           <Properties>
             <string name="Name">Sounds</string>
             <string name="Source"><![CDATA[--!strict
@@ -21953,12 +22797,12 @@ return Sounds
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="62">
+  <Item class="Workspace" referent="65">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="63">
+    <Item class="Terrain" referent="66">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>

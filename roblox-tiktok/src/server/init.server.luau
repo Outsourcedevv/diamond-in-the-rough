@@ -24,6 +24,7 @@ local Keybinds = require(Shared:WaitForChild("Keybinds"))
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Mountain = require(script.Mountain)
 local TikTokFeed = require(script.TikTokFeed)
+local GiftSettings = require(script.GiftSettings)
 local Store = require(script.Store)
 local ClimbGame = require(script.ClimbGame)
 local ChalkGame = require(script.ChalkGame)
@@ -68,6 +69,9 @@ local settings = {
 	climbRules = table.clone(Config.ClimbGiftRules) :: { [string]: number },
 	chalkRules = table.clone(Config.ChalkGiftRules) :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
+	-- Gifts the streamer added in the gift settings (name -> coins), for gifts
+	-- missing from the built-in list (see GiftCatalogue).
+	customGifts = {} :: { [string]: number },
 	-- Players who hid the GAMES tab and SETTINGS button (by user id).
 	hiddenButtons = {} :: { [string]: boolean },
 	-- Players who hid Diamond Climb's movement card or Chalkboard Count's
@@ -125,6 +129,7 @@ if saved then
 	settings.giftRules = cleanRules(settings.giftRules, 1500000)
 	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
 	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
+	settings.customGifts = GiftSettings.cleanCustom(settings.customGifts)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
 		settings.leaderboards = { helpers = {}, griefers = {} }
@@ -156,6 +161,7 @@ local function publishSettings()
 	State:SetAttribute("ClimbRules", game:GetService("HttpService"):JSONEncode(settings.climbRules))
 	State:SetAttribute("ChalkRules", game:GetService("HttpService"):JSONEncode(settings.chalkRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
+	State:SetAttribute("CustomGifts", game:GetService("HttpService"):JSONEncode(settings.customGifts))
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
@@ -1225,11 +1231,11 @@ filterText = filtered
 
 -- Rebuild test presets: blocks added -> the coins that pick its effect tier.
 local REBUILD_TEST_COINS: { [number]: number } = { [100] = 1, [1000] = 10, [10000] = 100, [50000] = 500, [100000] = 1000, [1500000] = 10000 }
-local function testGift(coins: number, count: number, name: string, rocks: number?)
+local function testGift(coins: number, count: number, name: string, rocks: number?, from: string?)
 	onTikTok({
 		id = "test-" .. tostring(os.clock()),
 		type = "gift",
-		name = "Test",
+		name = from or "Test",
 		gift = name,
 		rocks = rocks,
 		coins = coins,
@@ -1525,13 +1531,25 @@ local function applySetting(player: Player, action: string, value: any)
 			end
 		end
 		settings.giftBindings[key] = { gift = binding.gift, coins = binding.coins, game = true }
+	elseif action == "setGiftSettings" and type(value) == "table" then
+		-- The full-screen gift settings: one gift's rules for each game and its key.
+		local problem = GiftSettings.apply(settings, value, { rough = 1500000, climb = ClimbPath.TOP, chalk = ChalkBoard.GOAL.max })
+		if problem then
+			notice(player, problem)
+			return
+		end
+		notice(player, "Saved " .. string.sub(tostring(value.gift), 1, 40) .. ".")
+	elseif action == "removeCustomGift" and type(value) == "string" then
+		GiftSettings.remove(settings, value)
 	elseif action == "removeGiftBinding" and type(value) == "string" then
 		if settings.giftBindings[value] == nil then return end
 		settings.giftBindings[value] = nil
 	elseif action == "testGift" and type(value) == "table" then
 		local coins = if type(value.coins) == "number" then math.clamp(value.coins, 1, 100000) else 1
 		local count = if type(value.count) == "number" then math.clamp(math.floor(value.count), 1, 100) else 1
-		testGift(coins, count, if type(value.name) == "string" then string.sub(value.name, 1, 40) else "Test gift")
+		-- A gift keybind (pressed by TikFinity when the gift arrives) is a real
+		-- gift from the LIVE, so the feed says so rather than "Test".
+		testGift(coins, count, if type(value.name) == "string" then string.sub(value.name, 1, 40) else "Test gift", nil, if value.keybind == true then "A viewer" else nil)
 		return
 	else
 		return
