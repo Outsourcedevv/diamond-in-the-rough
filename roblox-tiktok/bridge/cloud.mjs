@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 
 // The relay's address, built into every connector. The game has the same one
 // (Config.RelayUrl). A connector's config.json may say otherwise (relayUrl).
-export const RELAY_URL = '';
+export const RELAY_URL = 'https://diamond-rush-relay.diamondbridgeconnector.workers.dev';
 
 // Letters and digits that can't be mixed up (no 0/O, 1/I).
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
