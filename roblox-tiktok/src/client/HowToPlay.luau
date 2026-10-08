@@ -56,6 +56,7 @@ HowToPlay.PAGES = {
 			"<b>Click</b> the diamond to pick it up, and the diamond bird to catch it.",
 			"",
 			"<b>G</b>  games menu: join, or go back to the lobby",
+			"In the lobby, each game also has a room off the hallway: walk into its glowing portal (or press <b>E</b> at it) to join.",
 			"<b>P</b>  settings: field of view, and hiding the GAMES and SETTINGS buttons",
 			"<b>H</b>  this guide",
 			"<b>Y</b>  streamer panel: gift settings, test gifts, map and settings",

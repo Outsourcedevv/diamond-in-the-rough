@@ -2,7 +2,7 @@
 
 A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain made of **250,000 rocks** (one rock is one stone) is shown counting down at the top of the screen. The rock slopes smoothly towards open air, with snow on the summit, grassy foothills over a dirt layer and layered stone inside: finding the one small diamond should feel like finding a needle in a haystack. Every gift, like, follow and share from your viewers blasts stone out of it. Once the diamond is exposed, find it, click it and **hold it for 15 seconds** to win.
 
-- **Royal lobby.** Everyone arrives in a white marble court floating in the sky, with gold trim, royal blue banners, a ring of columns and a giant turning diamond. A games menu on the left joins **Diamond in the Rough** or **Diamond Climb**; more games are marked *Coming soon*. See [The lobby and the games menu](#the-lobby-and-the-games-menu).
+- **Royal lobby.** Everyone arrives in a closed white marble palace floating in the sky: a grand hallway of columns, chandeliers and royal blue banners leads to a domed throne room with a giant turning diamond. Each game has its own room off the hallway with a glowing portal to walk into, and the games menu on the left joins them too; more games are marked *Coming soon*. See [The lobby and the games menu](#the-lobby-and-the-games-menu).
 - **Stone counter.** The top of the screen shows how much stone is left (250,000 to start), with a progress bar.
 - **Gifts blast the mountain.** Each TikTok coin removes 100 rocks, so a Rose (1 coin) removes 100 and a Galaxy (1,000 coins) removes 100,000. The counter always equals the rocks really left. Likes, follows and shares also chip away. Big gifts make big explosions. A feed in the corner shows who sent what.
 - **Diamond bird.** Every 5 to 7½ minutes (at random) a sparkling bird made of diamond swoops down from the sky and circles the mountain about halfway up, flapping its glass wings. Click it and **every gift counts double for 30 seconds**: gifts that blast stone remove twice as much, gifts with an add rule add twice as much, the gift animation is sized for the doubled gift and the coins count double on the leaderboard. The display shows **DIAMOND BIRD · CLICK IT FOR 2X GIFTS** while it is flying, and a gold **2X** card with the seconds left sits beside the stone count while the bonus runs; doubled gifts show 2X in the feed. Gifts are doubled if they arrive during the 30 seconds, even if the mountain is still busy with earlier gifts. Aim the dot at it in first person: the dot turns gold and grows when a click will catch it, so you don't have to hit the bird exactly (it counts within a few degrees), and on a phone you tap it. The click goes to the server, which checks the bird is still circling and that you are within 300 studs of where it is flying. If nobody catches it, it flies off when the next bird arrives. Catching another bird during the bonus restarts the 30 seconds (gifts are doubled, never quadrupled). The **Y** panel has **Send a diamond bird now** for testing, and the timings are in `src/shared/Config.luau` (`BirdMinSeconds`, `BirdMaxSeconds`, `BirdBoostSeconds`, `BirdMultiplier`).
@@ -100,7 +100,14 @@ Run `luau tests/gift-performance.luau` for a CPU checkpoint timing report and `p
 
 ## The lobby and the games menu
 
-Players start in the lobby, a white and gold royal court floating high in the sky away from the mountain. A royal blue carpet leads from the spawn to a marble dais with a giant turning diamond. Marble columns with gold capitals ring the court, hung with royal blue banners with gold diamonds. A balustrade runs round the edge, and nobody can fall off.
+Players start in the lobby, a white and gold royal palace floating high in the sky away from the mountain. It is closed all round, with walls and ceilings everywhere, so no sky shows inside and nobody can fall off. You arrive at one end of a long **grand hallway**: a royal blue carpet runs down it between marble columns with gold sconces and royal blue banners, under a row of chandeliers, to the **throne room**, a round domed hall where a giant diamond turns over a marble dais.
+
+Four **rooms** open off the hallway, two on each side, each with a drawn emblem over its door:
+
+- On the left, **Diamond in the Rough** (a mine with rock walls, timber supports, glowing crystals and a little mountain with the diamond on top) and **Chalkboard Count** (a classroom with a chalkboard, a teacher's desk, a clock and a bookshelf).
+- On the right, **Diamond Climb** (violet crystal walls, a crystal tower with platforms spiralling round it, and steps to hop up) and the **Coming soon** room, behind a closed gold gate, where something covered waits under a spotlight.
+
+At the back of each game's room is a glowing **portal**: walk into it, or press **E** at it, to join that game. It does the same as **JOIN** in the games menu. The rooms and the palace are built by `src/server/Lobby.luau` (`Lobby.ROOMS` lists the rooms).
 
 The **GAMES** menu on the left of the screen lists the games:
 
@@ -109,7 +116,7 @@ The **GAMES** menu on the left of the screen lists the games:
 - **Chalkboard Count** shows the count on the board, the goal and how many times it was reached. Press **JOIN** to go to the classroom (see [Chalkboard Count](#chalkboard-count)).
 - The last card says **Coming soon**, ready for a future game.
 
-Beside the carpet stands a **How to Play** board (drawn, with no lettering). Walk up and press **E**, or click it, and a guide opens on screen with six pages: **Connect TikTok** (setting up TikFinity and gift keys), **Testing** (the Y panel's test gifts, rebuild tests, the bird button and the gift settings), **Controls**, **How to win**, **Diamond Climb** and **Chalkboard**. The games menu's **How to play** button and the **H** key open it too, anywhere.
+Beside the carpet near the spawn stands a **How to Play** board (drawn, with no lettering). Walk up and press **E**, or click it, and a guide opens on screen with six pages: **Connect TikTok** (setting up TikFinity and gift keys), **Testing** (the Y panel's test gifts, rebuild tests, the bird button and the gift settings), **Controls**, **How to win**, **Diamond Climb** and **Chalkboard**. The games menu's **How to play** button and the **H** key open it too, anywhere.
 
 Press **Hide** to hide the menu. The **GAMES** tab on the left, or the **G** key, brings it back. The key matters in the game, where the mouse is locked to first person. While you play, the menu has **Back to lobby**. You can't go back while you are holding the diamond.
 
