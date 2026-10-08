@@ -113,10 +113,14 @@ for _, gift in GiftCatalogue.GIFTS do
 	seen[string.lower(gift.name)] = true
 	check(gift.coins >= 1 and gift.coins == math.floor(gift.coins), "whole coins: " .. gift.name)
 end
-check(#GiftCatalogue.GIFTS >= 70, "a long list of gifts (" .. #GiftCatalogue.GIFTS .. ")")
-for _, name in { "Rose", "Galaxy", "Lion", "TikTok Universe", "Interstellar", "Finger Heart" } do
+check(#GiftCatalogue.GIFTS >= 120, "a long list of gifts (" .. #GiftCatalogue.GIFTS .. ")")
+for _, name in { "Rose", "Galaxy", "Lion", "TikTok Universe", "Interstellar", "Finger Heart", "Watermelon Love" } do
 	check(GiftCatalogue.find(name) ~= nil, "has " .. name)
 end
+for _, gift in GiftCatalogue.GIFTS do
+	check(type(gift.icon) == "string" and #gift.icon > 0, "an icon for " .. gift.name)
+end
+check(GiftCatalogue.find("Watermelon Love").icon == "🍉", "Watermelon Love has a watermelon")
 local all = GiftCatalogue.all({ ["My Gift"] = 77, Rose = 3 })
 check(#all == #GiftCatalogue.GIFTS + 1, "the streamer's own gift joins the list")
 for i = 2, #all do check(all[i - 1].coins <= all[i].coins, "cheapest first") end
@@ -150,6 +154,11 @@ check(GiftSettings.apply(store, { gift = "Mystery Box", coins = 250, rough = -50
 check(GiftSettings.apply(store, { gift = "mystery box", rough = 10 }, limits) == nil and store.customGifts["mystery box"] == 250, "renaming keeps its coins")
 GiftSettings.remove(store, "Mystery Box")
 check(next(store.customGifts) == nil and store.giftRules["mystery box"] == nil, "removing a gift clears it")
+-- A built-in gift's price can be changed, and changed back.
+check(GiftSettings.apply(store, { gift = "Galaxy", coins = 1100, key = "N" }, limits) == nil and store.customGifts.Galaxy == 1100, "a different price is kept")
+check(store.giftBindings.N.coins == 1100, "the key sends the gift at that price")
+GiftSettings.apply(store, { gift = "Galaxy", coins = 1000 }, limits)
+check(store.customGifts.Galaxy == nil, "the built-in price needs nothing kept")
 check(next(GiftSettings.cleanCustom({ [""] = 4, Good = 5.5, Bad = "x" })) == "Good", "saved custom gifts are cleaned")
 
 -- The menu -------------------------------------------------------------------
@@ -207,6 +216,12 @@ check(keyButton.Text == "Key: Shift+M", "Shift and a key make the binding")
 find(function(o) return o.ClassName == "TextButton" and o.Text == "Save" end).Activated:Fire()
 local last = sent[#sent]
 check(last.action == "setGiftSettings" and last.value.gift == "Lion" and last.value.coins == 29999, "Save sends the gift")
+local title = find(function(o) return o.ClassName == "TextLabel" and o.Text == "🦁  Lion" end)
+check(title ~= nil, "the editor shows the gift's icon and name")
+local lionRow = rowNamed("Lion")
+local hasIcon = false
+for _, child in lionRow:GetChildren() do if child.Text == "🦁" then hasIcon = true end end
+check(hasIcon, "each row shows the gift's icon")
 check(last.value.rough == -1000 and last.value.climb == 25 and last.value.chalk == nil and last.value.key == "Shift+M", "with each game's amount and the key")
 find(function(o) return o.ClassName == "TextButton" and o.Text == "Test gift" end).Activated:Fire()
 check(sent[#sent].action == "testGift" and sent[#sent].value.name == "Lion", "Test sends a test gift")
@@ -221,7 +236,7 @@ search:setText("Space Whale")
 local addRow = find(function(o) return o.ClassName == "TextButton" and o.Text and string.find(o.Text, "Add \"Space Whale\"", 1, true) end)
 check(addRow ~= nil, "offers to add a missing gift")
 addRow.Activated:Fire()
-local coinsBox = find(function(o) return o.ClassName == "TextBox" and o.PlaceholderText == "Coins per gift (for a gift you add)" end)
+local coinsBox = find(function(o) return o.ClassName == "TextBox" and o.PlaceholderText == "Coins per gift" end)
 check(coinsBox.Visible == true, "asks for its coins")
 coinsBox.Text = "1,234"
 find(function(o) return o.ClassName == "TextButton" and o.Text == "Save" end).Activated:Fire()

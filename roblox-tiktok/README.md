@@ -46,7 +46,7 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 
 ## Gift settings and TikFinity (no connector needed)
 
-In the game, press **Y** and click **Open gift settings (full screen)**. Every TikTok gift is listed with its coins and a search bar (gifts that are missing can be added with their coins). Pick a gift to set:
+In the game, press **Y** and click **Open gift settings (full screen)**. About 125 TikTok gifts are listed with an emoji icon, their coins and a search bar. TikTok's own gift pictures are its artwork and can't be put in a Roblox game, hence the emoji. Prices differ by country, so any gift's coins can be changed, and a gift that's missing can be added with its coins. Pick a gift to set:
 
 - **Diamond in the Rough:** rocks per gift (negative adds stone),
 - **Diamond Climb:** platforms per gift (negative sends the climber down),

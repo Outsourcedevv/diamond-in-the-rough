@@ -14,7 +14,7 @@ local Keybinds = require(Shared:WaitForChild("Keybinds"))
 
 local GiftMenu = {}
 
-type Gift = { name: string, coins: number }
+type Gift = { name: string, coins: number, icon: string? }
 
 local WHITE = Color3.fromRGB(255, 255, 255)
 local GOLD = Color3.fromRGB(246, 200, 92)
@@ -215,7 +215,8 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	end
 	local giftName = add(label(right, "Pick a gift", 26, WHITE, FONT_HEAVY, 32))
 	local giftCoins = add(label(right, "", 15, MUTED, FONT_MEDIUM, 20))
-	local coinsBox = add(box(right, "Coins per gift (for a gift you add)"))
+	add(label(right, "COINS PER GIFT (change it if TikTok's price is different where you are)", 13, MUTED, FONT, 18))
+	local coinsBox = add(box(right, "Coins per gift"))
 	local function section(heading: string, hint: string, placeholder: string): TextBox
 		add(label(right, heading, 15, GOLD, FONT, 20))
 		add(label(right, hint, 13, MUTED, FONT_MEDIUM, 34))
@@ -247,7 +248,6 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 
 	-- The chosen gift and its key (while editing).
 	local chosen: Gift? = nil
-	local chosenCustom = false
 	local chosenKey = ""
 	local capturing = false
 
@@ -268,7 +268,6 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 
 	local function choose(gift: Gift?, custom: boolean)
 		chosen = gift
-		chosenCustom = custom
 		capturing = false
 		status.Text = ""
 		local rough, climb, chalk, bindings = rules()
@@ -283,9 +282,9 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 			return
 		end
 		local lower = string.lower(gift.name)
-		giftName.Text = gift.name
+		giftName.Text = (gift.icon or GiftCatalogue.ICON) .. "  " .. gift.name
 		giftCoins.Text = string.format("%s coin%s", tostring(gift.coins), if gift.coins == 1 then "" else "s")
-		coinsBox.Visible = custom
+		coinsBox.Visible = true
 		coinsBox.Text = tostring(gift.coins)
 		removeCustom.Visible = custom and GiftCatalogue.find(gift.name) == nil
 		roughBox.Text = if type(rough[lower]) == "number" then tostring(rough[lower]) else ""
@@ -342,8 +341,17 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 			}, list)
 			rounded(row, 8)
 			make("TextLabel", {
-				Position = UDim2.fromOffset(12, 0),
-				Size = UDim2.new(0.42, -12, 1, 0),
+				Position = UDim2.fromOffset(8, 0),
+				Size = UDim2.new(0, 34, 1, 0),
+				BackgroundTransparency = 1,
+				Font = FONT,
+				TextSize = 24,
+				TextColor3 = WHITE,
+				Text = gift.icon or GiftCatalogue.ICON,
+			}, row)
+			make("TextLabel", {
+				Position = UDim2.fromOffset(48, 0),
+				Size = UDim2.new(0.42, -48, 1, 0),
 				BackgroundTransparency = 1,
 				Font = FONT,
 				TextSize = 16,
@@ -420,13 +428,10 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local function current(): { [string]: any }?
 		local gift = chosen
 		if gift == nil then return nil end
-		local coins = gift.coins
-		if chosenCustom then
-			coins = tonumber((string.gsub(coinsBox.Text, "[^%d]", ""))) or 0
-			if coins < 1 then
-				status.Text = "Type how many coins the gift costs."
-				return nil
-			end
+		local coins = tonumber((string.gsub(coinsBox.Text, "[^%d]", ""))) or 0
+		if coins < 1 then
+			status.Text = "Type how many coins the gift costs."
+			return nil
 		end
 		return {
 			gift = gift.name,
@@ -442,7 +447,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		if value == nil then return end
 		send("setGiftSettings", value)
 		status.Text = "Saved."
-		if chosen and chosenCustom then (chosen :: Gift).coins = value.coins end
+		if chosen then (chosen :: Gift).coins = value.coins end
 	end)
 	test.Activated:Connect(function()
 		local value = current()
