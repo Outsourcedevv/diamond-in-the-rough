@@ -59,7 +59,13 @@ function Store.load(key: string?): ({ [string]: any }?, boolean)
 	return nil, ok
 end
 
--- Saves a few seconds after the last change, so quick edits make one write.
+-- Seconds between writes. Roblox allows one write to the same save about
+-- every 6 seconds; writing faster (a busy stream) fills its queue until saves
+-- fail.
+Store.WRITE_EVERY = 6
+
+-- Saves a few seconds after the last change, so quick edits make one write,
+-- and one write at a time: changes made while writing go in the next one.
 function Store.save(data: { [string]: any })
 	if blocked then return end
 	pending = table.clone(data)
@@ -67,17 +73,19 @@ function Store.save(data: { [string]: any })
 		return
 	end
 	saving = true
-	task.delay(4, function()
+	task.delay(Store.WRITE_EVERY, function()
 		local target = open()
 		local snapshot = pending
 		pending = nil
-		saving = false
 		if target ~= nil and snapshot ~= nil then
 			local ok, problem = pcall(target.SetAsync, target, KEY, snapshot)
 			if not ok then
 				warn("[DiamondRush] Could not save settings: " .. tostring(problem))
 			end
 		end
+		saving = false
+		local later = pending
+		if later ~= nil then Store.save(later) end
 	end)
 end
 

@@ -129,7 +129,8 @@ check(#GiftCatalogue.search(all, "") == #all, "empty search shows everything")
 for _, gift in all do if gift.name == "Rose" then check(gift.coins == 3, "a custom price replaces the built-in one") end end
 
 -- Keybinds -----------------------------------------------------------------
-check(Keybinds.allowed("K") and Keybinds.allowed("Shift+K") and Keybinds.allowed("Ctrl+Shift+F5") and Keybinds.allowed("KeypadSeven"), "keys and combos")
+check(Keybinds.allowed("K") and Keybinds.allowed("Shift+K") and Keybinds.allowed("Ctrl+Shift+K") and Keybinds.allowed("F5") and Keybinds.allowed("KeypadSeven"), "keys and combos")
+check(not Keybinds.allowed("Shift+F3") and not Keybinds.allowed("Ctrl+F6") and not Keybinds.allowed("Ctrl+Shift+F5"), "Roblox's Shift and Ctrl F-key shortcuts are left out")
 check(not Keybinds.allowed("W") and not Keybinds.allowed("Shift+Y") and not Keybinds.allowed("F9") and not Keybinds.allowed("Alt+K") and not Keybinds.allowed(5), "the game's own keys are refused")
 check(Keybinds.combo("K", true, true) == "Ctrl+Shift+K" and Keybinds.combo("K") == "K", "combo names")
 check(Keybinds.label("Shift+One") == "Shift+1" and Keybinds.label("KeypadSeven") == "Num 7", "labels")
@@ -176,14 +177,14 @@ check(store.customGifts.Galaxy == nil, "the built-in price needs nothing kept")
 check(next(GiftSettings.cleanCustom({ [""] = 4, Good = 5.5, Bad = "x" })) == "Good", "saved custom gifts are cleaned")
 do
 	local cleaned = GiftSettings.cleanBindings({
-		K = { gift = " Rose ", coins = 1.5 }, ["Shift+F2"] = { gift = "Galaxy", coins = 1000 },
+		K = { gift = " Rose ", coins = 1.5 }, ["F2"] = { gift = "Galaxy", coins = 1000 }, ["Shift+F2"] = { gift = "Galaxy", coins = 1000 },
 		G = { gift = "Lion", coins = 29999 }, P = { gift = "Lion", coins = 29999 }, W = { gift = "Rose", coins = 1 },
 		J = { gift = "Rose" }, L = { coins = 5 }, M = "Rose", N = { gift = "", coins = 1 }, Q = { gift = "Rose", coins = 0 / 0 },
 	})
 	local keys = {}
 	for key in cleaned do table.insert(keys, key) end
 	table.sort(keys)
-	check(table.concat(keys, ",") == "K,Shift+F2", "saved keybinds keep only usable keys with a gift and coins: " .. table.concat(keys, ","))
+	check(table.concat(keys, ",") == "F2,K", "saved keybinds keep only usable keys with a gift and coins: " .. table.concat(keys, ","))
 	check(cleaned.K.gift == "Rose" and cleaned.K.coins == 1, "a saved keybind's gift and coins are tidied")
 	check(next(GiftSettings.cleanBindings("nope")) == nil, "a broken keybind list is dropped")
 end
@@ -267,11 +268,23 @@ check(last.value.reset == true, "and the reset")
 check(last.value.anim == 3, "and the animation")
 find(function(o) return o.ClassName == "TextButton" and o.Text == "Test gift" end).Activated:Fire()
 check(sent[#sent].action == "testGift" and sent[#sent].value.name == "Lion", "Test sends a test gift")
+check(sent[#sent - 1].action == "setGiftSettings" and sent[#sent - 1].value.gift == "Lion" and sent[#sent - 1].value.rough == -1000, "Test saves the boxes first, so it plays what they say")
+local chalkNote = find(function(o) return o.ClassName == "TextLabel" and o.Text and string.find(o.Text, "countdown reset gift", 1, true) end)
+check(chalkNote == nil or chalkNote.Visible == false, "no countdown note for a gift that isn't Chalkboard Count's reset gift")
 
 -- The server saves it and publishes; the list shows it.
 publish("GiftRules", { lion = -1000 }); publish("ClimbRules", { lion = 25 }); publish("WinRules", { lion = -1 }); publish("ResetGifts", { lion = true }); publish("AnimRules", { lion = 3 }); publish("GiftBindings", { ["Shift+M"] = { gift = "Lion", coins = 29999 } })
 local summary = textOf(rowNamed("Lion"))
 check(string.find(summary, "Rough -1000", 1, true) and string.find(summary, "Climb +25", 1, true) and string.find(summary, "Chalk auto", 1, true) and string.find(summary, "[Shift+M]", 1, true) and string.find(summary, "Wins -1", 1, true) and string.find(summary, "RESET", 1, true) and string.find(summary, "Anim 3", 1, true), "the list shows the saved settings: " .. summary)
+
+-- Chalkboard Count's countdown reset gift says its number there isn't used.
+attributes.ChalkResetGift = "Galaxy"
+search:setText("")
+rowNamed("Galaxy").Activated:Fire()
+local note = find(function(o) return o.ClassName == "TextLabel" and o.Text and string.find(o.Text, "countdown reset gift", 1, true) end)
+check(note ~= nil and note.Visible == true, "the chalk countdown gift is pointed out")
+rowNamed("Lion").Activated:Fire()
+check(note.Visible == false, "and only for that gift")
 
 -- A gift that's missing can be added.
 search:setText("Space Whale")

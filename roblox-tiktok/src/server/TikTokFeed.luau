@@ -67,15 +67,22 @@ end
 -- The published game ---------------------------------------------------------
 -- The game asks the relay for its code's events, and the relay holds each
 -- request for a few seconds until something arrives, so gifts land within
--- about a second. Goes up whenever the code changes, so an older loop stops.
+-- about a second. The first request (start=1) only learns where the events
+-- are up to, so gifts sent before the game started are not played; every
+-- later one asks for the events after that (start=0, even from 0).
+-- Goes up whenever the code changes, so an older loop stops.
 local codeGeneration = 0
 TikTokFeed.RELAY_WAIT = 8 -- seconds the relay may hold a request
+TikTokFeed.IDLE_WAIT = 1 -- seconds between requests the relay answered at once with nothing
 
 local function relayLoop(generation: number, url: string, code: string, onEvent: (Event) -> (), onStatus: (string) -> ())
 	local since = 0
+	local started = false
 	local failures = 0
 	while generation == codeGeneration do
-		local address = string.format("%s/c/%s/events?since=%d&wait=%d", url, code, since, if since == 0 then 0 else TikTokFeed.RELAY_WAIT)
+		local address = string.format("%s/c/%s/events?since=%d&wait=%d&start=%d", url, code, since,
+			if started then TikTokFeed.RELAY_WAIT else 0, if started then 0 else 1)
+		local asked = os.clock()
 		local ok, body = pcall(HttpService.GetAsync, HttpService, address, true)
 		local decoded, data = false, nil
 		if ok then
@@ -89,7 +96,12 @@ local function relayLoop(generation: number, url: string, code: string, onEvent:
 			end
 			if type(data.last) == "number" then since = math.max(since, data.last) end
 			onStatus(if type(data.tiktok) == "string" and data.tiktok ~= "" then string.sub(data.tiktok, 1, 80) else "waiting for DiamondRushBridge.exe")
-			task.wait(0.1)
+			-- An empty answer that came straight back (a relay that doesn't
+			-- hold requests open) waits a second, so the game stays well under
+			-- Roblox's HTTP limit and the relay's daily requests.
+			local quick = started and #data.events == 0 and os.clock() - asked < 1
+			started = true
+			task.wait(if quick then TikTokFeed.IDLE_WAIT else 0.1)
 		else
 			failures += 1
 			if not ok then warn("[DiamondRush] relay: " .. tostring(body)) end

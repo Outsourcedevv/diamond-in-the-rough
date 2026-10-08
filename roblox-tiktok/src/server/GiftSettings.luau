@@ -80,7 +80,7 @@ function GiftSettings.apply(store: Store, value: any, limits: Limits): string?
 	end
 	local key = value.key
 	if type(key) == "string" and key ~= "" and not Keybinds.allowed(key) then
-		return Keybinds.label(key) .. " is used by the game. Pick another key."
+		return Keybinds.label(key) .. " is used by the game or Roblox. Pick another key."
 	end
 
 	store.giftRules[lower] = amount(value.rough, limits.rough)

@@ -2030,7 +2030,9 @@ Keybinds.MAX = 300 -- bindings kept at once
 -- (E for prompts, G games, H how to play, P settings, Y the streamer panel)
 -- and Roblox's own keys (I and O zoom, F9 to F12) are left out, so a binding
 -- never fights them. Any of them can also be held with Shift or Ctrl (or both),
--- which gives TikFinity hundreds of keys to press, one per gift.
+-- which gives TikFinity hundreds of keys to press, one per gift, except the
+-- F keys: Roblox uses Shift and Ctrl with those (Shift+F2 to F5 show its stats
+-- on screen, Ctrl+F6 its profiler), so F1 to F8 work on their own only.
 Keybinds.KEYS = {
 	"B", "C", "F", "J", "K", "L", "M", "N", "Q", "R", "T", "U", "V", "X", "Z",
 	"One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Zero",
@@ -2068,6 +2070,7 @@ function Keybinds.split(name: string): (string?, boolean, boolean)
 	if string.sub(rest, 1, 5) == "Ctrl+" then ctrl = true; rest = string.sub(rest, 6) end
 	if string.sub(rest, 1, 6) == "Shift+" then shift = true; rest = string.sub(rest, 7) end
 	if not allowed[rest] then return nil, false, false end
+	if (ctrl or shift) and string.match(rest, "^F%d$") then return nil, false, false end
 	return rest, ctrl, shift
 end
 
@@ -5346,7 +5349,7 @@ local settings = {
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	-- Diamond Climb's and Chalkboard Count's own gift rules: platforms (or
-	-- numbers) per gift, negative to send them down (set on the control page).
+	-- numbers) per gift, negative to send them down (set in the gift settings).
 	climbRules = table.clone(Config.ClimbGiftRules) :: { [string]: number },
 	chalkRules = table.clone(Config.ChalkGiftRules) :: { [string]: number },
 	-- Wins per gift (from the gift settings): added to, or taken from, the win
@@ -6708,6 +6711,16 @@ local function placeCharacter(player: Player, character: Model)
 end
 
 local function applySetting(player: Player, action: string, value: any)
+	-- The wins box and its +1 / -1 change the win counter on screen: Diamond
+	-- Climb's or Chalkboard Count's own while the streamer is in that game.
+	local place = placeOf(player)
+	if (action == "setWins" or action == "addWins") and type(value) == "number" and value == value
+		and (place == "climb" or place == "chalk") then
+		local wins = if place == "climb" then climbGame.progress.wins else chalkGame.progress.wins
+		local change = if action == "addWins" then math.floor(value) else math.clamp(math.floor(value), -999999, 999999) - wins
+		if place == "climb" then climbGame.addWins(change) else chalkGame.addWins(change) end
+		return
+	end
 	if action == "setWins" and type(value) == "number" then
 		settings.wins = math.clamp(math.floor(value), -999999, 999999)
 	elseif action == "addWins" and type(value) == "number" then
@@ -9577,7 +9590,7 @@ function GiftSettings.apply(store: Store, value: any, limits: Limits): string?
 	end
 	local key = value.key
 	if type(key) == "string" and key ~= "" and not Keybinds.allowed(key) then
-		return Keybinds.label(key) .. " is used by the game. Pick another key."
+		return Keybinds.label(key) .. " is used by the game or Roblox. Pick another key."
 	end
 
 	store.giftRules[lower] = amount(value.rough, limits.rough)
@@ -12748,7 +12761,13 @@ function Store.load(key: string?): ({ [string]: any }?, boolean)
 	return nil, ok
 end
 
--- Saves a few seconds after the last change, so quick edits make one write.
+-- Seconds between writes. Roblox allows one write to the same save about
+-- every 6 seconds; writing faster (a busy stream) fills its queue until saves
+-- fail.
+Store.WRITE_EVERY = 6
+
+-- Saves a few seconds after the last change, so quick edits make one write,
+-- and one write at a time: changes made while writing go in the next one.
 function Store.save(data: { [string]: any })
 	if blocked then return end
 	pending = table.clone(data)
@@ -12756,17 +12775,19 @@ function Store.save(data: { [string]: any })
 		return
 	end
 	saving = true
-	task.delay(4, function()
+	task.delay(Store.WRITE_EVERY, function()
 		local target = open()
 		local snapshot = pending
 		pending = nil
-		saving = false
 		if target ~= nil and snapshot ~= nil then
 			local ok, problem = pcall(target.SetAsync, target, KEY, snapshot)
 			if not ok then
 				warn("[DiamondRush] Could not save settings: " .. tostring(problem))
 			end
 		end
+		saving = false
+		local later = pending
+		if later ~= nil then Store.save(later) end
 	end)
 end
 
@@ -12856,15 +12877,22 @@ end
 -- The published game ---------------------------------------------------------
 -- The game asks the relay for its code's events, and the relay holds each
 -- request for a few seconds until something arrives, so gifts land within
--- about a second. Goes up whenever the code changes, so an older loop stops.
+-- about a second. The first request (start=1) only learns where the events
+-- are up to, so gifts sent before the game started are not played; every
+-- later one asks for the events after that (start=0, even from 0).
+-- Goes up whenever the code changes, so an older loop stops.
 local codeGeneration = 0
 TikTokFeed.RELAY_WAIT = 8 -- seconds the relay may hold a request
+TikTokFeed.IDLE_WAIT = 1 -- seconds between requests the relay answered at once with nothing
 
 local function relayLoop(generation: number, url: string, code: string, onEvent: (Event) -> (), onStatus: (string) -> ())
 	local since = 0
+	local started = false
 	local failures = 0
 	while generation == codeGeneration do
-		local address = string.format("%s/c/%s/events?since=%d&wait=%d", url, code, since, if since == 0 then 0 else TikTokFeed.RELAY_WAIT)
+		local address = string.format("%s/c/%s/events?since=%d&wait=%d&start=%d", url, code, since,
+			if started then TikTokFeed.RELAY_WAIT else 0, if started then 0 else 1)
+		local asked = os.clock()
 		local ok, body = pcall(HttpService.GetAsync, HttpService, address, true)
 		local decoded, data = false, nil
 		if ok then
@@ -12878,7 +12906,12 @@ local function relayLoop(generation: number, url: string, code: string, onEvent:
 			end
 			if type(data.last) == "number" then since = math.max(since, data.last) end
 			onStatus(if type(data.tiktok) == "string" and data.tiktok ~= "" then string.sub(data.tiktok, 1, 80) else "waiting for DiamondRushBridge.exe")
-			task.wait(0.1)
+			-- An empty answer that came straight back (a relay that doesn't
+			-- hold requests open) waits a second, so the game stays well under
+			-- Roblox's HTTP limit and the relay's daily requests.
+			local quick = started and #data.events == 0 and os.clock() - asked < 1
+			started = true
+			task.wait(if quick then TikTokFeed.IDLE_WAIT else 0.1)
 		else
 			failures += 1
 			if not ok then warn("[DiamondRush] relay: " .. tostring(body)) end
@@ -13186,6 +13219,11 @@ local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 
 local player = Players.LocalPlayer
+-- Nobody carries a tool (digging is bare-handed), so Roblox's backpack bar is
+-- off: it would otherwise take the number keys, which gifts can be bound to.
+pcall(function()
+	game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+end)
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
@@ -13753,7 +13791,7 @@ panelLabel("WIN COUNTER TITLE")
 local titleBox = panelBox("", function(text)
 	send("setTitle", text)
 end)
-panelLabel("WINS")
+panelLabel("WINS (of the game you are playing)")
 local winsInput = panelBox("", function(text)
 	local number = tonumber(text)
 	if number then
@@ -14115,9 +14153,15 @@ end
 State:GetAttributeChangedSignal("Statues"):Connect(refreshStatues)
 refreshStatues()
 
+-- The wins of the game being played (Diamond Climb and Chalkboard Count keep their own).
+local function currentWins(): number
+	if player:GetAttribute("InClimb") == true then return attr("ClimbWins", 0) end
+	if player:GetAttribute("InChalk") == true then return attr("ChalkWins", 0) end
+	return attr("Wins", 0)
+end
 local function refreshPanelFields()
 	titleBox.Text = attr("WinTitle", "WINS")
-	winsInput.Text = tostring(attr("Wins", 0))
+	winsInput.Text = tostring(currentWins())
 	goalBox.Text = tostring(attr("WinGoal", 0))
 	textColourBox.Text = attr("WinTextColor", "#FFFFFF")
 	backgroundBox.Text = attr("WinBackgroundColor", "#2B2140")
@@ -14336,11 +14380,9 @@ local function setSettingsOpen(show: boolean)
 end
 settingsButton.Activated:Connect(function() setSettingsOpen(not settingsCard.Visible) end)
 settingsDone.Activated:Connect(function() setSettingsOpen(false) end)
--- P toggles the settings in the game, unless the streamer bound P to a test gift.
+-- P toggles the settings in the game (no gift can be given P, see Keybinds).
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed or input.KeyCode ~= SETTINGS_KEY or not gui.Enabled or UserInputService:GetFocusedTextBox() then return end
-	local ok, bindings = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), attr("GiftBindings", "{}"))
-	if ok and type(bindings) == "table" and bindings[SETTINGS_KEY.Name] ~= nil then return end
 	setSettingsOpen(not settingsCard.Visible)
 end)
 
@@ -14388,12 +14430,6 @@ player:GetAttributeChangedSignal("DiamondRushAdmin"):Connect(refreshAdmin)
 refreshAdmin()
 
 -- Live updates ---------------------------------------------------------------------------
--- The wins of the game being played (Diamond Climb and Chalkboard Count keep their own).
-local function currentWins(): number
-	if player:GetAttribute("InClimb") == true then return attr("ClimbWins", 0) end
-	if player:GetAttribute("InChalk") == true then return attr("ChalkWins", 0) end
-	return attr("Wins", 0)
-end
 local function refreshWins()
 	winsBox.Visible = attr("ShowWins", true)
 	winsBox.Text = Format.wins(attr("WinTitle", "WINS"), currentWins(), attr("WinGoal", 0))
@@ -20669,6 +20705,9 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local roughBox = section("DIAMOND IN THE ROUGH: rocks per gift", "Positive breaks that many rocks off the mountain; negative adds stone. Empty: worked out from the coins.", "auto (from the coins)")
 	local climbBox = section("DIAMOND CLIMB: platforms per gift", "Positive sends the climber up; negative sends them down. Empty: worked out from the coins.", "auto (from the coins)")
 	local chalkBox = section("CHALKBOARD COUNT: numbers per gift", "Positive counts up; negative counts down. Empty: worked out from the coins.", "auto (from the coins)")
+	-- Chalkboard Count's own reset gift (Y panel) starts its countdown instead.
+	local chalkNote = add(label(right, "", 13, GOLD, FONT_MEDIUM, 34))
+	chalkNote.Visible = false
 	local winsBox = section("WINS per gift", "Adds wins (e.g. 1) or takes them away (e.g. -1) on the win counter of whichever game you're playing. Empty: no change.", "no change")
 	add(label(right, "ANIMATION", 15, GOLD, FONT, 20))
 	local animButton = add(button(right, "Animation: Auto"))
@@ -20745,6 +20784,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 			giftCoins.Text = "Choose one from the list, or search for a gift that's missing to add it."
 			coinsBox.Visible = false
 			removeCustom.Visible = false
+			chalkNote.Visible = false
 			for _, input in { roughBox, climbBox, chalkBox, winsBox } do input.Text = "" end
 			chosenKey = ""
 			showKey()
@@ -20766,6 +20806,9 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		showAnim()
 		chosenKey = keyFor(bindings, gift.name)
 		showKey()
+		local countdownGift = state:GetAttribute("ChalkResetGift")
+		chalkNote.Visible = type(countdownGift) == "string" and string.lower(countdownGift) == lower
+		chalkNote.Text = "In Chalkboard Count this is the countdown reset gift (set in the Y panel), so there it starts the countdown and the number above isn't used."
 	end
 
 	-- The list, drawn again whenever the search or the settings change.
@@ -20908,7 +20951,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 			chosenKey = combo
 			status.Text = ""
 		else
-			status.Text = Keybinds.label(combo) .. " is used by the game. Try a letter like K, a number, F1–F8 or the number pad."
+			status.Text = Keybinds.label(combo) .. " is used by the game or Roblox. Try a letter like K, a number, F1–F8 on their own or the number pad."
 		end
 		showKey()
 	end)
@@ -20943,8 +20986,12 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	test.Activated:Connect(function()
 		local value = current()
 		if value == nil then return end
+		-- Saved first, so the test plays what the boxes say now (the server
+		-- handles the two in order).
+		send("setGiftSettings", value)
+		if chosen then (chosen :: Gift).coins = value.coins end
 		send("testGift", { coins = value.coins, count = 1, name = value.gift })
-		status.Text = "Sent a test " .. value.gift .. " (test gifts never count on the leaderboards)."
+		status.Text = "Saved, and sent a test " .. value.gift .. " (test gifts never count on the leaderboards)."
 	end)
 	reset.Activated:Connect(function()
 		if chosen == nil then return end
@@ -21396,7 +21443,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
@@ -21831,13 +21877,9 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	tab.Activated:Connect(function() setOpen(true) end)
 	hide.Activated:Connect(function() setOpen(false) end)
 
-	-- G toggles the menu, unless the streamer bound G to a test gift.
+	-- G toggles the menu (no gift can be given G, see Keybinds).
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 		if processed or input.KeyCode ~= TOGGLE_KEY then return end
-		local ok, bindings = pcall(function()
-			return HttpService:JSONDecode(state:GetAttribute("GiftBindings") or "{}")
-		end)
-		if ok and type(bindings) == "table" and bindings[TOGGLE_KEY.Name] ~= nil then return end
 		setOpen(not open)
 	end)
 	-- First person locks the mouse; free it while the menu is open.

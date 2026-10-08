@@ -108,3 +108,33 @@ test('the front page says it is running', async () => {
   const response = await handle(new Request('https://relay.test/'), {});
   assert.match(await response.text(), /running/);
 });
+
+test('a game starting after ten quiet minutes still gets the next gift', async () => {
+  const relay = setUp();
+  const code = await codeFor(SECRET);
+  await relay.push(code, { events: [{ id: 's:1', type: 'gift', gift: 'Rose' }], tiktok: 't' });
+  relay.tick((LIMITS.keepSeconds + 1) * 1000);
+  await relay.push(code, { events: [], tiktok: 't' });
+  // The old gift is past keeping, but the newest event number stays.
+  let reply = await relay.call(`/c/${code}/events?since=0&wait=0&start=1`);
+  assert.ok(reply.body.last >= 1, 'the newest event number never drops back to 0');
+  assert.deepEqual(reply.body.events, []);
+  const start = reply.body.last;
+  relay.tick(300);
+  await relay.push(code, { events: [{ id: 's:2', type: 'gift', gift: 'Galaxy' }], tiktok: 't' });
+  reply = await relay.call(`/c/${code}/events?since=${start}&wait=0&start=0`);
+  assert.deepEqual(reply.body.events.map((e) => e.id), ['s:2']);
+  // Games from before the start flag still start with since=0.
+  reply = await relay.call(`/c/${code}/events?since=0`);
+  assert.equal(reply.body.last, start + 1);
+});
+
+test('on a brand-new relay, a started game asks for the events after 0', async () => {
+  const relay = setUp();
+  const code = await codeFor(SECRET);
+  let reply = await relay.call(`/c/${code}/events?since=0&wait=0&start=1`);
+  assert.equal(reply.body.last, 0);
+  await relay.push(code, { events: [{ id: 's:1', type: 'gift', gift: 'Rose' }], tiktok: 't' });
+  reply = await relay.call(`/c/${code}/events?since=0&wait=0&start=0`);
+  assert.deepEqual(reply.body.events.map((e) => e.id), ['s:1'], 'the very first gift arrives');
+});

@@ -64,7 +64,7 @@ local settings = {
 	perShare = Config.StonePerShare,
 	giftRules = table.clone(Config.GiftRules) :: { [string]: number },
 	-- Diamond Climb's and Chalkboard Count's own gift rules: platforms (or
-	-- numbers) per gift, negative to send them down (set on the control page).
+	-- numbers) per gift, negative to send them down (set in the gift settings).
 	climbRules = table.clone(Config.ClimbGiftRules) :: { [string]: number },
 	chalkRules = table.clone(Config.ChalkGiftRules) :: { [string]: number },
 	-- Wins per gift (from the gift settings): added to, or taken from, the win
@@ -1426,6 +1426,16 @@ local function placeCharacter(player: Player, character: Model)
 end
 
 local function applySetting(player: Player, action: string, value: any)
+	-- The wins box and its +1 / -1 change the win counter on screen: Diamond
+	-- Climb's or Chalkboard Count's own while the streamer is in that game.
+	local place = placeOf(player)
+	if (action == "setWins" or action == "addWins") and type(value) == "number" and value == value
+		and (place == "climb" or place == "chalk") then
+		local wins = if place == "climb" then climbGame.progress.wins else chalkGame.progress.wins
+		local change = if action == "addWins" then math.floor(value) else math.clamp(math.floor(value), -999999, 999999) - wins
+		if place == "climb" then climbGame.addWins(change) else chalkGame.addWins(change) end
+		return
+	end
 	if action == "setWins" and type(value) == "number" then
 		settings.wins = math.clamp(math.floor(value), -999999, 999999)
 	elseif action == "addWins" and type(value) == "number" then
