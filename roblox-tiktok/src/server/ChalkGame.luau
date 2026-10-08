@@ -88,6 +88,7 @@ export type Game = {
 	hold: (player: Player, value: any) -> (),
 	setting: (player: Player, action: string, value: any) -> boolean,
 	gift: (who: string, event: { [string]: any }, rocks: number, doubled: boolean, rule: number?) -> string,
+	addWins: (amount: number) -> number,
 	removing: (player: Player) -> (),
 }
 
@@ -330,6 +331,15 @@ function ChalkGame.start(options: Options): Game
 	-- own number for this gift (up if positive, down if negative, per gift);
 	-- without one, `rocks` (what it would do to the mountain) decides: its
 	-- sign up or down, the coins how far. Returns the feed's ending.
+	-- A gift that gives (or takes) wins: the board's win count changes by
+	-- `amount`, never below 0. Returns the new count.
+	function self.addWins(amount: number): number
+		progress.wins = math.clamp(progress.wins + math.floor(amount), 0, 999999)
+		publish()
+		options.save()
+		return progress.wins
+	end
+
 	function self.gift(who: string, event: { [string]: any }, rocks: number, doubled: boolean, rule: number?): string
 		if winning then return "" end
 		local coins = math.max(1, event.coins or 1)

@@ -68,6 +68,9 @@ local settings = {
 	-- numbers) per gift, negative to send them down (set on the control page).
 	climbRules = table.clone(Config.ClimbGiftRules) :: { [string]: number },
 	chalkRules = table.clone(Config.ChalkGiftRules) :: { [string]: number },
+	-- Wins per gift (from the gift settings): added to, or taken from, the win
+	-- counter of whichever game is being played.
+	winRules = {} :: { [string]: number },
 	giftBindings = {} :: { [string]: any },
 	-- Gifts the streamer added in the gift settings (name -> coins), for gifts
 	-- missing from the built-in list (see GiftCatalogue).
@@ -129,6 +132,7 @@ if saved then
 	settings.giftRules = cleanRules(settings.giftRules, 1500000)
 	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
 	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
+	settings.winRules = cleanRules(settings.winRules, 1000)
 	settings.customGifts = GiftSettings.cleanCustom(settings.customGifts)
 	-- Older saves kept gifters and likers; those totals cannot be split by side.
 	if type(settings.leaderboards.helpers) ~= "table" or type(settings.leaderboards.griefers) ~= "table" then
@@ -160,6 +164,7 @@ local function publishSettings()
 	State:SetAttribute("GiftRules", game:GetService("HttpService"):JSONEncode(settings.giftRules))
 	State:SetAttribute("ClimbRules", game:GetService("HttpService"):JSONEncode(settings.climbRules))
 	State:SetAttribute("ChalkRules", game:GetService("HttpService"):JSONEncode(settings.chalkRules))
+	State:SetAttribute("WinRules", game:GetService("HttpService"):JSONEncode(settings.winRules))
 	State:SetAttribute("GiftBindings", game:GetService("HttpService"):JSONEncode(settings.giftBindings))
 	State:SetAttribute("CustomGifts", game:GetService("HttpService"):JSONEncode(settings.customGifts))
 	local statueList = {}
@@ -1019,6 +1024,20 @@ local function processTikTok(event: TikTokFeed.Event)
 			elseif count == 1 then string.format("%s sent %s (%d of %d)", who, giftLabel or "a gift", event.part or 1, event.parts)
 			else string.format("%s sent %s x%d (%d of %d)", who, giftLabel or "a gift", count, event.part or 1, event.parts)
 		recordGifter(event, amount, coins * count)
+		-- Wins per gift (gift settings): the win counter of the game being played.
+		local winRule = settings.winRules[string.lower(event.gift or "")]
+		if winRule ~= nil and winRule ~= 0 then
+			local change = winRule * count
+			if chalkGame.writer() ~= nil then
+				chalkGame.addWins(change)
+			elseif climbGame.climber() ~= nil then
+				climbGame.addWins(change)
+			else
+				settings.wins = math.clamp(settings.wins + change, 0, 999999)
+				saveSettings()
+			end
+			text ..= string.format("  %s%d WIN%s", if change > 0 then "+" else "", change, if math.abs(change) == 1 then "" else "S")
+		end
 	elseif event.type == "like" then
 		local likes = math.max(1, math.floor(event.likes or 1))
 		amount = likes * settings.perLike
@@ -1533,7 +1552,7 @@ local function applySetting(player: Player, action: string, value: any)
 		settings.giftBindings[key] = { gift = binding.gift, coins = binding.coins, game = true }
 	elseif action == "setGiftSettings" and type(value) == "table" then
 		-- The full-screen gift settings: one gift's rules for each game and its key.
-		local problem = GiftSettings.apply(settings, value, { rough = 1500000, climb = ClimbPath.TOP, chalk = ChalkBoard.GOAL.max })
+		local problem = GiftSettings.apply(settings, value, { rough = 1500000, climb = ClimbPath.TOP, chalk = ChalkBoard.GOAL.max, wins = 1000 })
 		if problem then
 			notice(player, problem)
 			return

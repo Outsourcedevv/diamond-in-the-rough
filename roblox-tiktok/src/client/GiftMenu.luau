@@ -225,6 +225,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local roughBox = section("DIAMOND IN THE ROUGH: rocks per gift", "Positive breaks that many rocks off the mountain; negative adds stone. Empty: worked out from the coins.", "auto (from the coins)")
 	local climbBox = section("DIAMOND CLIMB: platforms per gift", "Positive sends the climber up; negative sends them down. Empty: worked out from the coins.", "auto (from the coins)")
 	local chalkBox = section("CHALKBOARD COUNT: numbers per gift", "Positive counts up; negative counts down. Empty: worked out from the coins.", "auto (from the coins)")
+	local winsBox = section("WINS per gift", "Adds wins (e.g. 1) or takes them away (e.g. -1) on the win counter of whichever game you're playing. Empty: no change.", "no change")
 	add(label(right, "KEYBIND (for TikFinity)", 15, GOLD, FONT, 20))
 	add(label(right, "Press the button, then the key. Shift or Ctrl with a key works too. Pressing it in the game sends this gift.", 13, MUTED, FONT_MEDIUM, 34))
 	local keyRow = add(make("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1 }, right))
@@ -252,7 +253,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	local capturing = false
 
 	local function rules()
-		return decode("GiftRules"), decode("ClimbRules"), decode("ChalkRules"), decode("GiftBindings"), decode("CustomGifts")
+		return decode("GiftRules"), decode("ClimbRules"), decode("ChalkRules"), decode("GiftBindings"), decode("CustomGifts"), decode("WinRules")
 	end
 	local function keyFor(bindings: { [string]: any }, name: string): string
 		local lower = string.lower(name)
@@ -270,13 +271,13 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		chosen = gift
 		capturing = false
 		status.Text = ""
-		local rough, climb, chalk, bindings = rules()
+		local rough, climb, chalk, bindings, _, wins = rules()
 		if gift == nil then
 			giftName.Text = "Pick a gift"
 			giftCoins.Text = "Choose one from the list, or search for a gift that's missing to add it."
 			coinsBox.Visible = false
 			removeCustom.Visible = false
-			for _, input in { roughBox, climbBox, chalkBox } do input.Text = "" end
+			for _, input in { roughBox, climbBox, chalkBox, winsBox } do input.Text = "" end
 			chosenKey = ""
 			showKey()
 			return
@@ -290,6 +291,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		roughBox.Text = if type(rough[lower]) == "number" then tostring(rough[lower]) else ""
 		climbBox.Text = if type(climb[lower]) == "number" then tostring(climb[lower]) else ""
 		chalkBox.Text = if type(chalk[lower]) == "number" then tostring(chalk[lower]) else ""
+		winsBox.Text = if type(wins[lower]) == "number" then tostring(wins[lower]) else ""
 		chosenKey = keyFor(bindings, gift.name)
 		showKey()
 	end
@@ -299,7 +301,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 		for _, child in list:GetChildren() do
 			if child:IsA("GuiObject") then child:Destroy() end
 		end
-		local rough, climb, chalk, bindings, custom = rules()
+		local rough, climb, chalk, bindings, custom, wins = rules()
 		local all = GiftCatalogue.all(custom :: any)
 		local shown = GiftCatalogue.search(all, search.Text)
 		local query = (string.gsub(search.Text, "^%s*(.-)%s*$", "%1"))
@@ -379,8 +381,9 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 				TextColor3 = MUTED,
 				TextXAlignment = Enum.TextXAlignment.Right,
 				TextTruncate = Enum.TextTruncate.AtEnd,
-				Text = string.format("Rough %s · Climb %s · Chalk %s%s",
+				Text = string.format("Rough %s · Climb %s · Chalk %s%s%s",
 					GiftMenu.ruleText(rough[lower]), GiftMenu.ruleText(climb[lower]), GiftMenu.ruleText(chalk[lower]),
+					if type(wins[lower]) == "number" and wins[lower] ~= 0 then " · Wins " .. GiftMenu.ruleText(wins[lower]) else "",
 					if key ~= "" then " · [" .. Keybinds.label(key) .. "]" else ""),
 			}, row)
 			row.Activated:Connect(function()
@@ -391,7 +394,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	end
 
 	search:GetPropertyChangedSignal("Text"):Connect(draw)
-	for _, name in { "GiftRules", "ClimbRules", "ChalkRules", "GiftBindings", "CustomGifts" } do
+	for _, name in { "GiftRules", "ClimbRules", "ChalkRules", "GiftBindings", "CustomGifts", "WinRules" } do
 		state:GetAttributeChangedSignal(name):Connect(function()
 			if open then draw() end
 		end)
@@ -439,6 +442,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 			rough = GiftMenu.parseAmount(roughBox.Text),
 			climb = GiftMenu.parseAmount(climbBox.Text),
 			chalk = GiftMenu.parseAmount(chalkBox.Text),
+			wins = GiftMenu.parseAmount(winsBox.Text),
 			key = chosenKey,
 		}
 	end
@@ -457,7 +461,7 @@ function GiftMenu.start(send: (string, any) -> (), state: Instance)
 	end)
 	reset.Activated:Connect(function()
 		if chosen == nil then return end
-		roughBox.Text, climbBox.Text, chalkBox.Text = "", "", ""
+		roughBox.Text, climbBox.Text, chalkBox.Text, winsBox.Text = "", "", "", ""
 		chosenKey = ""
 		capturing = false
 		showKey()
