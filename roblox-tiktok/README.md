@@ -44,6 +44,19 @@ A Roblox version of Diamond in the Rough made for TikTok LIVE. A big mountain ma
 - **Aim at stone.** A small dot marks the centre of the screen. The surface rock directly under it gets a white outline; the outline follows the same target used for digging and disappears when aiming away or opening settings.
 - **Dig with your hands.** First-person view with two hands: hold the left mouse button on the mountain and your hands take turns, four swings a second: each draws back, drives forward into the rock with the fingers clawed, and rakes the rubble down and back. The rock breaks as each hand lands (25 rocks a strike, about 100 a second), so what you see and what you dig stay in step. A swing always finishes once begun, so letting go never snaps a hand back. The hands are drawn small and close to the camera, so they never sink into the rock when you stand right against it. Connected, hinged fingers curl during the scoop; sleeves meet the palms, and the real avatar arms are hidden locally to prevent duplicate floating limbs; the animation pauses when you aim away from reachable stone.
 
+## Gift settings and TikFinity (no connector needed)
+
+In the game, press **Y** and click **Open gift settings (full screen)**. Every TikTok gift is listed with its coins and a search bar (gifts that are missing can be added with their coins). Pick a gift to set:
+
+- **Diamond in the Rough:** rocks per gift (negative adds stone),
+- **Diamond Climb:** platforms per gift (negative sends the climber down),
+- **Chalkboard Count:** numbers per gift (negative counts down),
+- **a keybind:** press **Set key**, then a key: letters like K, numbers, F1 to F8, the number pad, Insert, Home, End, Page Up/Down or Delete, on their own or with **Shift** or **Ctrl**, so there are hundreds to give out.
+
+Leave an amount empty to work it out from the gift's coins. **Save**, and **Test gift** to see it. Pressing a gift's key in the game sends that gift.
+
+**With TikFinity:** in TikFinity, add an action that **simulates a keystroke** (the gift's key, with Shift or Ctrl if you chose them) and an event that runs it when that gift is received. Keep the Roblox window focused while you stream, and every gift on your LIVE reaches the game through its key. Gifts sent by keys show as "A viewer sent …" in the feed and don't count on the leaderboards (the key doesn't say who sent it).
+
 ## Gift catalogue and keybinds
 
 Open the updated bridge control page at **http://localhost:8787** and enter your TikTok username to connect. Connecting is free. The catalogue starts with a starter list of common gifts, and every gift you receive on your LIVE is added to it automatically, with the coins TikTok reports, and saved for next time. After connecting, the bridge loads the room's full gift list straight from TikTok (free), and **Refresh from TikTok** loads it again. Only if TikTok doesn't send it does the bridge try the signed route through Euler Stream, which is a paid feature; then the page says so and keeps the list it has. The bridge never asks for the paid list while connecting.
