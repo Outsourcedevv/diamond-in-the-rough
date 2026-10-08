@@ -48,6 +48,12 @@ function ClimbView.pitch(index: number): number
 	return 0.8 + (index % 10) * 0.07
 end
 
+-- The wall's health colour: green when whole, gold, then red near breaking.
+function ClimbView.wallColour(health: number, max: number): string
+	local fraction = health / math.max(1, max)
+	return if fraction > 0.6 then "#76E6A0" elseif fraction > 0.25 then "#F6C85C" else "#FF5454"
+end
+
 -- What the climb's display says.
 function ClimbView.platformText(index: number): string
 	return string.format("PLATFORM %s / %s", Format.commas(math.floor(index + 0.5)), Format.commas(ClimbPath.TOP))
@@ -350,11 +356,15 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	-- The display follows the checkpoint, or the ride while a gift carries the climber.
 	local shownPlatform = attr("ClimbCheckpoint", 0)
 	local function refreshStats()
-		statsLabel.Text = string.format('BEST <font color="#FFFFFF">%s</font>    CLIMBS <font color="#F6C85C">%s</font>',
-			Format.commas(attr("ClimbBest", 0)), Format.commas(attr("ClimbWins", 0)))
+		local wall, wallMax = attr("ClimbWall", ClimbPath.WALL.default), attr("ClimbWallMax", ClimbPath.WALL.default)
+		statsLabel.Text = string.format('BEST <font color="#FFFFFF">%s</font>    CLIMBS <font color="#F6C85C">%s</font>    WALL <font color="%s">%s</font>',
+			Format.commas(attr("ClimbBest", 0)), Format.commas(attr("ClimbWins", 0)),
+			ClimbView.wallColour(wall, wallMax), Format.commas(wall))
 	end
 	state:GetAttributeChangedSignal("ClimbBest"):Connect(refreshStats)
 	state:GetAttributeChangedSignal("ClimbWins"):Connect(refreshStats)
+	state:GetAttributeChangedSignal("ClimbWall"):Connect(refreshStats)
+	state:GetAttributeChangedSignal("ClimbWallMax"):Connect(refreshStats)
 	refreshStats()
 	local lastWhole = -1
 	local wasHolding = false
@@ -397,6 +407,39 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		if tower then tower.Parent = if active then workspace else hiddenTower end
 	end
 	local startDiamond: (Instance) -> ()
+	-- The wall behind the start: its health over it, and how it takes hits.
+	local wallPart: BasePart? = nil
+	local wallColour: Color3? = nil
+	local wallBar: Frame? = nil
+	local wallText: TextLabel? = nil
+	local function refreshWall()
+		local health, max = attr("ClimbWall", ClimbPath.WALL.default), attr("ClimbWallMax", ClimbPath.WALL.default)
+		local bar, text = wallBar, wallText
+		if bar and text then
+			bar.Size = UDim2.fromScale(math.clamp(health / math.max(1, max), 0, 1), 1)
+			bar.BackgroundColor3 = Color3.fromHex(ClimbView.wallColour(health, max))
+			text.Text = string.format("WALL  %s / %s", Format.commas(health), Format.commas(max))
+		end
+	end
+	local function startWall(model: Instance)
+		local found = model:WaitForChild("ClimbWall", math.huge)
+		if found == nil or not found:IsA("BasePart") then return end
+		wallPart = found
+		wallColour = found.Color
+		local sign = make("BillboardGui", { Name = "WallHealth", Adornee = found, Size = UDim2.fromScale(14, 2.6),
+			StudsOffsetWorldSpace = Vector3.new(0, ClimbPath.WALL_SIZE.Y / 2 + 3, 0), LightInfluence = 0, MaxDistance = 300 }, player:WaitForChild("PlayerGui"))
+		local back = make("Frame", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromScale(0.5, 1), Size = UDim2.fromScale(1, 0.38),
+			BackgroundColor3 = Color3.fromRGB(20, 22, 30), BackgroundTransparency = 0.15, BorderSizePixel = 0 }, sign)
+		rounded(back, 6)
+		local fill = make("Frame", { Size = UDim2.fromScale(1, 1), BorderSizePixel = 0 }, back)
+		rounded(fill, 6)
+		local label = make("TextLabel", { Size = UDim2.fromScale(1, 0.58), BackgroundTransparency = 1, Font = FONT_HEAVY, TextScaled = true,
+			TextColor3 = WHITE, TextStrokeTransparency = 0.3, Text = "" }, sign)
+		wallBar, wallText = fill, label
+		refreshWall()
+	end
+	state:GetAttributeChangedSignal("ClimbWall"):Connect(refreshWall)
+	state:GetAttributeChangedSignal("ClimbWallMax"):Connect(refreshWall)
 	-- Started at the end (once everything it uses is ready).
 	local function findTower()
 		local model = workspace:WaitForChild("DiamondClimb", math.huge)
@@ -408,6 +451,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		for _, item in model:GetDescendants() do add(item) end
 		model.DescendantAdded:Connect(add)
 		task.spawn(startDiamond, model)
+		task.spawn(startWall, model)
 		showTower()
 	end
 
@@ -690,6 +734,36 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	local function onWin(data: any)
 		if active then winWaiting = data end
 	end
+	-- A push back past platform 0 hits the wall; at 0 health it breaks.
+	local function onWall(data: any)
+		if not active or type(data) ~= "table" then return end
+		local wall = wallPart
+		local at = if wall then wall.Position else ClimbPath.top(0)
+		local damage = tonumber(data.damage) or 0
+		if data.broke then
+			Sounds.play("bigBoom", at, 1.6)
+			Sounds.play("shatter", at, 1.4)
+			showShout("THE WALL BROKE! -1 WIN", RED, 4)
+		else
+			Sounds.play(if damage >= 200 then "boom" else "clang", at)
+			showShout("WALL -" .. Format.commas(damage), Color3.fromRGB(255, 160, 80), 1.6)
+		end
+		-- The wall flashes and shudders.
+		if wall and wallColour then
+			local base = wallColour
+			wall.Color = if data.broke then WHITE else RED
+			TweenService:Create(wall, TweenInfo.new(if data.broke then 1 else 0.4), { Color = base }):Play()
+			local home = ClimbPath.wallFrame()
+			task.spawn(function()
+				for i = 1, 8 do
+					local amount = (if data.broke then 0.8 else 0.25) * (1 - i / 8)
+					wall.CFrame = home * CFrame.new((math.random() - 0.5) * amount, 0, (math.random() - 0.5) * amount)
+					task.wait(0.03)
+				end
+				wall.CFrame = home
+			end)
+		end
+	end
 	local function onRestart()
 		if not active then return end
 		table.clear(rides)
@@ -749,6 +823,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		onGift = onGift,
 		onWin = onWin,
 		onRestart = onRestart,
+		onWall = onWall,
 	}
 end
 

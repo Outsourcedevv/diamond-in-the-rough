@@ -106,6 +106,29 @@ function ClimbPath.isOn(index: number, feet: Vector3, slack: number?): boolean
 	return flat <= ClimbPath.size(index) / 2 + 1.5 + extra and feet.Y >= top.Y - 1.5 - extra and feet.Y <= top.Y + 4 + extra * 2
 end
 
+-- The wall behind the start island. Gifts that push the climber back past
+-- platform 0 hit it instead: every platform they would have gone below 0
+-- takes 1 health off. At 0 health the wall breaks, the climber loses a win
+-- and the wall is built again at full health.
+ClimbPath.WALL = { min = 100, max = 1000000, default = 5000 }
+ClimbPath.WALL_SIZE = Vector3.new(26, 14, 3) -- across, up, thick
+
+-- The wall's middle, behind the start island (the way back, away from
+-- platform 1), standing on the island's level.
+function ClimbPath.wallFrame(): CFrame
+	local start = ClimbPath.top(0)
+	local ahead = ClimbPath.top(1) - start
+	local back = -Vector3.new(ahead.X, 0, ahead.Z).Unit
+	local at = start + back * (ClimbPath.START_SIZE / 2 + ClimbPath.WALL_SIZE.Z / 2 + 0.5) + Vector3.new(0, ClimbPath.WALL_SIZE.Y / 2, 0)
+	return CFrame.lookAt(at, at - back)
+end
+
+-- How far past platform 0 a push from `from` by `move` goes (the wall's
+-- damage), or 0.
+function ClimbPath.wallDamage(from: number, move: number): number
+	return math.max(0, -(math.floor(from) + math.floor(move)))
+end
+
 -- How many platforms a gift of `coins` (each) moves the climber, up or down.
 -- It grows with the square root of the coins: a Rose is 2, 100 coins is 20,
 -- a Galaxy 63 and 10,000 coins 200. `strength` is the streamer's multiplier.

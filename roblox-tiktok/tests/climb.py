@@ -97,6 +97,18 @@ check(ClimbPath.isOn(50, ClimbPath.top(50) + Vector3.new(0, 7, 0), 4) and not Cl
 local ahead = ClimbPath.standFrame(10)
 check((ahead.Position + ahead.LookVector * 10 - ClimbPath.top(11)).Magnitude < (ahead.Position - ClimbPath.top(11)).Magnitude, "standing facing the next platform")
 
+-- The wall behind the start: pushes past platform 0 hit it.
+check(ClimbPath.WALL.default == 5000, "the wall starts with 5,000 health")
+check(ClimbPath.wallDamage(0, -20) == 20 and ClimbPath.wallDamage(5, -20) == 15 and ClimbPath.wallDamage(30, -20) == 0 and ClimbPath.wallDamage(0, 20) == 0, "only the push past platform 0 hits the wall")
+local wallAt = ClimbPath.wallFrame().Position
+check((wallAt - ClimbPath.top(1)).Magnitude > (ClimbPath.top(0) - ClimbPath.top(1)).Magnitude, "the wall is behind the start, away from platform 1")
+check(math.abs(wallAt.Y - ClimbPath.WALL_SIZE.Y / 2 - ClimbPath.top(0).Y) < 1e-6, "the wall stands on the start island's level")
+local flatToWall = Vector3.new(wallAt.X - ClimbPath.top(0).X, 0, wallAt.Z - ClimbPath.top(0).Z).Magnitude
+check(flatToWall > ClimbPath.START_SIZE / 2, "the wall is at the island's edge, not on it")
+local walled = ClimbGame.clean({ wall = 99999, wallMax = 2000 })
+check(walled.wallMax == 2000 and walled.wall == 2000, "a saved wall is kept within its health")
+check(ClimbGame.clean(nil).wall == 5000 and ClimbGame.clean({ wallMax = 1 }).wallMax == ClimbPath.WALL.min, "a new climb has a whole wall")
+
 -- Gifts: more platforms for bigger gifts.
 check(ClimbPath.giftPlatforms(1) == 2 and ClimbPath.giftPlatforms(10) == 6 and ClimbPath.giftPlatforms(100) == 20
 	and ClimbPath.giftPlatforms(500) == 45 and ClimbPath.giftPlatforms(1000) == 63 and ClimbPath.giftPlatforms(10000) == 200, "platforms per gift")
@@ -145,18 +157,52 @@ for _, object in instances do
 		end
 		if object:IsA("BasePart") and object.CanCollide then
 			solid += 1
-			check(object.Name == "Platform" or object.Name == "StartIsland", "only platforms are solid: " .. tostring(object.Name))
+			check(object.Name == "Platform" or object.Name == "StartIsland" or object.Name == "ClimbWall", "only platforms (and the wall) are solid: " .. tostring(object.Name))
 		end
 		if object.ClassName == "TextLabel" or object.ClassName == "SurfaceGui" or object.ClassName == "BillboardGui" then lettered += 1 end
 		if object.ClassName == "PointLight" then lights += 1 end
 	end
 end
 check(platforms == ClimbPath.TOP, "1000 platforms built: " .. platforms)
-check(solid == ClimbPath.TOP + 1, "1000 platforms and the start island are solid")
+check(solid == ClimbPath.TOP + 2, "1000 platforms, the start island and the wall are solid")
 check(lettered == 0, "no lettered signs on the tower")
 check(lights <= 2, "the tower adds at most a light or two")
 check(built.diamond.Name == "ClimbDiamond" and typeof(built.diamond:GetAttribute("Centre")) == "Vector3", "the diamond waits at the top")
 check(built.spawn.Name == "ClimbStart" and built.spawn.Enabled == false, "the climb's respawn point is never a random spawn")
+-- The wall in a running climb: pushes past platform 0 wear it down, and a
+-- broken wall takes a win and is built again.
+local fired = {}
+local realGetService = game.GetService
+game.GetService = function(self, name)
+	if name == "Players" then return { GetPlayers = function() return {} end } end
+	return realGetService(self, name)
+end
+task.delay = function() end
+local climbState = newInstance("Folder")
+local settings = { climb = { wins = 3, wallMax = 100 } }
+local climbGame = ClimbGame.start({
+	settings = settings, save = function() end, state = climbState, parent = newInstance("Workspace"),
+	notify = { FireAllClients = function(_, kind, data) table.insert(fired, { kind = kind, data = data }) end },
+} :: any)
+check(climbState:GetAttribute("ClimbWall") == 100 and climbState:GetAttribute("ClimbWallMax") == 100, "the wall's health is shown")
+local from, to, damage, broke = climbGame.gift("Ann", 10, { coins = 1 })
+check(to == 10 and damage == 0 and not broke, "going up never hits the wall")
+from, to, damage, broke = climbGame.gift("Ben", -30, { coins = 1 })
+check(to == 0 and damage == 20 and not broke and climbGame.progress.wall == 80, "the push past platform 0 hits the wall")
+from, to, damage, broke = climbGame.gift("Cat", -50, { coins = 1 })
+check(to == 0 and damage == 50 and climbGame.progress.wall == 30, "gifts keep pushing at platform 0, into the wall")
+check(fired[#fired].kind == "climbWall" and fired[#fired].data.damage == 50 and fired[#fired].data.health == 30, "everyone sees the hit")
+from, to, damage, broke = climbGame.gift("Dee", -40, { coins = 1 })
+check(broke and climbGame.progress.wins == 2 and climbGame.progress.wall == 100, "a broken wall takes a win and is built again")
+check(fired[#fired].data.broke == true and climbState:GetAttribute("ClimbWins") == 2, "the break is shown")
+climbGame.progress.wins = 0
+climbGame.progress.wall = 1
+climbGame.gift("Eve", -5, { coins = 1 })
+check(climbGame.progress.wins == 0, "wins never go below 0")
+check(climbGame.setWallMax(2500) and climbGame.progress.wall == 2500 and climbState:GetAttribute("ClimbWallMax") == 2500, "the streamer sets the wall's health")
+check(not climbGame.setWallMax("x") and climbGame.setWallMax(1) and climbGame.progress.wallMax == ClimbPath.WALL.min, "the wall's health stays in range")
+game.GetService = realGetService
+
 print(string.format("PASS: %d climb checks (gap %.2f, step %.2f, head room %.1f, tower %.0f studs)", passed, widestGap, steepest, lowestHead, ClimbPath.height(ClimbPath.TOP)))
 '''
 

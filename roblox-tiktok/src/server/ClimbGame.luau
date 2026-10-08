@@ -25,7 +25,7 @@ local Climb = require(script.Parent:WaitForChild("Climb"))
 
 local ClimbGame = {}
 
-export type Progress = { checkpoint: number, best: number, wins: number, speed: number, jump: number, strength: number }
+export type Progress = { checkpoint: number, best: number, wins: number, speed: number, jump: number, strength: number, wall: number, wallMax: number }
 
 -- Gift strength choices in the streamer panel: platforms per gift times this.
 ClimbGame.STRENGTHS = { 0.5, 1, 2 }
@@ -36,7 +36,8 @@ ClimbGame.WIN_SECONDS = 8
 ClimbGame.MAX_SKIP = 20
 
 function ClimbGame.defaults(): Progress
-	return { checkpoint = 0, best = 0, wins = 0, speed = ClimbPath.SPEED.default, jump = ClimbPath.JUMP.default, strength = 1 }
+	return { checkpoint = 0, best = 0, wins = 0, speed = ClimbPath.SPEED.default, jump = ClimbPath.JUMP.default, strength = 1,
+		wall = ClimbPath.WALL.default, wallMax = ClimbPath.WALL.default }
 end
 
 -- A saved climb with anything missing or out of range put right.
@@ -55,6 +56,9 @@ function ClimbGame.clean(saved: any): Progress
 	number("wins", 0, 999999, true)
 	number("speed", ClimbPath.SPEED.min, ClimbPath.SPEED.max, false)
 	number("jump", ClimbPath.JUMP.min, ClimbPath.JUMP.max, false)
+	number("wallMax", ClimbPath.WALL.min, ClimbPath.WALL.max, true)
+	progress.wall = progress.wallMax
+	number("wall", 1, progress.wallMax, true)
 	if table.find(ClimbGame.STRENGTHS, saved.strength) then progress.strength = saved.strength end
 	progress.best = math.max(progress.best, progress.checkpoint)
 	-- A climb saved at the top (the server stopped during the win) starts again.
@@ -91,7 +95,8 @@ export type Game = {
 	setMove: (player: Player, value: any) -> (),
 	setStrength: (value: any) -> boolean,
 	restart: () -> (),
-	gift: (who: string, move: number, info: { [string]: any }) -> (number, number),
+	gift: (who: string, move: number, info: { [string]: any }) -> (number, number, number, boolean),
+	setWallMax: (value: any) -> boolean,
 	addWins: (amount: number) -> number,
 	removing: (player: Player) -> (),
 }
@@ -117,6 +122,8 @@ function ClimbGame.start(options: Options): Game
 		state:SetAttribute("ClimbJump", progress.jump)
 		state:SetAttribute("ClimbStrength", progress.strength)
 		state:SetAttribute("ClimbHoldStart", holdStart)
+		state:SetAttribute("ClimbWall", progress.wall)
+		state:SetAttribute("ClimbWallMax", progress.wallMax)
 	end
 	publish()
 
@@ -192,6 +199,8 @@ function ClimbGame.start(options: Options): Game
 		winning = true
 		cancelHold()
 		progress.wins += 1
+		-- A new climb starts with a whole wall.
+		progress.wall = progress.wallMax
 		setCheckpoint(ClimbPath.TOP)
 		notify:FireAllClients("climbWin", { wins = progress.wins, name = if player then player.DisplayName else "" })
 		task.delay(ClimbGame.WIN_SECONDS, function()
@@ -316,12 +325,40 @@ function ClimbGame.start(options: Options): Game
 	-- A gift (or a follow or share) moves the climber `move` platforms (up if
 	-- positive). Every climbing player's game plays it with `info` (the
 	-- gift's coins, name and sender). Returns where the climber was and is now.
-	function self.gift(who: string, move: number, info: { [string]: any }): (number, number)
+	-- The wall's health, set in the streamer panel: a full new wall.
+	function self.setWallMax(value: any): boolean
+		if type(value) ~= "number" or value ~= value then return false end
+		progress.wallMax = math.clamp(math.floor(value), ClimbPath.WALL.min, ClimbPath.WALL.max)
+		progress.wall = progress.wallMax
+		publish()
+		options.save()
+		return true
+	end
+
+	-- A push back past platform 0 hits the wall: 1 health a platform. At 0
+	-- the wall breaks, a win is lost and the wall is built again.
+	local function hitWall(who: string, damage: number): boolean
+		progress.wall -= damage
+		local broke = progress.wall <= 0
+		if broke then
+			progress.wins = math.max(0, progress.wins - 1)
+			progress.wall = progress.wallMax
+		end
+		publish()
+		options.save()
+		notify:FireAllClients("climbWall", { damage = damage, health = progress.wall, max = progress.wallMax, broke = broke, name = who, wins = progress.wins })
+		return broke
+	end
+
+	-- Returns where the climber was and is, and the wall's damage and whether it broke.
+	function self.gift(who: string, move: number, info: { [string]: any }): (number, number, number, boolean)
 		local from = progress.checkpoint
-		if winning or move == 0 then return from, from end
+		if winning or move == 0 then return from, from, 0, false end
+		local damage = if move < 0 then ClimbPath.wallDamage(from, move) else 0
+		local broke = if damage > 0 then hitWall(who, damage) else false
 		local to = math.clamp(from + move, 0, ClimbPath.TOP)
 		-- Already at the bottom (or top): no ride that goes nowhere.
-		if to == from then return from, from end
+		if to == from then return from, from, damage, broke end
 		-- Sent down from the top: the hold is lost.
 		if to < ClimbPath.TOP then cancelHold() end
 		setCheckpoint(to)
@@ -337,7 +374,7 @@ function ClimbGame.start(options: Options): Game
 			-- gift has sent them down meanwhile).
 			task.delay(ClimbPath.giftSeconds(info.coins or 1), startHold)
 		end
-		return from, to
+		return from, to, damage, broke
 	end
 
 	function self.removing(player: Player)

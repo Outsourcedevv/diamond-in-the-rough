@@ -1094,7 +1094,7 @@ local function processTikTok(event: TikTokFeed.Event)
 		local move = if rule ~= nil then math.floor(rule) * math.max(1, math.floor(event.count or 1))
 			elseif event.type == "gift" then ClimbGame.giftMove(amount, coins, event.count or 1, climbGame.progress.strength)
 			elseif amount > 0 then 1 else 0
-		local from, to = climbGame.gift(who, move, {
+		local from, to, wallDamage, wallBroke = climbGame.gift(who, move, {
 			coins = if event.type == "gift" then coins else 1,
 			gift = (giftLabel or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"))
 				.. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
@@ -1102,6 +1102,12 @@ local function processTikTok(event: TikTokFeed.Event)
 		local moved = to - from
 		if doubledGifts[event] then text = "2X " .. text end
 		text ..= if moved > 0 then string.format("  UP %d", moved) elseif moved < 0 then string.format("  DOWN %d", -moved) else ""
+		-- Pushed back past platform 0: the wall takes the rest.
+		if wallBroke then
+			text ..= "  WALL BROKEN! -1 WIN"
+		elseif wallDamage > 0 then
+			text ..= string.format("  WALL -%s", Format.commas(wallDamage))
+		end
 		Notify:FireAllClients("feed", { text = text, stone = 0, kind = event.type })
 		return
 	end
@@ -1534,6 +1540,10 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "setClimbStrength" and type(value) == "number" then
 		climbGame.setStrength(value)
+		return
+	elseif action == "setClimbWall" and type(value) == "number" then
+		-- The wall's health (Y panel): a whole new wall that strong.
+		climbGame.setWallMax(value)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
