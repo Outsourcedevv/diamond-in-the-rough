@@ -112,14 +112,14 @@ end
 -- What the Diamond Climb card says about the climb.
 function LobbyView.climbStatus(checkpoint: number, wins: number): string
 	local text = "Platform " .. Format.commas(checkpoint) .. " of 1,000"
-	if wins > 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " climb" else " climbs") end
+	if wins ~= 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " climb" else " climbs") end
 	return text
 end
 
 -- What the Chalkboard Count card says about the board.
 function LobbyView.chalkStatus(count: number, goal: number, wins: number): string
 	local text = "Count " .. Format.commas(count) .. " of " .. Format.commas(goal)
-	if wins > 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " win" else " wins") end
+	if wins ~= 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " win" else " wins") end
 	return text
 end
 

@@ -122,7 +122,7 @@ check(ClimbGame.giftMove(1, 1, 3, 1) == 6, "a combo counts each gift")
 
 -- A saved climb is cleaned up.
 local clean = ClimbGame.clean({ checkpoint = 2000, best = 5, wins = -3, speed = 99, jump = 1, strength = 7 })
-check(clean.checkpoint == 0 and clean.best == 1000 and clean.wins == 0 and clean.speed == ClimbPath.SPEED.max and clean.jump == ClimbPath.JUMP.min and clean.strength == 1,
+check(clean.checkpoint == 0 and clean.best == 1000 and clean.wins == -3 and clean.speed == ClimbPath.SPEED.max and clean.jump == ClimbPath.JUMP.min and clean.strength == 1,
 	"out of range saves are put right (a climb saved at the top starts again)")
 local kept = ClimbGame.clean({ checkpoint = 321.7, best = 400, wins = 2, speed = 24, jump = 9.5, strength = 2 })
 check(kept.checkpoint == 321 and kept.best == 400 and kept.wins == 2 and kept.speed == 24 and kept.jump == 9.5 and kept.strength == 2, "a good save is kept")
@@ -215,7 +215,7 @@ check(fired[#fired].data.broke == true and climbState:GetAttribute("ClimbWins") 
 climbGame.progress.wins = 0
 climbGame.progress.wall = 1
 climbGame.gift("Eve", -5, { coins = 1 })
-check(climbGame.progress.wins == 0, "wins never go below 0")
+check(climbGame.progress.wins == -1, "a broken wall can take wins below 0")
 check(climbGame.setWallMax(2500) and climbGame.progress.wall == 2500 and climbState:GetAttribute("ClimbWallMax") == 2500, "the streamer sets the wall's health")
 check(not climbGame.setWallMax("x") and climbGame.setWallMax(1) and climbGame.progress.wallMax == ClimbPath.WALL.min, "the wall's health stays in range")
 game.GetService = realGetService

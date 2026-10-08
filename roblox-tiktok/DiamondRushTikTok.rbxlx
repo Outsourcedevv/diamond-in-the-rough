@@ -6342,7 +6342,7 @@ local function processTikTok(event: TikTokFeed.Event)
 			elseif climbGame.climber() ~= nil then
 				climbGame.addWins(change)
 			else
-				settings.wins = math.clamp(settings.wins + change, 0, 999999)
+				settings.wins = math.clamp(settings.wins + change, -999999, 999999)
 				saveSettings()
 			end
 			text ..= string.format("  %s%d WIN%s", if change > 0 then "+" else "", change, if math.abs(change) == 1 then "" else "S")
@@ -6755,9 +6755,9 @@ end
 
 local function applySetting(player: Player, action: string, value: any)
 	if action == "setWins" and type(value) == "number" then
-		settings.wins = math.clamp(math.floor(value), 0, 999999)
+		settings.wins = math.clamp(math.floor(value), -999999, 999999)
 	elseif action == "addWins" and type(value) == "number" then
-		settings.wins = math.clamp(settings.wins + math.floor(value), 0, 999999)
+		settings.wins = math.clamp(settings.wins + math.floor(value), -999999, 999999)
 	elseif action == "setTitle" and type(value) == "string" then
 		local clean = filtered(player, string.sub(value, 1, 24))
 		if clean == nil then
@@ -7211,7 +7211,7 @@ function ChalkGame.clean(saved: any): Progress
 	end
 	number("goal", ChalkBoard.GOAL.min, ChalkBoard.GOAL.max, true)
 	number("count", 0, progress.goal, true)
-	number("wins", 0, 999999, true)
+	number("wins", -999999, 999999, true) -- gifts can take wins below 0
 	number("best", 0, ChalkBoard.GOAL.max, true)
 	number("speed", ChalkBoard.SPEED.min, ChalkBoard.SPEED.max, false)
 	number("saveCoins", 1, 1000000, true)
@@ -7499,9 +7499,9 @@ function ChalkGame.start(options: Options): Game
 	-- without one, `rocks` (what it would do to the mountain) decides: its
 	-- sign up or down, the coins how far. Returns the feed's ending.
 	-- A gift that gives (or takes) wins: the board's win count changes by
-	-- `amount`, never below 0. Returns the new count.
+	-- `amount`, and can go below 0. Returns the new count.
 	function self.addWins(amount: number): number
-		progress.wins = math.clamp(progress.wins + math.floor(amount), 0, 999999)
+		progress.wins = math.clamp(progress.wins + math.floor(amount), -999999, 999999)
 		publish()
 		options.save()
 		return progress.wins
@@ -8068,7 +8068,7 @@ function ClimbGame.clean(saved: any): Progress
 	end
 	number("checkpoint", 0, ClimbPath.TOP, true)
 	number("best", 0, ClimbPath.TOP, true)
-	number("wins", 0, 999999, true)
+	number("wins", -999999, 999999, true) -- gifts and the wall can take wins below 0
 	number("speed", ClimbPath.SPEED.min, ClimbPath.SPEED.max, false)
 	number("jump", ClimbPath.JUMP.min, ClimbPath.JUMP.max, false)
 	number("wallMax", ClimbPath.WALL.min, ClimbPath.WALL.max, true)
@@ -8318,9 +8318,9 @@ function ClimbGame.start(options: Options): Game
 	end
 
 	-- A gift that gives (or takes) wins: the climb's win count changes by
-	-- `amount`, never below 0. Returns the new count.
+	-- `amount`, and can go below 0. Returns the new count.
 	function self.addWins(amount: number): number
-		progress.wins = math.clamp(progress.wins + math.floor(amount), 0, 999999)
+		progress.wins = math.clamp(progress.wins + math.floor(amount), -999999, 999999)
 		publish()
 		options.save()
 		return progress.wins
@@ -8356,7 +8356,7 @@ function ClimbGame.start(options: Options): Game
 		progress.wall -= damage
 		local broke = progress.wall <= 0
 		if broke then
-			progress.wins = math.max(0, progress.wins - 1)
+			progress.wins = math.max(-999999, progress.wins - 1)
 			progress.wall = progress.wallMax
 		end
 		publish()
@@ -13477,7 +13477,8 @@ local boostTime = make("TextLabel", {
 	Text = "",
 }, boostTag)
 
--- Win counter, under the stone count ------------------------------------------------
+-- Win counter: under the stone count, or under the climb's or chalkboard's own
+-- display, showing the wins of whichever game is being played -----------------------
 local WINS_Y, WINS_Y_HOLDING = 102, 158 -- moves below the hold countdown while it shows
 local winsBox = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0),
@@ -13487,7 +13488,7 @@ local winsBox = make("TextLabel", {
 	Font = FONT_HEAVY,
 	TextSize = 26,
 	Text = "WINS: 0",
-}, roughHud)
+}, gui)
 rounded(winsBox, 14)
 make("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, winsBox)
 local winsStroke = make("UIStroke", { Thickness = 2, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
@@ -14651,9 +14652,15 @@ player:GetAttributeChangedSignal("DiamondRushAdmin"):Connect(refreshAdmin)
 refreshAdmin()
 
 -- Live updates ---------------------------------------------------------------------------
+-- The wins of the game being played (Diamond Climb and Chalkboard Count keep their own).
+local function currentWins(): number
+	if player:GetAttribute("InClimb") == true then return attr("ClimbWins", 0) end
+	if player:GetAttribute("InChalk") == true then return attr("ChalkWins", 0) end
+	return attr("Wins", 0)
+end
 local function refreshWins()
 	winsBox.Visible = attr("ShowWins", true)
-	winsBox.Text = Format.wins(attr("WinTitle", "WINS"), attr("Wins", 0), attr("WinGoal", 0))
+	winsBox.Text = Format.wins(attr("WinTitle", "WINS"), currentWins(), attr("WinGoal", 0))
 	winsBox.TextColor3 = hexColor(attr("WinTextColor", "#FFFFFF"), WHITE)
 	winsBox.BackgroundColor3 = hexColor(attr("WinBackgroundColor", "#2B2140"), PANEL)
 	winsStroke.Color = winsBox.TextColor3:Lerp(GOLD, 0.6)
@@ -14661,8 +14668,11 @@ local function refreshWins()
 		refreshPanelFields()
 	end
 end
-for _, name in { "Wins", "WinTitle", "WinGoal", "WinTextColor", "WinBackgroundColor", "ShowWins", "NextStartingStone" } do
+for _, name in { "Wins", "ClimbWins", "ChalkWins", "WinTitle", "WinGoal", "WinTextColor", "WinBackgroundColor", "ShowWins", "NextStartingStone" } do
 	State:GetAttributeChangedSignal(name):Connect(refreshWins)
+end
+for _, name in { "InGame", "InClimb", "InChalk" } do
+	player:GetAttributeChangedSignal(name):Connect(refreshWins)
 end
 refreshWins()
 
@@ -14684,7 +14694,9 @@ RunService.RenderStepped:Connect(function(dt: number)
 	-- The hold counter takes the top-centre slot; the hand and gem stay unobscured.
 	stoneBox.Visible = phase ~= "Holding"
 	timerLabel.Visible = phase ~= "Holding"
-	winsBox.Position = UDim2.new(0.5, 0, 0, if phase == "Holding" then WINS_Y_HOLDING else WINS_Y)
+	-- In Diamond in the Rough it moves below the hold countdown; the climb and
+	-- chalkboard have their own displays above it, the same height.
+	winsBox.Position = UDim2.new(0.5, 0, 0, if phase == "Holding" and roughHud.Visible then WINS_Y_HOLDING else WINS_Y)
 	-- The time takes the wins' place when the counter is hidden.
 	timerLabel.Position = UDim2.new(0.5, 0, 0, if winsBox.Visible then 154 else WINS_Y)
 	local now = workspace:GetServerTimeNow()
@@ -15956,7 +15968,8 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		TextSize = 13, TextColor3 = MUTED, RichText = true, Text = "" }, card)
 
 	-- The reset countdown banner.
-	local resetBox = make("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 112), Size = UDim2.fromOffset(440, 70), Visible = false }, gui)
+	-- Under the win counter (102 to 146).
+	local resetBox = make("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 156), Size = UDim2.fromOffset(440, 70), Visible = false }, gui)
 	glass(resetBox, 14)
 	resetBox.BackgroundColor3 = Color3.fromRGB(90, 16, 24)
 	local resetScale = make("UIScale", { Scale = 1 }, resetBox)
@@ -15966,7 +15979,7 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		TextSize = 14, TextColor3 = WHITE, Text = "" }, resetBox)
 
 	-- A big line for gifts, saves and wins.
-	local shout = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 192), Size = UDim2.fromOffset(700, 46),
+	local shout = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 236), Size = UDim2.fromOffset(700, 46),
 		BackgroundTransparency = 1, Font = FONT_HEAVY, TextSize = 38, TextColor3 = GOLD, TextStrokeTransparency = 0.3, TextTransparency = 1, Text = "" }, gui)
 	local shoutScale = make("UIScale", { Scale = 1 }, shout)
 	-- Who sent what, under a gift show's name.
@@ -15996,7 +16009,7 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	end
 
 	-- The hold at the goal, under the reset banner's place.
-	local hold = HoldCountdown.new(gui, 270, "HOLD THE GOAL")
+	local hold = HoldCountdown.new(gui, 300, "HOLD THE GOAL")
 	local hint = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -40), Size = UDim2.fromOffset(520, 22), BackgroundTransparency = 1,
 		Font = FONT, TextSize = 16, TextColor3 = WHITE, TextStrokeTransparency = 0.4, Text = "Hold the left mouse button, Space or the screen to write" }, gui)
 
@@ -18224,7 +18237,8 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	-- A big line under the display for milestones and the win.
 	local shout = make("TextLabel", {
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 112),
+		-- Under the win counter (102 to 146).
+		Position = UDim2.new(0.5, 0, 0, 158),
 		Size = UDim2.fromOffset(600, 46),
 		BackgroundTransparency = 1,
 		Font = FONT_HEAVY,
@@ -18252,7 +18266,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	end
 
 	-- The hold at the top, under the display.
-	local hold = HoldCountdown.new(gui, 166, "HOLD THE TOP")
+	local hold = HoldCountdown.new(gui, 214, "HOLD THE TOP")
 
 	-- The speed and jump sliders, bottom right (Settings can hide them).
 	local moveCard = make("Frame", {
@@ -21744,14 +21758,14 @@ end
 -- What the Diamond Climb card says about the climb.
 function LobbyView.climbStatus(checkpoint: number, wins: number): string
 	local text = "Platform " .. Format.commas(checkpoint) .. " of 1,000"
-	if wins > 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " climb" else " climbs") end
+	if wins ~= 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " climb" else " climbs") end
 	return text
 end
 
 -- What the Chalkboard Count card says about the board.
 function LobbyView.chalkStatus(count: number, goal: number, wins: number): string
 	local text = "Count " .. Format.commas(count) .. " of " .. Format.commas(goal)
-	if wins > 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " win" else " wins") end
+	if wins ~= 0 then text ..= " · " .. Format.commas(wins) .. (if wins == 1 then " win" else " wins") end
 	return text
 end
 

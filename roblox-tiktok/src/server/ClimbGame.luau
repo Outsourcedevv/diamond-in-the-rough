@@ -53,7 +53,7 @@ function ClimbGame.clean(saved: any): Progress
 	end
 	number("checkpoint", 0, ClimbPath.TOP, true)
 	number("best", 0, ClimbPath.TOP, true)
-	number("wins", 0, 999999, true)
+	number("wins", -999999, 999999, true) -- gifts and the wall can take wins below 0
 	number("speed", ClimbPath.SPEED.min, ClimbPath.SPEED.max, false)
 	number("jump", ClimbPath.JUMP.min, ClimbPath.JUMP.max, false)
 	number("wallMax", ClimbPath.WALL.min, ClimbPath.WALL.max, true)
@@ -303,9 +303,9 @@ function ClimbGame.start(options: Options): Game
 	end
 
 	-- A gift that gives (or takes) wins: the climb's win count changes by
-	-- `amount`, never below 0. Returns the new count.
+	-- `amount`, and can go below 0. Returns the new count.
 	function self.addWins(amount: number): number
-		progress.wins = math.clamp(progress.wins + math.floor(amount), 0, 999999)
+		progress.wins = math.clamp(progress.wins + math.floor(amount), -999999, 999999)
 		publish()
 		options.save()
 		return progress.wins
@@ -341,7 +341,7 @@ function ClimbGame.start(options: Options): Game
 		progress.wall -= damage
 		local broke = progress.wall <= 0
 		if broke then
-			progress.wins = math.max(0, progress.wins - 1)
+			progress.wins = math.max(-999999, progress.wins - 1)
 			progress.wall = progress.wallMax
 		end
 		publish()

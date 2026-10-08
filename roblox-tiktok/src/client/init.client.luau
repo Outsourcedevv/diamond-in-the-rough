@@ -235,7 +235,8 @@ local boostTime = make("TextLabel", {
 	Text = "",
 }, boostTag)
 
--- Win counter, under the stone count ------------------------------------------------
+-- Win counter: under the stone count, or under the climb's or chalkboard's own
+-- display, showing the wins of whichever game is being played -----------------------
 local WINS_Y, WINS_Y_HOLDING = 102, 158 -- moves below the hold countdown while it shows
 local winsBox = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0),
@@ -245,7 +246,7 @@ local winsBox = make("TextLabel", {
 	Font = FONT_HEAVY,
 	TextSize = 26,
 	Text = "WINS: 0",
-}, roughHud)
+}, gui)
 rounded(winsBox, 14)
 make("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, winsBox)
 local winsStroke = make("UIStroke", { Thickness = 2, Color = GOLD, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, winsBox)
@@ -1409,9 +1410,15 @@ player:GetAttributeChangedSignal("DiamondRushAdmin"):Connect(refreshAdmin)
 refreshAdmin()
 
 -- Live updates ---------------------------------------------------------------------------
+-- The wins of the game being played (Diamond Climb and Chalkboard Count keep their own).
+local function currentWins(): number
+	if player:GetAttribute("InClimb") == true then return attr("ClimbWins", 0) end
+	if player:GetAttribute("InChalk") == true then return attr("ChalkWins", 0) end
+	return attr("Wins", 0)
+end
 local function refreshWins()
 	winsBox.Visible = attr("ShowWins", true)
-	winsBox.Text = Format.wins(attr("WinTitle", "WINS"), attr("Wins", 0), attr("WinGoal", 0))
+	winsBox.Text = Format.wins(attr("WinTitle", "WINS"), currentWins(), attr("WinGoal", 0))
 	winsBox.TextColor3 = hexColor(attr("WinTextColor", "#FFFFFF"), WHITE)
 	winsBox.BackgroundColor3 = hexColor(attr("WinBackgroundColor", "#2B2140"), PANEL)
 	winsStroke.Color = winsBox.TextColor3:Lerp(GOLD, 0.6)
@@ -1419,8 +1426,11 @@ local function refreshWins()
 		refreshPanelFields()
 	end
 end
-for _, name in { "Wins", "WinTitle", "WinGoal", "WinTextColor", "WinBackgroundColor", "ShowWins", "NextStartingStone" } do
+for _, name in { "Wins", "ClimbWins", "ChalkWins", "WinTitle", "WinGoal", "WinTextColor", "WinBackgroundColor", "ShowWins", "NextStartingStone" } do
 	State:GetAttributeChangedSignal(name):Connect(refreshWins)
+end
+for _, name in { "InGame", "InClimb", "InChalk" } do
+	player:GetAttributeChangedSignal(name):Connect(refreshWins)
 end
 refreshWins()
 
@@ -1442,7 +1452,9 @@ RunService.RenderStepped:Connect(function(dt: number)
 	-- The hold counter takes the top-centre slot; the hand and gem stay unobscured.
 	stoneBox.Visible = phase ~= "Holding"
 	timerLabel.Visible = phase ~= "Holding"
-	winsBox.Position = UDim2.new(0.5, 0, 0, if phase == "Holding" then WINS_Y_HOLDING else WINS_Y)
+	-- In Diamond in the Rough it moves below the hold countdown; the climb and
+	-- chalkboard have their own displays above it, the same height.
+	winsBox.Position = UDim2.new(0.5, 0, 0, if phase == "Holding" and roughHud.Visible then WINS_Y_HOLDING else WINS_Y)
 	-- The time takes the wins' place when the counter is hidden.
 	timerLabel.Position = UDim2.new(0.5, 0, 0, if winsBox.Visible then 154 else WINS_Y)
 	local now = workspace:GetServerTimeNow()

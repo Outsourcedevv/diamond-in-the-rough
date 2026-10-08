@@ -173,7 +173,8 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	-- A big line under the display for milestones and the win.
 	local shout = make("TextLabel", {
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 112),
+		-- Under the win counter (102 to 146).
+		Position = UDim2.new(0.5, 0, 0, 158),
 		Size = UDim2.fromOffset(600, 46),
 		BackgroundTransparency = 1,
 		Font = FONT_HEAVY,
@@ -201,7 +202,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	end
 
 	-- The hold at the top, under the display.
-	local hold = HoldCountdown.new(gui, 166, "HOLD THE TOP")
+	local hold = HoldCountdown.new(gui, 214, "HOLD THE TOP")
 
 	-- The speed and jump sliders, bottom right (Settings can hide them).
 	local moveCard = make("Frame", {
