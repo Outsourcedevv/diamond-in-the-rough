@@ -22,7 +22,6 @@ local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
 local Mountain = require(script.Mountain)
-local TikTokFeed = require(script.TikTokFeed)
 local GiftSettings = require(script.GiftSettings)
 local Store = require(script.Store)
 local ClimbGame = require(script.ClimbGame)
@@ -47,6 +46,22 @@ local MountainSync = Instance.new("RemoteEvent")
 MountainSync.Name = "MountainSync"
 MountainSync.Parent = Remotes
 Remotes.Parent = ReplicatedStorage
+
+-- A gift (or a like, follow or share) to play: from a key TikFinity presses,
+-- the Y panel's test gifts or the gift settings' Test button.
+type GiftEvent = {
+	id: string,
+	type: string, -- "gift" | "like" | "follow" | "share"
+	user: string?,
+	name: string?,
+	gift: string?,
+	coins: number?, -- coins per gift
+	count: number?, -- gifts in this event
+	part: number?, -- set when a combo plays as separate gifts: which one this is
+	parts: number?, -- and how many there are
+	likes: number?,
+	rocks: number?, -- set only by the rebuild tests
+}
 
 -- Saved settings --------------------------------------------------------------
 local settings = {
@@ -88,9 +103,6 @@ local settings = {
 	-- Helpers gave coins to break the mountain, griefers to add stone to it.
 	leaderboards = { helpers = {}, griefers = {} } :: { helpers: { any }, griefers: { any } },
 	statues = {} :: { any },
-	-- The streamer's game code, from their connector's control page: this game
-	-- listens for that code's gifts (see TikTokFeed.useCode).
-	gameCode = "",
 	theme = "default", -- the map's look: "default" (alpine), "sakura", "farm", "desert" or "haunted"
 	skin = "stone", -- the mountain: "stone" with a diamond, or "hay" with a needle
 	-- Diamond Climb's progress, chosen speed and jump, and gift strength (see ClimbGame).
@@ -128,10 +140,6 @@ if saved then
 		end
 		return rules
 	end
-	-- Older saves also kept a relay address; it is no longer used.
-	(settings :: any).relayUrl = nil
-	settings.gameCode = string.upper((string.gsub(settings.gameCode, "[^%w]", "")))
-	if #settings.gameCode > Config.GameCodeMaxLength then settings.gameCode = "" end
 	settings.giftRules = cleanRules(settings.giftRules, 1500000)
 	settings.climbRules = cleanRules(settings.climbRules, ClimbPath.TOP)
 	settings.chalkRules = cleanRules(settings.chalkRules, ChalkBoard.GOAL.max)
@@ -186,7 +194,6 @@ local function publishSettings()
 	local statueList = {}
 	for _, statue in settings.statues do table.insert(statueList, { name = statue.n, coins = statue.c }) end
 	State:SetAttribute("Statues", game:GetService("HttpService"):JSONEncode(statueList))
-	State:SetAttribute("GameCode", settings.gameCode)
 	State:SetAttribute("Theme", settings.theme)
 	State:SetAttribute("Skin", settings.skin)
 end
@@ -954,8 +961,8 @@ local function scheduleBoards()
 	task.delay(1, refreshBoards)
 end
 -- `rocks` is the gift's effect: positive breaks the mountain, negative adds stone.
-local function recordGifter(event: TikTokFeed.Event, rocks: number, coins: number)
-	-- Test gifts (from the settings panel or the bridge page) never count.
+local function recordGifter(event: GiftEvent, rocks: number, coins: number)
+	-- Test gifts and keyed gifts (the sender isn't known) never count.
 	if event.user == "tester" or string.sub(event.id, 1, 5) == "test-" then return end
 	if rocks == 0 then return end
 	local key = string.lower(event.user or event.name or "")
@@ -990,10 +997,10 @@ local diamondBird = require(script.DiamondBird).start({
 	end,
 })
 -- Gifts that arrived during the bonus, so the feed can say so.
-local doubledGifts: { [TikTokFeed.Event]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+local doubledGifts: { [GiftEvent]: boolean } = setmetatable({}, { __mode = "k" }) :: any
 
--- TikTok ------------------------------------------------------------------------
-local function processTikTok(event: TikTokFeed.Event)
+-- Gifts ------------------------------------------------------------------------
+local function processTikTok(event: GiftEvent)
 	-- Names and gift names come from TikTok (or a typed keybind), so they go
 	-- through Roblox's text filter before anyone sees them.
 	local who = boardName(event.name or event.user or "Someone") or "Viewer"
@@ -1123,10 +1130,10 @@ end
 
 -- One yielding worker owns all gift mutations; polling stays responsive and
 -- overlapping live/test events cannot corrupt the grid or overtake each other.
-local giftQueue: { TikTokFeed.Event } = {}
+local giftQueue: { GiftEvent } = {}
 local giftHead = 1
 local giftWorkerRunning = false
-local enqueue: (TikTokFeed.Event) -> ()
+local enqueue: (GiftEvent) -> ()
 
 -- A gift sent several times at once (Galaxy x10) plays as that many separate
 -- gifts: each one blasts or adds its own stone with its own effect and feed
@@ -1137,7 +1144,7 @@ local MAX_SPLIT = 20
 -- Seconds between the gifts of a combo, by the gift's effect tier: about half
 -- an effect, so at most two overlap (the client plays two at once).
 local SPLIT_SPACING = { 0.6, 0.8, 1.2, 2.2, 2.8, 3.7 }
-local function splitCombo(event: TikTokFeed.Event, doubled: boolean)
+local function splitCombo(event: GiftEvent, doubled: boolean)
 	local count = math.max(1, math.floor(event.count or 1))
 	local parts = math.min(count, MAX_SPLIT)
 	local spacing = SPLIT_SPACING[GiftTier.forCoins(math.max(1, event.coins or 1))]
@@ -1151,7 +1158,7 @@ local function splitCombo(event: TikTokFeed.Event, doubled: boolean)
 	end
 end
 
-local function onTikTok(event: TikTokFeed.Event)
+local function onTikTok(event: GiftEvent)
 	-- While the diamond bird's bonus runs, a gift counts as if it were sent
 	-- twice: double the stone blasted or added, the effect and the leaderboard
 	-- coins. It is decided on arrival, so gifts still queued keep their bonus.
@@ -1168,7 +1175,7 @@ local function onTikTok(event: TikTokFeed.Event)
 	enqueue(event)
 end
 
-function enqueue(event: TikTokFeed.Event)
+function enqueue(event: GiftEvent)
 	table.insert(giftQueue, event)
 	State:SetAttribute("GiftQueueLength", #giftQueue - giftHead + 1)
 	if giftWorkerRunning then return end
@@ -1206,28 +1213,6 @@ function enqueue(event: TikTokFeed.Event)
 		State:SetAttribute("GiftProcessing", false)
 	end)
 end
-
--- The status can carry the streamer's TikTok username, so it is filtered too.
-local function shownStatus(status: string): string
-	if not string.find(status, "@", 1, true) then return status end
-	return boardName(status) or "connected"
-end
-local function setTikTokStatus(status: string)
-	State:SetAttribute("TikTok", shownStatus(status))
-end
-TikTokFeed.start(Config.BridgeUrls, onTikTok, setTikTokStatus)
-
--- The published game: this streamer's own gifts arrive from their connector
--- under the game code they typed in the Y panel.
-local function useCode()
-	TikTokFeed.useCode(settings.gameCode, onTikTok, function(status: string)
-		-- In Studio with no code, the connector on this PC reports instead.
-		if RunService:IsStudio() and settings.gameCode == "" then return end
-		status = shownStatus(status)
-		State:SetAttribute("TikTok", if settings.gameCode == "" then status else status .. " (code " .. settings.gameCode .. ")")
-	end, Config.RelayUrl)
-end
-useCode()
 
 -- Pickaxe mining and settings ---------------------------------------------------------
 local function isAdmin(player: Player): boolean
@@ -1523,19 +1508,6 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
 		return
-	elseif action == "setGameCode" and type(value) == "string" then
-		-- GAME CODE in the Y panel: the code the connector's control page shows.
-		-- This game then listens for that code's gifts.
-		local code = string.upper((string.gsub(value, "[^%w]", "")))
-		if #code > Config.GameCodeMaxLength then
-			notice(player, "That game code is too long. Copy it from the control page.")
-			return
-		end
-		settings.gameCode = code
-		saveSettings()
-		useCode()
-		notice(player, if code == "" then "Game code cleared." else "Game code set to " .. code .. ".")
-		return
 	elseif action == "setTheme" and type(value) == "string" then
 		setTheme(value)
 		return
@@ -1799,5 +1771,4 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 publishSettings()
-State:SetAttribute("TikTok", "Starting…")
 newRound()

@@ -2,7 +2,7 @@
 -- The full-screen gift settings (streamer only): every TikTok gift with a
 -- search bar; pick one to set what it does in each game and the key that
 -- sends it. TikFinity can press that key whenever the gift arrives on the
--- LIVE, so the game reacts to real gifts without any connector.
+-- LIVE, so the game reacts to real gifts.
 -- GiftMenu.start(send, state, notice) builds it; open it with GiftMenu.setOpen.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

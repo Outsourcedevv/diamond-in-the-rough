@@ -21,7 +21,7 @@
     },
     "HttpService": {
       "$properties": {
-        "HttpEnabled": true
+        "HttpEnabled": false
       }
     },
     "Workspace": {

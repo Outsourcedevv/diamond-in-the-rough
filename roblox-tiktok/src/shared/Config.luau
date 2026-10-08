@@ -63,20 +63,8 @@ local Config = {
 	DigSoundId = "",
 	DigSoundVolume = 0.5,
 
-	-- TikTok ------------------------------------------------------------------
-	BridgeUrls = { "http://localhost:8787", "http://127.0.0.1:8787" }, -- the bridge app (Roblox Studio)
-	-- The published game: each streamer's connector sends their gifts to the
-	-- Diamond Rush relay (relay/worker.js on Cloudflare) under their game code,
-	-- and they type the code in the Y panel. bridge/cloud.mjs has the same address.
-	RelayUrl = "https://diamond-rush-relay.diamondbridgeconnector.workers.dev",
-	GameCodeMaxLength = 12,
-	-- Where streamers get the TikTok connector. Roblox does not allow links
-	-- that lead off Roblox inside the game, so name the place and put the
-	-- actual Discord invite under Social Links on the game's page.
-	ConnectorMessage = "Streamers: join our Discord to download the TikTok connector (DiamondRushBridge.exe). The Discord link is on this game's page, under Social Links.",
-
 	-- Single player: whoever plays is the streamer, so every player gets the Y
-	-- panel, test gifts and gift keybinds. Set to false for a game where others
+	-- panel, test gifts and gift settings (with their keys). Set to false for a game where others
 	-- join; then only the owner and Admins can.
 	SinglePlayer = true,
 	-- Extra Roblox user ids allowed to change settings (the owner always can).

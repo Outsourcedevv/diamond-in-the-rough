@@ -757,16 +757,6 @@ panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
 
--- The code from the connector's control page tells this game which stream's
--- gifts are its own.
-panelLabel("TIKTOK CONNECTOR")
-panelLabel(Config.ConnectorMessage)
-panelLabel("GAME CODE (shown on the connector's page)")
-local gameCodeBox = panelBox("", function(text)
-	send("setGameCode", text)
-end)
-gameCodeBox.PlaceholderText = "e.g. ABCD EFGH, or empty for none"
-
 panelLabel("MAP THEME (changes for everyone straight away)")
 local THEME_BUTTONS = { { "Alpine", "default" }, { "Sakura", "sakura" }, { "Farm", "farm" }, { "Desert", "desert" }, { "Haunted", "haunted" } }
 local themeButtons: { TextButton } = {}
@@ -960,8 +950,6 @@ local function refreshPanelFields()
 	perLikeBox.Text = "Like: " .. tostring(attr("PerLike", Config.StonePerLike))
 	perFollowBox.Text = "Follow: " .. tostring(attr("PerFollow", Config.StonePerFollow))
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
-	local code = attr("GameCode", "")
-	gameCodeBox.Text = if #code == 8 then string.sub(code, 1, 4) .. " " .. string.sub(code, 5) else code
 end
 
 -- Settings (every player): the field of view and hiding the buttons, from the
@@ -1273,7 +1261,8 @@ RunService.RenderStepped:Connect(function(dt: number)
 	if boosted then setText(boostTime, Format.duration(boostLeft)) end
 	local roundStart = attr("RoundStart", now)
 	setText(timerLabel, '<font color="#A8AEBE">TIME</font>   ' .. Format.duration(if phase == "Won" then attr("LastTime", 0) else now - roundStart))
-	setText(status, "TikTok: " .. tostring(attr("TikTok", "")) .. (if attr("GiftProcessing", false) then " · Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else ""))
+	-- Shown only while gifts are being played on the mountain.
+	setText(status, if attr("GiftProcessing", false) then "Updating mountain (" .. tostring(attr("GiftQueueLength", 0)) .. " queued)" else "")
 
 	if phase == "Holding" then
 		local elapsed = now - attr("HoldStart", now)

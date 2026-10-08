@@ -1,6 +1,6 @@
 --!strict
 -- Gift keybinds: keys the streamer can give a gift to, so pressing the key in
--- the game sends that gift (no TikTok or connector needed). TikFinity can
+-- the game sends that gift. TikFinity can
 -- press the key when the gift arrives on the LIVE. Set from the gift settings
 -- (GiftMenu); the server publishes them as the
 -- State attribute "GiftBindings" (JSON {"Shift+K": {gift, coins}}).
