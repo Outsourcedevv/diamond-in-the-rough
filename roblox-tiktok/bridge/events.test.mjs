@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createEventQueue, createGiftTracker, likeEvent, packMessages } from './events.mjs';
+import fs from 'node:fs';
+import { createEventQueue, createGiftTracker, likeEvent, CONNECT_OPTIONS } from './events.mjs';
 
 const rose = (repeatCount, repeatEnd) => ({
   giftId: 5655,
@@ -71,16 +72,21 @@ test('the queue numbers events and returns only newer ones', () => {
   assert.match(queue.since(4)[0].id, /^[0-9a-f]{8}:5$/);
 });
 
-test('open cloud messages stay under the size limit and keep every event', () => {
-  const queue = createEventQueue();
-  const events = [];
-  for (let i = 0; i < 40; i += 1) events.push(queue.push({ type: 'gift', user: `user${i}`, name: `Viewer number ${i}`, gift: 'Rose', coins: 1, count: 1 }));
-  const messages = packMessages(events);
-  assert.ok(messages.length > 1);
-  let total = 0;
-  for (const message of messages) {
-    assert.ok(Buffer.byteLength(message) <= 900);
-    total += JSON.parse(message).length;
+test('connecting never asks for the paid gift list', () => {
+  assert.equal(CONNECT_OPTIONS.enableExtendedGiftInfo, false);
+  const source = fs.readFileSync(new URL('./bridge.mjs', import.meta.url), 'utf8');
+  assert.match(source, /new TikTokLiveConnection\(username, CONNECT_OPTIONS\)/);
+  assert.doesNotMatch(source, /enableExtendedGiftInfo:\s*true/);
+});
+
+test('the connector only passes on real LIVE events; gift settings live in the game', () => {
+  const bridge = fs.readFileSync(new URL('./bridge.mjs', import.meta.url), 'utf8');
+  const page = fs.readFileSync(new URL('./control.html', import.meta.url), 'utf8');
+  // No pretend gifts, and none of the old rule, theme or skin controls.
+  for (const route of ['/test', '/catalogue', '/game-rule', '/theme', '/skin']) {
+    assert.doesNotMatch(bridge, new RegExp(`pathname === '${route}`));
+    assert.doesNotMatch(page, new RegExp(`['"\`]${route}['"\`/]`));
   }
-  assert.equal(total, 40);
+  assert.doesNotMatch(bridge, /rocks/);
+  assert.match(bridge, /rules: \[\]/);
 });

@@ -110,23 +110,23 @@ relay.tiktok.ABCDEFGH = "connected to @streamer"
 TikTokFeed.useCode("abcd efgh", onEvent, onStatus, URL)
 step(0.5)
 check(string.find(relay.asked[1], "https://relay.example.workers.dev/c/ABCDEFGH/events?since=0", 1, true) == 1, "asks the relay for its cleaned-up code")
-check(#got == 1 and got[1] == "giftRule:Rose", "starts from the rules, not old gifts")
+check(#got == 0, "starts after the old gifts, and ignores rules from outside (the game's own gift settings rule)")
 check(status == "connected to @streamer", "shows the TikTok status")
 
 send("ABCDEFGH", { id = "s:1", type = "gift", gift = "Galaxy" })
 send("OTHERCOD", { id = "x:1", type = "gift", gift = "Lion" })
 send("ABCDEFGH", { id = "s:2", type = "like", likes = 9 })
 step(10)
-check(#got == 3 and got[2] == "gift:Galaxy" and got[3] == "like:9", "new gifts arrive in order, only this code's")
+check(#got == 2 and got[1] == "gift:Galaxy" and got[2] == "like:9", "new gifts arrive in order, only this code's")
 step(30)
-check(#got == 3, "nothing twice")
+check(#got == 2, "nothing twice")
 
 -- The relay goes down for a moment: it keeps trying.
 relay.down = 4
 send("ABCDEFGH", { id = "s:3", type = "gift", gift = "Rose" })
 step(9)
 step(60)
-check(got[4] == "gift:Rose", "gets going again once the relay is back")
+check(got[3] == "gift:Rose", "gets going again once the relay is back")
 
 -- A new code: the old one stops.
 TikTokFeed.useCode("WXYZ2345", onEvent, onStatus, URL)

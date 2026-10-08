@@ -300,11 +300,6 @@ for _, key in { "W", "A", "S", "D", "Space", "E", "G", "H", "P", "Y", "I", "O", 
 	check(not Keybinds.allowed(key), "keys the game uses stay free: " .. tostring(key))
 end
 check(Keybinds.label("One") == "1" and Keybinds.label("Zero") == "0" and Keybinds.label("K") == "K", "keys are shown as on the keyboard")
-local cleaned = Keybinds.clean("  Rose ", 1.7)
-check(cleaned ~= nil and cleaned.gift == "Rose" and cleaned.coins == 1, "a binding keeps the gift's name and whole coins")
-check(Keybinds.clean("", 5) == nil and Keybinds.clean("   ", 5) == nil and Keybinds.clean("Rose", "5") == nil and Keybinds.clean(nil, 5) == nil, "bad bindings are refused")
-local capped = Keybinds.clean(string.rep("x", 80), 10 ^ 9)
-check(capped ~= nil and #capped.gift == 40 and capped.coins == 100000, "long names and huge coin counts are capped")
 
 print(string.format("%d passed, %d failed", passed, failed))
 if failed > 0 then

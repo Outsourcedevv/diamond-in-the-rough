@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { codeFor, ruleId, placeFileType, placeVersionUrl, CODE_ALPHABET, CODE_LENGTH } from './cloud.mjs';
+import { codeFor, placeFileType, placeVersionUrl, CODE_ALPHABET, CODE_LENGTH } from './cloud.mjs';
 
 test('a game code is 8 easy-to-read characters, the same for the same secret', () => {
   const code = codeFor('a'.repeat(48));
@@ -8,11 +8,6 @@ test('a game code is 8 easy-to-read characters, the same for the same secret', (
   assert.ok([...code].every((c) => CODE_ALPHABET.includes(c)));
   assert.equal(codeFor('a'.repeat(48)), code);
   assert.notEqual(codeFor('b'.repeat(48)), code);
-});
-
-test('a rule keeps its id while it stays the same', () => {
-  assert.equal(ruleId({ gift: 'Rose', rocks: 5 }), ruleId({ gift: 'Rose', rocks: 5 }));
-  assert.notEqual(ruleId({ gift: 'Rose', rocks: 5 }), ruleId({ gift: 'Rose', rocks: 6 }));
 });
 
 test('place files are recognised and sent to the right address', () => {

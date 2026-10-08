@@ -11,7 +11,7 @@ local RunService = game:GetService("RunService")
 
 export type Event = {
 	id: string,
-	type: string, -- "gift" | "like" | "follow" | "share" | "giftRule" | "climbRule" | "chalkRule" | "theme" | "skin" | "status"
+	type: string, -- "gift" | "like" | "follow" | "share" (and "status" from the relay)
 	user: string?,
 	name: string?,
 	gift: string?,
@@ -20,12 +20,7 @@ export type Event = {
 	part: number?, -- set by the server when it plays a combo as separate gifts: which one this is
 	parts: number?, -- and how many there are
 	likes: number?,
-	rocks: number?,
-	keybind: string?,
-	amount: number?, -- "climbRule" and "chalkRule" events: platforms or numbers per gift, negative for down
-	clear: boolean?, -- and true when the rule is removed
-	theme: string?, -- "theme" events: the map theme the control page chose
-	skin: string?, -- "skin" events: stone and diamond, or hay and needle
+	rocks: number?, -- set only by the game's own rebuild tests, never from outside
 	tiktok: string?, -- "status" events: the connector's TikTok status line
 }
 
@@ -34,8 +29,12 @@ local TikTokFeed = {}
 local seen: { [string]: boolean } = {}
 local seenOrder: { string } = {}
 
+-- Only viewers' gifts, likes, follows and shares come from outside; gift rules
+-- and the rest are set in the game itself (the gift settings and Y panel).
+local ACCEPTED = { gift = true, like = true, follow = true, share = true }
+
 local function deliver(raw: any, onEvent: (Event) -> ())
-	if type(raw) ~= "table" or type(raw.id) ~= "string" or type(raw.type) ~= "string" then
+	if type(raw) ~= "table" or type(raw.id) ~= "string" or not ACCEPTED[raw.type] then
 		return
 	end
 	if seen[raw.id] then
@@ -47,12 +46,6 @@ local function deliver(raw: any, onEvent: (Event) -> ())
 		seen[table.remove(seenOrder, 1) :: string] = nil
 	end
 	local event: Event = {
-		rocks = if type(raw.rocks) == "number" and raw.rocks == raw.rocks then math.clamp(raw.rocks, -1500000, 1500000) else nil,
-		keybind = if type(raw.keybind) == "string" then string.sub(raw.keybind, 1, 16) else nil,
-		amount = if type(raw.amount) == "number" and raw.amount == raw.amount then math.clamp(raw.amount, -100000, 100000) else nil,
-		clear = if raw.clear == true then true else nil,
-		theme = if type(raw.theme) == "string" then string.sub(raw.theme, 1, 16) else nil,
-		skin = if type(raw.skin) == "string" then string.sub(raw.skin, 1, 16) else nil,
 		tiktok = if type(raw.tiktok) == "string" then string.sub(raw.tiktok, 1, 80) else nil,
 		id = raw.id,
 		type = raw.type,
@@ -153,8 +146,7 @@ function TikTokFeed.start(urls: { string }, onEvent: (Event) -> (), onStatus: (s
 			if decoded and type(data) == "table" then
 				failures = 0
 				-- The game just started: the bridge's older events were already
-				-- played (or sent before Play), so only its gift rules apply
-				-- (the mountain's, the climb's and the chalkboard's).
+				-- played (or sent before Play), so they are skipped.
 				local fresh = session == ""
 				if data.session ~= session then
 					-- The bridge restarted: start again from its first event.
@@ -163,9 +155,7 @@ function TikTokFeed.start(urls: { string }, onEvent: (Event) -> (), onStatus: (s
 				end
 				if type(data.events) == "table" then
 					for _, raw in data.events do
-						if not fresh or (type(raw) == "table" and (raw.type == "giftRule" or raw.type == "climbRule" or raw.type == "chalkRule")) then
-							deliver(raw, onEvent)
-						end
+						if not fresh then deliver(raw, onEvent) end
 					end
 				end
 				if type(data.last) == "number" then

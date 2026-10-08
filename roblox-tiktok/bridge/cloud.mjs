@@ -30,12 +30,6 @@ export function codeFor(secret) {
   return code;
 }
 
-// An id for a rule that stays the same while the rule does, so a game that
-// already has it skips the repeat and a game that just started takes it.
-export function ruleId(rule) {
-  return `r${createHash('sha256').update(JSON.stringify(rule)).digest('hex').slice(0, 12)}`;
-}
-
 // Updating the published game -------------------------------------------------
 // The owner's connector can upload a new place file straight to Roblox (Open
 // Cloud place publishing), for when Studio's own publish gets stuck. This uses

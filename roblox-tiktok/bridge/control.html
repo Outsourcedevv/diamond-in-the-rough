@@ -76,10 +76,6 @@
   button:active { transform: translateY(0); }
   button:disabled { opacity: .55; cursor: progress; transform: none; }
   button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, .scroll-hint:focus-visible { outline: 3px solid rgba(200, 50, 60, .38); outline-offset: 2px; }
-  button.gift { background: var(--blush); color: var(--ink); box-shadow: inset 0 0 0 1px var(--blush-deep); }
-  button.gift:hover { background: #fbd9e4; filter: none; }
-  button.rebuild { background: linear-gradient(180deg, #38906f, #266a52); box-shadow: 0 6px 14px -8px rgba(25, 85, 60, .75), inset 0 0 0 1px rgba(214, 240, 224, .35); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
   .status { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; }
   .status b { color: var(--muted); font-weight: 600; }
   .good { color: var(--ok); font-weight: 600; } .wait { color: var(--wait); font-weight: 600; }
@@ -88,22 +84,9 @@
   li::before { content: ""; position: absolute; left: 2px; top: 12px; width: 12px; height: 14px; background: var(--petal) center / contain no-repeat; }
   li:last-child { border: 0; }
   small { color: var(--muted); }
-  .catalogue { max-height: 340px; overflow: auto; margin: 12px 0; padding: 2px; }
-  .catalogue button { text-align: left; min-height: 72px; background: #fff; color: var(--ink); border: 2px solid var(--blush-deep); box-shadow: none; }
-  .catalogue button:hover { background: #fff4f7; filter: none; }
-  .catalogue button[aria-pressed="true"] { border-color: var(--vermilion); background: #fff0f3; }
-  .catalogue small { display: block; }
-  .editor { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 14px 0; }
-  .editor label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-weight: 600; font-size: 14px; }
-  .editor input { flex: initial; width: 100%; }
-  #catalogueMessage { min-height: 24px; margin-top: 10px; }
-  .game-rules li { display: flex; align-items: center; gap: 10px; }
-  .game-rules li span { flex: 1; }
-  .game-rules button { padding: 6px 12px; font-size: 14px; }
-  .game-message { min-height: 24px; margin-top: 10px; }
   details summary { cursor: pointer; font-family: var(--serif); font-weight: 700; color: var(--vermilion-deep); }
   footer { position: relative; z-index: 10; text-align: center; padding: 0 16px 40px; font-family: var(--serif); color: var(--muted); }
-  @media (max-width: 540px) { .editor { grid-template-columns: 1fr; } section { padding: 22px 16px 18px; } }
+  @media (max-width: 540px) { section { padding: 22px 16px 18px; } }
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     .scene > * { transform: none !important; }
@@ -265,58 +248,10 @@
   </section>
 
   <section>
-    <h2>Gift catalogue</h2>
-    <p>Pick a gift and choose what it does. Every gift you receive on your LIVE is added to this list automatically. The full list loads from TikTok when you connect, or press Refresh.</p>
-    <div class="row"><input id="giftSearch" type="search" placeholder="Search gifts by name or coin price" aria-label="Search gifts"><button id="refreshCatalogue">Refresh from TikTok</button></div>
-    <p id="catalogueStatus" style="margin-top:10px" aria-live="polite"></p>
-    <div class="grid catalogue" id="catalogue"></div>
-    <h2 id="chosenGift">Select a gift above</h2>
-    <form id="giftEditor">
-      <fieldset id="giftFields" disabled style="border:0;padding:0;margin:0">
-        <div class="editor">
-          <label>Action<select id="giftAction"><option value="remove">Remove blocks</option><option value="add">Add blocks</option></select></label>
-          <label>Blocks per gift<input id="giftBlocks" type="number" min="0" max="1500000" step="1" required></label>
-        </div>
-        <div class="row"><button type="submit">Save gift</button></div>
-      </fieldset>
-    </form>
-    <p id="catalogueMessage" role="status"></p>
-    <small>Only real gifts from your LIVE reach the game: this page can't send pretend ones. Adding blocks refills dug spaces first, then grows the mountain beyond its starting size.</small>
-  </section>
-
-  <section>
-    <h2>2 · Map theme</h2>
-    <p>Switch the game's map for everyone, straight away. The game remembers the choice.</p>
-    <div class="grid" id="themes"></div>
-    <p style="margin-top:14px">The mountain itself can be stone with a diamond hidden inside, or a haystack with a needle. It's the same game, reskinned.</p>
-    <div class="grid" id="skins"></div>
-    <p id="themeMessage" role="status"></p>
-  </section>
-
-  <section>
-    <h2>3 · Diamond Climb gifts</h2>
-    <p>Choose how many platforms a gift sends you up or down the tower. Gifts that aren't listed send you up by their coins: a Rose is 2 platforms, 100 coins is 20, a Galaxy is 63.</p>
-    <form class="editor game-rule" data-game="climb">
-      <label>Gift<select name="gift" required></select></label>
-      <label>Direction<select name="direction"><option value="up">Send up</option><option value="down">Send down</option></select></label>
-      <label>Platforms per gift<input name="amount" type="number" min="0" max="1000" step="1" required></label>
-      <div class="row" style="grid-column:1/-1"><button type="submit">Save</button></div>
-    </form>
-    <ul class="game-rules" data-game="climb"></ul>
-    <p class="game-message" data-game="climb" role="status"></p>
-  </section>
-
-  <section>
-    <h2>4 · Chalkboard Count gifts</h2>
-    <p>Choose how many numbers a gift adds to the count or takes off it. Gifts that aren't listed add by their coins: a Rose is 2, 100 coins is 20. The reset gift (a Galaxy unless you changed it in the game) still starts the reset.</p>
-    <form class="editor game-rule" data-game="chalk">
-      <label>Gift<select name="gift" required></select></label>
-      <label>Direction<select name="direction"><option value="up">Count up</option><option value="down">Count down</option></select></label>
-      <label>Numbers per gift<input name="amount" type="number" min="0" max="100000" step="1" required></label>
-      <div class="row" style="grid-column:1/-1"><button type="submit">Save</button></div>
-    </form>
-    <ul class="game-rules" data-game="chalk"></ul>
-    <p class="game-message" data-game="chalk" role="status"></p>
+    <h2>2 · Set up your gifts in the game</h2>
+    <p>What each gift does is set inside the game, not here. In Diamond Rush on Roblox, press <strong>Y</strong> and choose <strong>Open gift settings</strong>. Search for any TikTok gift and pick what it does in each game, its win change, its animation, whether it resets the game, and a key for it.</p>
+    <p>Using TikFinity? Give a gift a key in the game's gift settings, then have TikFinity press that key when the gift arrives.</p>
+    <p><small>Only real gifts from your LIVE go through this connector: it can't send pretend ones. Use the game's own test buttons to try things out.</small></p>
   </section>
 
   <section>
@@ -347,42 +282,6 @@
 
 <script>
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-for (const [theme, name] of [['default', 'Alpine'], ['sakura', 'Sakura'], ['farm', 'Farm'], ['desert', 'Desert'], ['haunted', 'Haunted']]) {
-  const button = document.createElement('button');
-  button.textContent = name;
-  button.className = 'gift';
-  button.onclick = async () => {
-    button.disabled = true;
-    const message = document.getElementById('themeMessage');
-    try {
-      const response = await post('/theme', {theme});
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error);
-      message.textContent = `${name} theme sent. The map changes when the game receives it.`;
-      await refresh();
-    } catch(error) { message.textContent = error.message; }
-    finally { button.disabled = false; }
-  };
-  document.getElementById('themes').append(button);
-}
-for (const [skin, label] of [['stone', 'Stone & diamond'], ['hay', 'Hay & needle']]) {
-  const button = document.createElement('button');
-  button.textContent = label;
-  button.className = 'gift';
-  button.onclick = async () => {
-    button.disabled = true;
-    const message = document.getElementById('themeMessage');
-    try {
-      const response = await post('/skin', {skin});
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error);
-      message.textContent = skin === 'hay' ? 'Haystack sent. The mountain turns to hay, with a needle to find.' : 'Stone sent. The mountain turns back to stone, with a diamond to find.';
-      await refresh();
-    } catch(error) { message.textContent = error.message; }
-    finally { button.disabled = false; }
-  };
-  document.getElementById('skins').append(button);
-}
 document.getElementById('connect').onsubmit = (event) => {
   event.preventDefault();
   post('/connect', { username: document.getElementById('username').value }).then(refresh);
@@ -416,121 +315,10 @@ document.getElementById('publishForm').onsubmit = async (event) => {
   }
 };
 
-let giftCatalogue = [], giftRules = {}, selectedGift = null, gameRules = { climb: {}, chalk: {} };
-const catalogueBox = document.getElementById('catalogue');
-function drawCatalogue() {
- const query=document.getElementById('giftSearch').value.trim().toLowerCase();
- const rows=giftCatalogue.filter(g=>g.name.toLowerCase().includes(query)||String(g.coins).includes(query));
- catalogueBox.replaceChildren();
- for(const gift of rows) {
-  const rule=giftRules[gift.name.toLowerCase()];
-  const button=document.createElement('button');button.type='button';
-  button.setAttribute('aria-pressed',String(selectedGift?.id===gift.id));
-  const name=document.createElement('span');name.textContent=gift.name;
-  const detail=document.createElement('small');
-  detail.textContent=`${gift.coins.toLocaleString()} coins${rule ? ` · ${rule.rocks<0?'Adds':'Removes'} ${Math.abs(rule.rocks).toLocaleString()}`:''}`;
-  button.append(name,detail);button.onclick=()=>chooseGift(gift);catalogueBox.append(button);
- }
- if(!rows.length) catalogueBox.textContent='No gifts match your search.';
-}
-function chooseGift(gift) {
- selectedGift=gift;
- const rule=giftRules[gift.name.toLowerCase()];
- document.getElementById('chosenGift').textContent=`${gift.name} · ${gift.coins.toLocaleString()} coins`;
- document.getElementById('giftAction').value=rule?.rocks<0?'add':'remove';
- document.getElementById('giftBlocks').value=Math.abs(rule?.rocks ?? Math.min(1500000,gift.coins*100));
- document.getElementById('giftFields').disabled=false;
- document.getElementById('catalogueMessage').textContent='';drawCatalogue();
-}
-async function loadCatalogue() {
- const data=await (await fetch('/catalogue')).json();
- giftCatalogue=data.gifts;giftRules=data.rules;gameRules={climb:data.climbRules ?? {},chalk:data.chalkRules ?? {}};drawGameRules();
- document.getElementById('catalogueStatus').textContent=`${data.gifts.length.toLocaleString()} gifts · ${data.status}`;
- drawCatalogue();
-}
-async function saveChosen() {
- if(!selectedGift || !document.getElementById('giftEditor').reportValidity()) return;
- const message=document.getElementById('catalogueMessage');
- try {
-  const response=await post('/catalogue/rule',{gift:selectedGift.name,coins:selectedGift.coins,action:document.getElementById('giftAction').value,blocks:Number(document.getElementById('giftBlocks').value),keybind:''});
-  const result=await response.json();if(!response.ok)throw new Error(result.error);
-  message.textContent='Saved. Roblox will receive this rule.';
-  await loadCatalogue();
- } catch(error) {message.textContent=error.message;}
-}
-// Diamond Climb and Chalkboard Count: platforms (or numbers) per gift, up or down.
-const GAME_UNITS = { climb: ['platform', 'platforms'], chalk: ['number', 'numbers'] };
-const coinsMove = coins => Math.max(1, Math.round(2 * Math.sqrt(Math.max(1, coins))));
-function drawGameRules() {
- for (const game of ['climb', 'chalk']) {
-  const form = document.querySelector(`form.game-rule[data-game="${game}"]`);
-  const select = form.elements.gift; const previous = select.value;
-  select.replaceChildren(...giftCatalogue.map(gift => { const option = document.createElement('option'); option.value = gift.name; option.textContent = `${gift.name} · ${gift.coins.toLocaleString()} coins`; return option; }));
-  if (previous) select.value = previous;
-  if (!form.elements.amount.value) fillGameRule(game);
-  const list = document.querySelector(`ul.game-rules[data-game="${game}"]`);
-  const rules = Object.values(gameRules[game]).sort((a, b) => a.coins - b.coins || a.gift.localeCompare(b.gift));
-  list.replaceChildren(...rules.map(rule => {
-   const item = document.createElement('li');
-   const text = document.createElement('span');
-   const [one, many] = GAME_UNITS[game];
-   const size = Math.abs(rule.amount);
-   text.textContent = `${rule.gift} · ${rule.coins.toLocaleString()} coins · ${rule.amount < 0 ? 'down' : 'up'} ${size.toLocaleString()} ${size === 1 ? one : many}`;
-   const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'gift'; remove.textContent = 'Remove';
-   remove.onclick = () => saveGameRule(game, { gift: rule.gift, remove: true });
-   item.append(text, remove);
-   return item;
-  }));
-  if (!rules.length) { const item = document.createElement('li'); item.innerHTML = '<small>No gifts set. Every gift goes up by its coins.</small>'; list.append(item); }
- }
-}
-// The chosen gift's current rule, or what its coins would do.
-function fillGameRule(game) {
- const form = document.querySelector(`form.game-rule[data-game="${game}"]`);
- const gift = giftCatalogue.find(g => g.name === form.elements.gift.value);
- if (!gift) return;
- const rule = gameRules[game][gift.name.toLowerCase()];
- form.elements.direction.value = rule && rule.amount < 0 ? 'down' : 'up';
- form.elements.amount.value = rule ? Math.abs(rule.amount) : coinsMove(gift.coins);
-}
-async function saveGameRule(game, body) {
- const message = document.querySelector(`.game-message[data-game="${game}"]`);
- try {
-  const response = await post('/game-rule', { game, ...body });
-  const result = await response.json(); if (!response.ok) throw new Error(result.error);
-  await loadCatalogue();
-  message.textContent = body.remove ? `${body.gift} removed. It goes up by its coins again.` : 'Saved. The game uses it straight away.';
- } catch (error) { message.textContent = error.message; }
-}
-for (const form of document.querySelectorAll('form.game-rule')) {
- const game = form.dataset.game;
- form.onsubmit = event => {
-  event.preventDefault();
-  if (!form.reportValidity()) return;
-  const gift = giftCatalogue.find(g => g.name === form.elements.gift.value);
-  if (!gift) return;
-  saveGameRule(game, { gift: gift.name, coins: gift.coins, direction: form.elements.direction.value, amount: Number(form.elements.amount.value) });
- };
- form.elements.gift.onchange = () => fillGameRule(game);
-}
-
-document.getElementById('giftSearch').oninput=drawCatalogue;
-document.getElementById('giftEditor').onsubmit=event=>{event.preventDefault();saveChosen();};
-document.getElementById('refreshCatalogue').onclick=async event=>{
- event.target.disabled=true;document.getElementById('catalogueStatus').textContent='Loading gifts from TikTok…';
- try { const response=await post('/catalogue/refresh',{username:document.getElementById('username').value});const data=await response.json();if(!response.ok)throw new Error(data.error);await loadCatalogue(); }
- catch(error){document.getElementById('catalogueStatus').textContent=error.message;}
- finally {event.target.disabled=false;}
-};
-loadCatalogue().catch(()=>{document.getElementById('catalogueStatus').textContent='Start the bridge to load your catalogue.';});
-
 let filled = false;
 function describe(event) {
-  if (event.type === 'gift' && event.rocks < 0) return `${event.name} sent ${event.gift} · rebuild up to ${Math.abs(event.rocks * event.count).toLocaleString()} blocks`;
   if (event.type === 'gift') return `${event.name} sent ${event.gift} x${event.count} · ${event.coins * event.count} coins`;
   if (event.type === 'like') return `${event.name} liked x${event.likes}`;
-  if (event.type === 'theme') return `Map theme: ${({ sakura: 'Sakura', farm: 'Farm', desert: 'Desert', haunted: 'Haunted' })[event.theme] ?? 'Alpine'}`;
-  if (event.type === 'skin') return `Mountain skin: ${event.skin === 'hay' ? 'Hay & needle' : 'Stone & diamond'}`;
   return `${event.name} ${event.type === 'follow' ? 'followed' : 'shared the live'}`;
 }
 async function refresh() {

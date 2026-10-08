@@ -32,6 +32,6 @@ Then put that address in `RELAY_URL` in `bridge/cloud.mjs` and `RelayUrl` in `sr
 ## Endpoints
 
 - `POST /c/CODE/push` with header `x-relay-secret` and body `{ events, rules, tiktok }`.
-- `GET /c/CODE/events?since=N&wait=S` returns `{ session, last, tiktok, events }`. `since=0` (a game that just started) returns the gift rules and the newest event number, not older gifts. With `wait`, the relay holds the request up to 8 seconds until something arrives.
+- `GET /c/CODE/events?since=N&wait=S` returns `{ session, last, tiktok, events }`. `since=0` (a game that just started) returns the newest event number, not older gifts (plus any rules an older connector stored; the game ignores them, as gift settings are kept in the game). With `wait`, the relay holds the request up to 8 seconds until something arrives.
 
 Run the tests with `node --test relay/worker.test.mjs` (Node 22, using SQLite in place of D1).
