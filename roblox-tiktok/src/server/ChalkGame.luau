@@ -55,7 +55,7 @@ function ChalkGame.clean(saved: any): Progress
 	end
 	number("goal", ChalkBoard.GOAL.min, ChalkBoard.GOAL.max, true)
 	number("count", 0, progress.goal, true)
-	number("wins", 0, 999999, true)
+	number("wins", -999999, 999999, true) -- gifts can take wins below 0
 	number("best", 0, ChalkBoard.GOAL.max, true)
 	number("speed", ChalkBoard.SPEED.min, ChalkBoard.SPEED.max, false)
 	number("saveCoins", 1, 1000000, true)
@@ -343,9 +343,9 @@ function ChalkGame.start(options: Options): Game
 	-- without one, `rocks` (what it would do to the mountain) decides: its
 	-- sign up or down, the coins how far. Returns the feed's ending.
 	-- A gift that gives (or takes) wins: the board's win count changes by
-	-- `amount`, never below 0. Returns the new count.
+	-- `amount`, and can go below 0. Returns the new count.
 	function self.addWins(amount: number): number
-		progress.wins = math.clamp(progress.wins + math.floor(amount), 0, 999999)
+		progress.wins = math.clamp(progress.wins + math.floor(amount), -999999, 999999)
 		publish()
 		options.save()
 		return progress.wins

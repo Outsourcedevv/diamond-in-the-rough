@@ -138,7 +138,8 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		TextSize = 13, TextColor3 = MUTED, RichText = true, Text = "" }, card)
 
 	-- The reset countdown banner.
-	local resetBox = make("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 112), Size = UDim2.fromOffset(440, 70), Visible = false }, gui)
+	-- Under the win counter (102 to 146).
+	local resetBox = make("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 156), Size = UDim2.fromOffset(440, 70), Visible = false }, gui)
 	glass(resetBox, 14)
 	resetBox.BackgroundColor3 = Color3.fromRGB(90, 16, 24)
 	local resetScale = make("UIScale", { Scale = 1 }, resetBox)
@@ -148,7 +149,7 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		TextSize = 14, TextColor3 = WHITE, Text = "" }, resetBox)
 
 	-- A big line for gifts, saves and wins.
-	local shout = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 192), Size = UDim2.fromOffset(700, 46),
+	local shout = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 236), Size = UDim2.fromOffset(700, 46),
 		BackgroundTransparency = 1, Font = FONT_HEAVY, TextSize = 38, TextColor3 = GOLD, TextStrokeTransparency = 0.3, TextTransparency = 1, Text = "" }, gui)
 	local shoutScale = make("UIScale", { Scale = 1 }, shout)
 	-- Who sent what, under a gift show's name.
@@ -178,7 +179,7 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	end
 
 	-- The hold at the goal, under the reset banner's place.
-	local hold = HoldCountdown.new(gui, 270, "HOLD THE GOAL")
+	local hold = HoldCountdown.new(gui, 300, "HOLD THE GOAL")
 	local hint = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -40), Size = UDim2.fromOffset(520, 22), BackgroundTransparency = 1,
 		Font = FONT, TextSize = 16, TextColor3 = WHITE, TextStrokeTransparency = 0.4, Text = "Hold the left mouse button, Space or the screen to write" }, gui)
 

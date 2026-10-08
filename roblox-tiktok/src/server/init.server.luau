@@ -1052,7 +1052,7 @@ local function processTikTok(event: TikTokFeed.Event)
 			elseif climbGame.climber() ~= nil then
 				climbGame.addWins(change)
 			else
-				settings.wins = math.clamp(settings.wins + change, 0, 999999)
+				settings.wins = math.clamp(settings.wins + change, -999999, 999999)
 				saveSettings()
 			end
 			text ..= string.format("  %s%d WIN%s", if change > 0 then "+" else "", change, if math.abs(change) == 1 then "" else "S")
@@ -1465,9 +1465,9 @@ end
 
 local function applySetting(player: Player, action: string, value: any)
 	if action == "setWins" and type(value) == "number" then
-		settings.wins = math.clamp(math.floor(value), 0, 999999)
+		settings.wins = math.clamp(math.floor(value), -999999, 999999)
 	elseif action == "addWins" and type(value) == "number" then
-		settings.wins = math.clamp(settings.wins + math.floor(value), 0, 999999)
+		settings.wins = math.clamp(settings.wins + math.floor(value), -999999, 999999)
 	elseif action == "setTitle" and type(value) == "string" then
 		local clean = filtered(player, string.sub(value, 1, 24))
 		if clean == nil then

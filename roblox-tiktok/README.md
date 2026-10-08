@@ -51,7 +51,7 @@ In the game, press **Y** and click **Open gift settings (full screen)**. About 1
 - **Diamond in the Rough:** rocks per gift (negative adds stone),
 - **Diamond Climb:** platforms per gift (negative sends the climber down),
 - **Chalkboard Count:** numbers per gift (negative counts down),
-- **Wins:** wins per gift, e.g. `1` or `-1` (or more), added to or taken from the win counter of whichever game is being played (never below 0),
+- **Wins:** wins per gift, e.g. `1` or `-1` (or more), added to or taken from the win counter of whichever game is being played (wins can go below 0),
 - **Animation:** the show the gift plays, from 1 (smallest) to 6 (biggest), named in each game (e.g. 3 is Diamond Fracture / Stone Surge, Rocket Boost / Anvil Smash, Paper Planes / Sponge Splash), or **Auto** to let the coins pick,
 - **Reset:** switch it on and the gift sends whichever game is being played back to the start: a full mountain again in Diamond in the Rough (back to the starting stone), platform 0 in Diamond Climb, or a count of 0 in Chalkboard Count. A reset gift does nothing else,
 - **a keybind:** press **Set key**, then a key: letters like K, numbers, F1 to F8, the number pad, Insert, Home, End, Page Up/Down or Delete, on their own or with **Shift** or **Ctrl**, so there are hundreds to give out.
@@ -145,7 +145,7 @@ The second game: jump up **1,000 platforms** spiralling round a tall crystal pil
 
 While you climb, gifts move you instead of the mountain. Back in the lobby or the mine, they work on the mountain as before.
 
-- **The wall.** Behind the start island stands a wall with 5,000 health (set it in the **Y** panel under DIAMOND CLIMB). Gifts keep pushing the climber back even at platform 0: every platform they would go below 0 takes 1 health off the wall. When the wall reaches 0 it breaks, the climber loses a win (never below 0) and the wall is built again at full health. A climb to the top also rebuilds it. Its health shows over the wall and on the climb's display.
+- **The wall.** Behind the start island stands a wall with 5,000 health (set it in the **Y** panel under DIAMOND CLIMB). Gifts keep pushing the climber back even at platform 0: every platform they would go below 0 takes 1 health off the wall. When the wall reaches 0 it breaks, the climber loses a win (wins can go below 0) and the wall is built again at full health. A climb to the top also rebuilds it. Its health shows over the wall and on the climb's display.
 
 ## Chalkboard Count
 
@@ -162,6 +162,8 @@ While you write, gifts move the count instead of the mountain. Back in the lobby
 - **The writer.** At the board your character is drawn twice as big and really writes: their right hand follows the chalk across each digit (an IKControl on R15 characters) and they step along the board to the digit being written. The writing speed card goes from 1 to 100,000 numbers a second (the old top speed of 20 a second for 1,000, scaled to 5 million); above 12 a second the board scribbles the number about a dozen times a second.
 
 ## Customise the win counter
+
+The win counter shows at the top of all three games, with the wins of the game being played (Diamond in the Rough's, Diamond Climb's or Chalkboard Count's), in the same title, colours and goal. Wins can go below 0 (gifts set to take wins, or a broken climb wall).
 
 While playing, press **Y** to open the hidden settings panel (only you, the owner, can open it; press Y again to close it). From there you can change:
 

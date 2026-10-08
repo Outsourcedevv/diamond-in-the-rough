@@ -37,7 +37,7 @@ local function run(seconds)
 end
 -- Files and how long each lasts at normal speed; "broken.wav" never ends.
 local LENGTHS = { ["rbxasset://sounds/collide.wav"] = 0.35, ["rbxasset://sounds/snap.wav"] = 0.2, ["rbxasset://sounds/clickfast.wav"] = 0.1,
-	["rbxasset://sounds/impact_explosion_03.mp3"] = 2.5, ["rbxasset://sounds/action_jump_land.mp3"] = 0.5, ["rbxassetid://1234567890"] = 0.4 }
+	["rbxasset://sounds/impact_explosion_03.mp3"] = 2.5, ["rbxasset://sounds/action_jump_land.mp3"] = 0.5, ["rbxasset://sounds/swoosh.wav"] = 0.6, ["rbxasset://sounds/glassbreak.wav"] = 0.9, ["rbxasset://sounds/electronicpingshort.wav"] = 0.4, ["rbxassetid://1234567890"] = 0.4 }
 local started, live, destroyed = 0, 0, 0
 local speeds = {}
 local SoundService = { Name = "SoundService" }

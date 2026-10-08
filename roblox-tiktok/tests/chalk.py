@@ -135,7 +135,7 @@ check(ChalkBoard.theme("nope") == ChalkBoard.THEMES.classic and ChalkBoard.theme
 
 -- A saved count is cleaned up.
 local clean = ChalkGame.clean({ count = 5000, goal = 4000, wins = -2, speed = 1e9, theme = "x", strength = 3, resetSeconds = 2, saveCoins = 0 })
-check(clean.goal == 4000 and clean.count == 0 and clean.wins == 0 and clean.speed == ChalkBoard.SPEED.max and clean.theme == "classic"
+check(clean.goal == 4000 and clean.count == 0 and clean.wins == -2 and clean.speed == ChalkBoard.SPEED.max and clean.theme == "classic"
 	and clean.strength == 1 and clean.resetSeconds == ChalkBoard.RESET_SECONDS.min and clean.saveCoins == 1, "out of range saves are put right (a count saved at the goal starts again)")
 local kept = ChalkGame.clean({ count = 321.7, goal = 500, wins = 2, best = 400, speed = 4.5, theme = "neon", strength = 2, resetGift = "Lion", resetSeconds = 90, saveCoins = 5000 })
 check(kept.count == 321 and kept.goal == 500 and kept.wins == 2 and kept.best == 400 and kept.speed == 4.5 and kept.theme == "neon"
@@ -415,7 +415,7 @@ check(chalk.resetNow() == before and chalk.progress.count == 0 and last("chalkWi
 check(chalk.resetNow() == 0 and chalk.progress.count == 0, "resetting an empty board is fine")
 local wins = chalk.progress.wins
 check(chalk.addWins(2) == wins + 2 and state:GetAttribute("ChalkWins") == wins + 2, "a gift can add wins")
-check(chalk.addWins(-9999) == 0, "wins never go below 0")
+check(chalk.addWins(-9999) == wins + 2 - 9999, "gifts can take wins below 0")
 check(not chalk.setting(streamer, "setPerCoin", 5), "other settings are left to the game")
 check(saves > 0, "settings are saved")
 
