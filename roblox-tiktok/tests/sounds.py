@@ -82,6 +82,33 @@ for _, cue in { "dig", "crumble" } do
 	end
 end
 
+-- No sound is an explosion any more, and the gift shows are half as loud.
+check(Sounds.FILES.boom == nil, "the explosion sample is gone")
+for name, cue in Sounds.CUES do
+	for _, layer in cue do check(Sounds.FILES[layer.file] ~= nil, name .. " uses a real file") end
+end
+speeds = {}
+local volumes = {}
+local oldNew = Instance.new
+Instance.new = function(className)
+	local object = oldNew(className)
+	if className == "Sound" then table.insert(volumes, object) end
+	return object
+end
+Sounds.play("bigBoom", Vector3)
+run(0.3)
+local loudest = 0
+for _, sound in volumes do loudest = math.max(loudest, sound.Volume or 0) end
+check(loudest <= 0.55 * Sounds.EFFECTS_VOLUME + 1e-9, string.format("a big impact is soft (%.2f)", loudest))
+table.clear(volumes)
+Sounds.play("dig", Vector3)
+local digLoudest = 0
+for _, sound in volumes do digLoudest = math.max(digLoudest, sound.Volume or 0) end
+check(math.abs(digLoudest - Sounds.CUES.dig[1].volume) < 1e-9, "digging keeps its full volume")
+Instance.new = oldNew
+run(5)
+started = 0
+
 -- Hits in a row climb in pitch, eight steps, then round again.
 check(Sounds.digPitch(1) == 1 and Sounds.digPitch(8) > Sounds.digPitch(7) and Sounds.digPitch(9) == 1, "the dig pitch climbs and comes round")
 check(Sounds.digPitch(8) < 1.25, "the climb stays gentle")
