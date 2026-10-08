@@ -109,13 +109,18 @@ ChalkBoard.BOARD_BOTTOM = 2.4 -- above the floor
 ChalkBoard.BOARD_Z = -20 -- the board's middle, from the classroom's middle (it faces +Z)
 ChalkBoard.BOARD_THICKNESS = 0.6
 
--- The settings: the number to reach, and how fast the hand writes.
-ChalkBoard.GOAL = { min = 10, max = 100000, default = 1000 }
-ChalkBoard.SPEED = { min = 1, max = 20, default = 3 } -- numbers a second
+-- The settings: the number to reach (up to 5 million), and how fast the hand
+-- writes. The fastest writing is the old top speed (20 a second for a goal of
+-- 1,000) scaled up to 5 million: 100,000 numbers a second.
+ChalkBoard.GOAL = { min = 10, max = 5000000, default = 1000 }
+ChalkBoard.SPEED = { min = 1, max = 100000, default = 3 } -- numbers a second
 ChalkBoard.RESET_SECONDS = { min = 10, max = 300, default = 60 }
 ChalkBoard.RESET_GIFT = "Galaxy" -- starts the reset countdown
 ChalkBoard.SAVE_COINS = 1000 -- a gift worth this much (not the reset gift) saves the count
-ChalkBoard.MAX_DIGITS = 6
+ChalkBoard.MAX_DIGITS = 7
+-- The writer is drawn this much bigger at the board, so their hand reaches the
+-- big number and they write it themselves.
+ChalkBoard.WRITER_SCALE = 2
 
 -- The board's front, where chalk goes.
 function ChalkBoard.face(): number
@@ -127,11 +132,34 @@ function ChalkBoard.centre(): Vector3
 	return Vector3.new(ChalkBoard.ORIGIN.X, ChalkBoard.ORIGIN.Y + ChalkBoard.BOARD_BOTTOM + ChalkBoard.BOARD_HEIGHT / 2, ChalkBoard.face())
 end
 
--- Where the writer stands: at the board, a little right of the middle,
--- facing it (the big number is written above their head).
+-- Where the (bigger) writer stands: at the board, a little right of the
+-- middle, facing it, close enough to write on it.
 function ChalkBoard.standFrame(): CFrame
-	local at = Vector3.new(ChalkBoard.ORIGIN.X + 3, ChalkBoard.ORIGIN.Y + 3, ChalkBoard.face() + 2.6)
+	local s = ChalkBoard.WRITER_SCALE
+	local at = Vector3.new(ChalkBoard.ORIGIN.X + 3, ChalkBoard.ORIGIN.Y + 3 * s, ChalkBoard.face() + 1.3 * s)
 	return CFrame.lookAt(at, at - Vector3.new(0, 0, 1))
+end
+
+-- Across the board (from its middle), where the writer stands so their right
+-- hand reaches a chalk point at `x`: just left of it, kept on the board.
+function ChalkBoard.writerX(x: number): number
+	local half = ChalkBoard.BOARD_WIDTH / 2 - 2
+	return math.clamp(x - 1.3 * ChalkBoard.WRITER_SCALE, -half, half)
+end
+
+-- The writing speed slider goes up in steps that feel even from 1 a second
+-- to 100,000 a second: `fraction` 0 to 1 along it, and back.
+function ChalkBoard.speedAt(fraction: number): number
+	local low, high = ChalkBoard.SPEED.min, ChalkBoard.SPEED.max
+	local raw = low * (high / low) ^ math.clamp(fraction, 0, 1)
+	if raw < 10 then return math.floor(raw * 2 + 0.5) / 2 end
+	-- Two significant figures: 12, 340, 5,600, 78,000.
+	local step = 10 ^ math.max(0, math.floor(math.log10(raw)) - 1)
+	return math.clamp(math.floor(raw / step + 0.5) * step, low, high)
+end
+function ChalkBoard.speedFraction(speed: number): number
+	local low, high = ChalkBoard.SPEED.min, ChalkBoard.SPEED.max
+	return math.clamp(math.log(math.max(speed, low) / low) / math.log(high / low), 0, 1)
 end
 
 -- The view of the classroom: in front of the board and off to one side, looking
@@ -7216,6 +7244,11 @@ function ChalkGame.start(options: Options): Game
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if humanoid == nil then return end
+		-- The writer is drawn bigger at the board (so they reach the number);
+		-- everyone else is their usual size.
+		local size = if writing(player) then ChalkBoard.WRITER_SCALE else 1
+		local model = character :: Model
+		if math.abs(model:GetScale() - size) > 1e-3 then model:ScaleTo(size) end
 		if writing(player) then
 			humanoid.WalkSpeed = 0
 			humanoid.UseJumpPower = false
@@ -7309,11 +7342,12 @@ function ChalkGame.start(options: Options): Game
 			carry = 0
 			return
 		end
+		-- Fast writing adds many numbers a frame (100,000 a second is ~1,700).
 		carry += dt * progress.speed
 		local whole = math.floor(carry)
 		if whole > 0 then
 			carry -= whole
-			add(math.min(whole, 5))
+			add(whole)
 		end
 	end)
 	-- Saves the count every few seconds while it changes.
@@ -7353,7 +7387,11 @@ function ChalkGame.start(options: Options): Game
 		-- A new character already moves the usual way; only the writer changes.
 		if not writing(player) then return end
 		local humanoid = character:WaitForChild("Humanoid", 10)
-		if humanoid and character.Parent ~= nil then applyMove(player) end
+		if humanoid and character.Parent ~= nil then
+			applyMove(player)
+			-- Scaled about their middle: back on the floor at the board.
+			character:PivotTo(ChalkBoard.standFrame())
+		end
 	end
 
 	-- The writer's game says they pressed (true) or let go (false).
@@ -7365,7 +7403,7 @@ function ChalkGame.start(options: Options): Game
 	-- Settings from the writer's card and the streamer panel. True if handled.
 	function self.setting(player: Player, action: string, value: any): boolean
 		if action == "setChalkSpeed" and type(value) == "number" and value == value then
-			progress.speed = math.clamp(math.floor(value * 2 + 0.5) / 2, ChalkBoard.SPEED.min, ChalkBoard.SPEED.max)
+			progress.speed = math.clamp(if value < 10 then math.floor(value * 2 + 0.5) / 2 else math.floor(value + 0.5), ChalkBoard.SPEED.min, ChalkBoard.SPEED.max)
 		elseif action == "setChalkTheme" and type(value) == "string" and ChalkBoard.THEMES[value] then
 			progress.theme = value
 			Classroom.setTheme(built, value)
@@ -15721,6 +15759,17 @@ function ChalkView.saveText(saveCoins: number): string
 	return string.format("Send a gift of %s+ coins to save the board", Format.commas(saveCoins))
 end
 
+-- The writing speed as the card shows it: "3 a second", "1.5 a second",
+-- "12,000 a second".
+function ChalkView.speedText(speed: number): string
+	return (if speed % 1 == 0 then Format.commas(speed) else string.format("%.1f", speed)) .. " a second"
+end
+
+-- Above this speed the board shows the count about FAST_DRAWS times a second
+-- (quick scribbles) instead of writing every number.
+ChalkView.FAST_SPEED = 12
+ChalkView.FAST_DRAWS = 12
+
 -- Seconds to write one number's strokes at `speed` numbers a second.
 function ChalkView.writeSeconds(speed: number): number
 	return math.clamp(0.8 / math.max(speed, 0.1), 0.04, 0.35)
@@ -15874,14 +15923,14 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	local draggingSpeed = false
 	local lastSent = 0
 	local function showSpeed()
-		local fraction = (speed - ChalkBoard.SPEED.min) / (ChalkBoard.SPEED.max - ChalkBoard.SPEED.min)
+		local fraction = ChalkBoard.speedFraction(speed)
 		fill.Size = UDim2.fromScale(fraction, 1)
 		knob.Position = UDim2.fromScale(fraction, 0.5)
-		speedValue.Text = (if speed % 1 == 0 then tostring(speed) else string.format("%.1f", speed)) .. " a second"
+		speedValue.Text = ChalkView.speedText(speed)
 	end
 	local function speedFromScreen(x: number, done: boolean)
 		local fraction = math.clamp((x - track.AbsolutePosition.X) / math.max(1, track.AbsoluteSize.X), 0, 1)
-		speed = math.floor((ChalkBoard.SPEED.min + fraction * (ChalkBoard.SPEED.max - ChalkBoard.SPEED.min)) * 2 + 0.5) / 2
+		speed = ChalkBoard.speedAt(fraction)
 		showSpeed()
 		local now = os.clock()
 		if done or now - lastSent > 0.25 then
@@ -15963,6 +16012,9 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		end
 		return p
 	end
+	-- Where the chalk last touched the board, and when: the writer's hand follows it.
+	local chalkPoint: Vector3? = nil
+	local chalkPointAt = 0
 	local function growStrokes()
 		local now = os.clock()
 		local at: Vector3? = nil
@@ -15990,6 +16042,8 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 			end
 		end
 		if at then
+			chalkPoint = at
+			chalkPointAt = now
 			tip.Color = theme().chalk
 			tip.Transparency = 0
 			-- Held at an angle, its end on the board.
@@ -16312,6 +16366,47 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		return true
 	end
 	local wasHolding = false
+	local lastDraw = 0
+	-- The writer's right hand follows the chalk (an IKControl moves the arm to
+	-- an invisible point on the board), and they step along the board to the
+	-- digit being written. Only this player's own game does this.
+	local handTarget = make("Part", { Name = "ChalkHandTarget", Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
+		Transparency = 1, Size = Vector3.new(0.2, 0.2, 0.2) }, drawing)
+	local ik: IKControl? = nil
+	local function handIK(): IKControl?
+		if ik and ik.Parent then return ik end
+		ik = nil
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local upper = character and character:FindFirstChild("RightUpperArm")
+		local hand = character and character:FindFirstChild("RightHand")
+		if humanoid == nil or upper == nil or hand == nil then return nil end -- R6: the old wiggle instead
+		ik = make("IKControl", { Name = "ChalkHand", Type = Enum.IKControlType.Position, ChainRoot = upper, EndEffector = hand,
+			Target = handTarget, SmoothTime = 0.04, Weight = 1, Enabled = false }, humanoid)
+		return ik
+	end
+	local function writeWithHand(dt: number): boolean
+		local control = handIK()
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if control == nil or root == nil or not root:IsA("BasePart") then return false end
+		-- The hand on the chalk while it writes; between numbers it hovers by
+		-- the last stroke, a little off the board.
+		local point = chalkPoint or ChalkBoard.onBoard(ChalkBoard.writerX(0) + 2, ChalkBoard.NUMBER_Y)
+		local resting = os.clock() - chalkPointAt > 0.15
+		handTarget.Position = point + Vector3.new(0, 0, if resting then 0.9 else 0.35)
+		control.Enabled = true
+		-- Step along the board so the hand reaches the digit being written.
+		local want = ChalkBoard.ORIGIN.X + ChalkBoard.writerX(point.X - ChalkBoard.ORIGIN.X)
+		local here = root.Position
+		local x = here.X + (want - here.X) * math.min(1, dt * 6)
+		local at = Vector3.new(x, here.Y, here.Z)
+		root.CFrame = CFrame.lookAt(at, at - Vector3.new(0, 0, 1))
+		return true
+	end
+	local function restHand()
+		if ik then ik.Enabled = false end
+	end
 	RunService.RenderStepped:Connect(function(dt: number)
 		if not active then return end
 		-- A steady view of the writer and the board (gifts may shake it).
@@ -16344,22 +16439,29 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 		if writingNow then
 			if arm == nil then grabArm() end
 			local a = arm
-			if a then
+			if writeWithHand(dt) then
+				-- The IKControl moves the arm (R15); the shoulder stays as it is.
+				if a and a.motor.Parent then a.motor.C0 = a.base end
+			elseif a then
 				local t = os.clock() * math.min(30, 6 + speed * 2)
 				local wiggle = CFrame.Angles(math.sin(t) * 0.12, math.cos(t * 1.3) * 0.1, 0)
 				a.motor.C0 = a.base * (if a.r15 then CFrame.Angles(2.3, 0, 0) else CFrame.Angles(0, 0, 2.3)) * wiggle
 			end
 		elseif arm then
 			releaseArm()
+			restHand()
 		end
 		hint.Visible = not writingNow and attr("ChalkCount", 0) < 3
 		-- The count, goal, progress and countdown on the board.
 		local count = attr("ChalkCount", 0)
-		if count ~= shownCount and os.clock() >= holdDrawUntil then
+		local fast = writingNow and speed > ChalkView.FAST_SPEED
+		if count ~= shownCount and os.clock() >= holdDrawUntil and (not fast or os.clock() - lastDraw >= 1 / ChalkView.FAST_DRAWS) then
+			lastDraw = os.clock()
 			local stepUp = count == shownCount + 1
-			-- Writing draws the next number at the writing speed; a jump
-			-- (a gift) draws each changed digit quickly.
-			drawCount(count, if stepUp then ChalkView.writeSeconds(speed) elseif shownCount >= 0 then 0.22 else 0)
+			-- Writing draws the next number at the writing speed; very fast
+			-- writing scribbles the changed digits a dozen times a second; a
+			-- jump (a gift) draws each changed digit quickly.
+			drawCount(count, if fast then 0.012 elseif stepUp then ChalkView.writeSeconds(speed) elseif shownCount >= 0 then 0.22 else 0)
 			drawProgress(count)
 			if not stepUp and shownCount >= 0 then dust(ChalkBoard.onBoard(0, ChalkBoard.NUMBER_Y), theme().chalk, 6, { 1, 4 }) end
 		end
@@ -16400,6 +16502,7 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 			ContextActionService:UnbindAction(WRITE_ACTION)
 			setHeld(false)
 			releaseArm()
+			restHand()
 			clearSlots()
 			for _, p in cornerParts do p:Destroy() end
 			table.clear(cornerParts)
@@ -16413,6 +16516,7 @@ function ChalkView.start(request: RemoteEvent, state: Instance)
 	player.CharacterAdded:Connect(function()
 		arm = nil
 		chalkStick = nil
+		ik = nil
 		setHeld(false)
 	end)
 

@@ -13,13 +13,18 @@ ChalkBoard.BOARD_BOTTOM = 2.4 -- above the floor
 ChalkBoard.BOARD_Z = -20 -- the board's middle, from the classroom's middle (it faces +Z)
 ChalkBoard.BOARD_THICKNESS = 0.6
 
--- The settings: the number to reach, and how fast the hand writes.
-ChalkBoard.GOAL = { min = 10, max = 100000, default = 1000 }
-ChalkBoard.SPEED = { min = 1, max = 20, default = 3 } -- numbers a second
+-- The settings: the number to reach (up to 5 million), and how fast the hand
+-- writes. The fastest writing is the old top speed (20 a second for a goal of
+-- 1,000) scaled up to 5 million: 100,000 numbers a second.
+ChalkBoard.GOAL = { min = 10, max = 5000000, default = 1000 }
+ChalkBoard.SPEED = { min = 1, max = 100000, default = 3 } -- numbers a second
 ChalkBoard.RESET_SECONDS = { min = 10, max = 300, default = 60 }
 ChalkBoard.RESET_GIFT = "Galaxy" -- starts the reset countdown
 ChalkBoard.SAVE_COINS = 1000 -- a gift worth this much (not the reset gift) saves the count
-ChalkBoard.MAX_DIGITS = 6
+ChalkBoard.MAX_DIGITS = 7
+-- The writer is drawn this much bigger at the board, so their hand reaches the
+-- big number and they write it themselves.
+ChalkBoard.WRITER_SCALE = 2
 
 -- The board's front, where chalk goes.
 function ChalkBoard.face(): number
@@ -31,11 +36,34 @@ function ChalkBoard.centre(): Vector3
 	return Vector3.new(ChalkBoard.ORIGIN.X, ChalkBoard.ORIGIN.Y + ChalkBoard.BOARD_BOTTOM + ChalkBoard.BOARD_HEIGHT / 2, ChalkBoard.face())
 end
 
--- Where the writer stands: at the board, a little right of the middle,
--- facing it (the big number is written above their head).
+-- Where the (bigger) writer stands: at the board, a little right of the
+-- middle, facing it, close enough to write on it.
 function ChalkBoard.standFrame(): CFrame
-	local at = Vector3.new(ChalkBoard.ORIGIN.X + 3, ChalkBoard.ORIGIN.Y + 3, ChalkBoard.face() + 2.6)
+	local s = ChalkBoard.WRITER_SCALE
+	local at = Vector3.new(ChalkBoard.ORIGIN.X + 3, ChalkBoard.ORIGIN.Y + 3 * s, ChalkBoard.face() + 1.3 * s)
 	return CFrame.lookAt(at, at - Vector3.new(0, 0, 1))
+end
+
+-- Across the board (from its middle), where the writer stands so their right
+-- hand reaches a chalk point at `x`: just left of it, kept on the board.
+function ChalkBoard.writerX(x: number): number
+	local half = ChalkBoard.BOARD_WIDTH / 2 - 2
+	return math.clamp(x - 1.3 * ChalkBoard.WRITER_SCALE, -half, half)
+end
+
+-- The writing speed slider goes up in steps that feel even from 1 a second
+-- to 100,000 a second: `fraction` 0 to 1 along it, and back.
+function ChalkBoard.speedAt(fraction: number): number
+	local low, high = ChalkBoard.SPEED.min, ChalkBoard.SPEED.max
+	local raw = low * (high / low) ^ math.clamp(fraction, 0, 1)
+	if raw < 10 then return math.floor(raw * 2 + 0.5) / 2 end
+	-- Two significant figures: 12, 340, 5,600, 78,000.
+	local step = 10 ^ math.max(0, math.floor(math.log10(raw)) - 1)
+	return math.clamp(math.floor(raw / step + 0.5) * step, low, high)
+end
+function ChalkBoard.speedFraction(speed: number): number
+	local low, high = ChalkBoard.SPEED.min, ChalkBoard.SPEED.max
+	return math.clamp(math.log(math.max(speed, low) / low) / math.log(high / low), 0, 1)
 end
 
 -- The view of the classroom: in front of the board and off to one side, looking

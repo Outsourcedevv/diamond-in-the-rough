@@ -73,8 +73,8 @@ end
 local halfWidth = ChalkBoard.BOARD_WIDTH / 2
 local lefts = ChalkBoard.digitLefts(ChalkBoard.MAX_DIGITS)
 check(#lefts == ChalkBoard.MAX_DIGITS, "a slot for each digit")
-check(lefts[1] > -halfWidth + 1, "the first of six digits is on the board")
-check(lefts[#lefts] + ChalkBoard.DIGIT_WIDTH < halfWidth - 1, "the last of six digits is on the board")
+check(lefts[1] > -halfWidth + 1, "the first of seven digits is on the board")
+check(lefts[#lefts] + ChalkBoard.DIGIT_WIDTH < halfWidth - 1, "the last of seven digits is on the board")
 check(math.abs(lefts[1] + lefts[#lefts] + ChalkBoard.DIGIT_WIDTH) < 1e-6, "the number is centred")
 local bottom = ChalkBoard.NUMBER_Y - ChalkBoard.NUMBER_HEIGHT / 2
 check(bottom > ChalkBoard.BOARD_BOTTOM + 1 and bottom + ChalkBoard.NUMBER_HEIGHT < ChalkBoard.BOARD_BOTTOM + ChalkBoard.BOARD_HEIGHT - 0.5, "the number fits the board's height")
@@ -85,7 +85,24 @@ for _, segment in ChalkBoard.segments(8, lefts[1], bottom, ChalkBoard.NUMBER_HEI
 	end
 end
 check(table.concat(ChalkBoard.digits(1234), "") == "1234" and table.concat(ChalkBoard.digits(0), "") == "0" and table.concat(ChalkBoard.digits(-5), "") == "0", "the digits of a count")
-check(#tostring(ChalkBoard.GOAL.max) <= ChalkBoard.MAX_DIGITS, "the highest goal fits in six digits")
+check(#tostring(ChalkBoard.GOAL.max) <= ChalkBoard.MAX_DIGITS, "the highest goal fits in seven digits")
+check(ChalkBoard.GOAL.max == 5000000, "goals go up to 5 million")
+check(ChalkBoard.SPEED.max == 20 * ChalkBoard.GOAL.max / 1000, "the top speed is the old 20 a second scaled to 5 million")
+-- The speed slider: even steps from 1 to 100,000 a second.
+check(ChalkBoard.speedAt(0) == ChalkBoard.SPEED.min and ChalkBoard.speedAt(1) == ChalkBoard.SPEED.max, "the slider's ends")
+local lastSpeed = 0
+for i = 0, 50 do
+	local v = ChalkBoard.speedAt(i / 50)
+	check(v >= lastSpeed, "the slider only goes up")
+	lastSpeed = v
+end
+check(math.abs(ChalkBoard.speedFraction(ChalkBoard.speedAt(0.6)) - 0.6) < 0.02, "slider positions round-trip")
+check(ChalkBoard.speedAt(0.5) > 100 and ChalkBoard.speedAt(0.5) < 1000, "halfway is a few hundred a second")
+-- The bigger writer stands on the floor at the board and steps along it.
+check(ChalkBoard.WRITER_SCALE > 1.5, "the writer is drawn bigger")
+local stand = ChalkBoard.standFrame()
+check(math.abs(stand.Position.Y - ChalkBoard.ORIGIN.Y - 3 * ChalkBoard.WRITER_SCALE) < 1e-6 and stand.Position.Z > ChalkBoard.face(), "standing on the floor in front of the board")
+check(ChalkBoard.writerX(0) < 0 and ChalkBoard.writerX(-100) >= -halfWidth and ChalkBoard.writerX(100) <= halfWidth, "the writer steps along the board, never off it")
 
 -- The writer stands at the board facing it; the camera is in front, looking at it.
 local stand = ChalkBoard.standFrame()
@@ -117,7 +134,7 @@ check(ChalkBoard.THEMES.classic.board.G > ChalkBoard.THEMES.classic.board.R and 
 check(ChalkBoard.theme("nope") == ChalkBoard.THEMES.classic and ChalkBoard.theme(nil) == ChalkBoard.THEMES.classic, "an unknown theme is classic")
 
 -- A saved count is cleaned up.
-local clean = ChalkGame.clean({ count = 5000, goal = 4000, wins = -2, speed = 99, theme = "x", strength = 3, resetSeconds = 2, saveCoins = 0 })
+local clean = ChalkGame.clean({ count = 5000, goal = 4000, wins = -2, speed = 1e9, theme = "x", strength = 3, resetSeconds = 2, saveCoins = 0 })
 check(clean.goal == 4000 and clean.count == 0 and clean.wins == 0 and clean.speed == ChalkBoard.SPEED.max and clean.theme == "classic"
 	and clean.strength == 1 and clean.resetSeconds == ChalkBoard.RESET_SECONDS.min and clean.saveCoins == 1, "out of range saves are put right (a count saved at the goal starts again)")
 local kept = ChalkGame.clean({ count = 321.7, goal = 500, wins = 2, best = 400, speed = 4.5, theme = "neon", strength = 2, resetGift = "Lion", resetSeconds = 90, saveCoins = 5000 })
@@ -131,6 +148,7 @@ check(ChalkView.countText(123, 1000) == "123 / 1,000", "count text")
 check(ChalkView.resetText(60) == "RESET IN 1:00" and ChalkView.resetText(9.2) == "RESET IN 0:10" and ChalkView.resetText(-3) == "RESET IN 0:00", "countdown text")
 check(ChalkView.saveText(1000) == "Send a gift of 1,000+ coins to save the board", "save text")
 check(ChalkView.writeSeconds(1) > ChalkView.writeSeconds(10) and ChalkView.writeSeconds(20) >= 0.04, "faster writing draws each number faster")
+check(ChalkView.speedText(3) == "3 a second" and ChalkView.speedText(1.5) == "1.5 a second" and ChalkView.speedText(12000) == "12,000 a second", "speed text")
 
 -- The classroom.
 local parent = newInstance("Workspace")
@@ -264,6 +282,11 @@ local streamer = newInstance("Player")
 streamer.Name, streamer.DisplayName, streamer.Parent = "Niamh", "Niamh", Players
 table.insert(players, streamer)
 local character = newInstance("Model")
+-- Models scale (ScaleTo) and move (PivotTo) like Roblox's.
+local characterScale = 1
+character.GetScale = function() return characterScale end
+character.ScaleTo = function(_, value) characterScale = value end
+character.PivotTo = function(self, frame) self.pivot = frame end
 streamer.Character = character
 local humanoid = newInstance("Humanoid")
 humanoid.Parent = character
@@ -272,6 +295,7 @@ streamer:SetAttribute("InChalk", true)
 chalk.entered(streamer, true)
 check(chalk.writer() == streamer, "the streamer is the writer")
 check(humanoid.WalkSpeed == 0 and humanoid.JumpHeight == 0, "the writer stands still at the board")
+check(characterScale == ChalkBoard.WRITER_SCALE, "the writer is drawn bigger at the board")
 check(humanoid.AutoRotate == false, "the movement keys can't turn the writer away from the board")
 
 -- Holding writes three numbers a second; letting go stops.
@@ -293,7 +317,7 @@ advance(2)
 check(chalk.progress.count == 21, "faster writing: " .. chalk.progress.count)
 chalk.hold(streamer, false)
 advance(0.1)
-check(chalk.setting(streamer, "setChalkSpeed", 99) and chalk.progress.speed == ChalkBoard.SPEED.max, "the speed has a top")
+check(chalk.setting(streamer, "setChalkSpeed", 1e9) and chalk.progress.speed == ChalkBoard.SPEED.max, "the speed has a top")
 chalk.setting(streamer, "setChalkSpeed", 3)
 
 -- Gifts move the count up and down.
@@ -395,12 +419,26 @@ check(chalk.addWins(-9999) == 0, "wins never go below 0")
 check(not chalk.setting(streamer, "setPerCoin", 5), "other settings are left to the game")
 check(saves > 0, "settings are saved")
 
+-- Very fast writing really is that fast (no cap per frame).
+chalk.setting(streamer, "setChalkGoal", 5000000)
+chalk.setting(streamer, "setChalkSpeed", 50000)
+local from = chalk.progress.count
+chalk.hold(streamer, true)
+advance(1)
+chalk.hold(streamer, false)
+advance(0.1)
+check(chalk.progress.count - from > 40000, "50,000 a second writes tens of thousands: " .. (chalk.progress.count - from))
+chalk.setting(streamer, "setChalkSpeed", 3)
+chalk.setting(streamer, "chalkRestart", nil)
+chalk.setting(streamer, "setChalkGoal", 1000)
+
 -- Leaving the board gives back Roblox's usual movement.
 chalk.hold(streamer, true)
 streamer:SetAttribute("InChalk", false)
 chalk.entered(streamer, false)
 advance(1)
 check(humanoid.WalkSpeed == 16 and humanoid.JumpHeight == 7.2 and humanoid.AutoRotate == true, "walking again after leaving")
+check(characterScale == 1, "and their usual size again")
 check(chalk.progress.count == 0 and state:GetAttribute("ChalkWriting") == false and chalk.writer() == nil, "nobody writes after leaving")
 chalk.removing(streamer)
 print(string.format("PASS: %d chalkboard game checks", passed))
