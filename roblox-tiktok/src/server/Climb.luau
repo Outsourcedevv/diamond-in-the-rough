@@ -95,6 +95,12 @@ function Climb.build(parent: Instance): Built
 	spawn.CanTouch = false
 	spawn.Parent = model
 
+	-- The wall behind the start island: gifts that push past platform 0 hit it.
+	local wall = piece(model, "ClimbWall", ClimbPath.WALL_SIZE, ClimbPath.wallFrame(), Color3.fromRGB(150, 132, 118), Enum.Material.Brick, true)
+	wall.CanQuery = true
+	piece(model, "WallCap", ClimbPath.WALL_SIZE + Vector3.new(0.6, 0, 0.6) - Vector3.new(0, ClimbPath.WALL_SIZE.Y - 0.8, 0),
+		ClimbPath.wallFrame() * CFrame.new(0, ClimbPath.WALL_SIZE.Y / 2 + 0.4, 0), GOLD, Enum.Material.Foil)
+
 	-- The platforms.
 	local platforms = Instance.new("Folder")
 	platforms.Name = "Platforms"

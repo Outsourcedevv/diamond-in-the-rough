@@ -886,6 +886,17 @@ local function refreshStrength()
 end
 State:GetAttributeChangedSignal("ClimbStrength"):Connect(refreshStrength)
 refreshStrength()
+panelLabel("Wall health (gifts that push you back past platform 0 hit the wall; when it breaks you lose a win)")
+local climbWallBox = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[,%s]", "")))
+	if number then send("setClimbWall", number) end
+end)
+climbWallBox.PlaceholderText = "e.g. 5,000"
+local function refreshWallBox()
+	climbWallBox.Text = Format.commas(attr("ClimbWallMax", 5000))
+end
+State:GetAttributeChangedSignal("ClimbWallMax"):Connect(refreshWallBox)
+refreshWallBox()
 
 panelLabel("CHALKBOARD COUNT")
 panelLabel("While writing, gifts add numbers and adding gifts rub them out.")
@@ -1496,6 +1507,8 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 		climb.onWin(data)
 	elseif kind == "climbRestart" then
 		climb.onRestart()
+	elseif kind == "climbWall" then
+		climb.onWall(data)
 	elseif kind == "chalkGift" then
 		chalk.onGift(data)
 	elseif kind == "chalkReset" then

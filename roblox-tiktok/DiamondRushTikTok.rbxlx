@@ -442,6 +442,29 @@ function ClimbPath.isOn(index: number, feet: Vector3, slack: number?): boolean
 	return flat <= ClimbPath.size(index) / 2 + 1.5 + extra and feet.Y >= top.Y - 1.5 - extra and feet.Y <= top.Y + 4 + extra * 2
 end
 
+-- The wall behind the start island. Gifts that push the climber back past
+-- platform 0 hit it instead: every platform they would have gone below 0
+-- takes 1 health off. At 0 health the wall breaks, the climber loses a win
+-- and the wall is built again at full health.
+ClimbPath.WALL = { min = 100, max = 1000000, default = 5000 }
+ClimbPath.WALL_SIZE = Vector3.new(26, 14, 3) -- across, up, thick
+
+-- The wall's middle, behind the start island (the way back, away from
+-- platform 1), standing on the island's level.
+function ClimbPath.wallFrame(): CFrame
+	local start = ClimbPath.top(0)
+	local ahead = ClimbPath.top(1) - start
+	local back = -Vector3.new(ahead.X, 0, ahead.Z).Unit
+	local at = start + back * (ClimbPath.START_SIZE / 2 + ClimbPath.WALL_SIZE.Z / 2 + 0.5) + Vector3.new(0, ClimbPath.WALL_SIZE.Y / 2, 0)
+	return CFrame.lookAt(at, at - back)
+end
+
+-- How far past platform 0 a push from `from` by `move` goes (the wall's
+-- damage), or 0.
+function ClimbPath.wallDamage(from: number, move: number): number
+	return math.max(0, -(math.floor(from) + math.floor(move)))
+end
+
 -- How many platforms a gift of `coins` (each) moves the climber, up or down.
 -- It grows with the square root of the coins: a Rose is 2, 100 coins is 20,
 -- a Galaxy 63 and 10,000 coins 200. `strength` is the streamer's multiplier.
@@ -6355,7 +6378,7 @@ local function processTikTok(event: TikTokFeed.Event)
 		local move = if rule ~= nil then math.floor(rule) * math.max(1, math.floor(event.count or 1))
 			elseif event.type == "gift" then ClimbGame.giftMove(amount, coins, event.count or 1, climbGame.progress.strength)
 			elseif amount > 0 then 1 else 0
-		local from, to = climbGame.gift(who, move, {
+		local from, to, wallDamage, wallBroke = climbGame.gift(who, move, {
 			coins = if event.type == "gift" then coins else 1,
 			gift = (giftLabel or (if event.type == "follow" then "Follow" elseif event.type == "share" then "Share" else "Gift"))
 				.. (if event.parts then string.format("  (%d of %d)", event.part or 1, event.parts) else ""),
@@ -6363,6 +6386,12 @@ local function processTikTok(event: TikTokFeed.Event)
 		local moved = to - from
 		if doubledGifts[event] then text = "2X " .. text end
 		text ..= if moved > 0 then string.format("  UP %d", moved) elseif moved < 0 then string.format("  DOWN %d", -moved) else ""
+		-- Pushed back past platform 0: the wall takes the rest.
+		if wallBroke then
+			text ..= "  WALL BROKEN! -1 WIN"
+		elseif wallDamage > 0 then
+			text ..= string.format("  WALL -%s", Format.commas(wallDamage))
+		end
 		Notify:FireAllClients("feed", { text = text, stone = 0, kind = event.type })
 		return
 	end
@@ -6795,6 +6824,10 @@ local function applySetting(player: Player, action: string, value: any)
 		return
 	elseif action == "setClimbStrength" and type(value) == "number" then
 		climbGame.setStrength(value)
+		return
+	elseif action == "setClimbWall" and type(value) == "number" then
+		-- The wall's health (Y panel): a whole new wall that strong.
+		climbGame.setWallMax(value)
 		return
 	elseif action == "spawnBird" then
 		diamondBird.spawn()
@@ -7894,6 +7927,12 @@ function Climb.build(parent: Instance): Built
 	spawn.CanTouch = false
 	spawn.Parent = model
 
+	-- The wall behind the start island: gifts that push past platform 0 hit it.
+	local wall = piece(model, "ClimbWall", ClimbPath.WALL_SIZE, ClimbPath.wallFrame(), Color3.fromRGB(150, 132, 118), Enum.Material.Brick, true)
+	wall.CanQuery = true
+	piece(model, "WallCap", ClimbPath.WALL_SIZE + Vector3.new(0.6, 0, 0.6) - Vector3.new(0, ClimbPath.WALL_SIZE.Y - 0.8, 0),
+		ClimbPath.wallFrame() * CFrame.new(0, ClimbPath.WALL_SIZE.Y / 2 + 0.4, 0), GOLD, Enum.Material.Foil)
+
 	-- The platforms.
 	local platforms = Instance.new("Folder")
 	platforms.Name = "Platforms"
@@ -7982,7 +8021,7 @@ local Climb = require(script.Parent:WaitForChild("Climb"))
 
 local ClimbGame = {}
 
-export type Progress = { checkpoint: number, best: number, wins: number, speed: number, jump: number, strength: number }
+export type Progress = { checkpoint: number, best: number, wins: number, speed: number, jump: number, strength: number, wall: number, wallMax: number }
 
 -- Gift strength choices in the streamer panel: platforms per gift times this.
 ClimbGame.STRENGTHS = { 0.5, 1, 2 }
@@ -7993,7 +8032,8 @@ ClimbGame.WIN_SECONDS = 8
 ClimbGame.MAX_SKIP = 20
 
 function ClimbGame.defaults(): Progress
-	return { checkpoint = 0, best = 0, wins = 0, speed = ClimbPath.SPEED.default, jump = ClimbPath.JUMP.default, strength = 1 }
+	return { checkpoint = 0, best = 0, wins = 0, speed = ClimbPath.SPEED.default, jump = ClimbPath.JUMP.default, strength = 1,
+		wall = ClimbPath.WALL.default, wallMax = ClimbPath.WALL.default }
 end
 
 -- A saved climb with anything missing or out of range put right.
@@ -8012,6 +8052,9 @@ function ClimbGame.clean(saved: any): Progress
 	number("wins", 0, 999999, true)
 	number("speed", ClimbPath.SPEED.min, ClimbPath.SPEED.max, false)
 	number("jump", ClimbPath.JUMP.min, ClimbPath.JUMP.max, false)
+	number("wallMax", ClimbPath.WALL.min, ClimbPath.WALL.max, true)
+	progress.wall = progress.wallMax
+	number("wall", 1, progress.wallMax, true)
 	if table.find(ClimbGame.STRENGTHS, saved.strength) then progress.strength = saved.strength end
 	progress.best = math.max(progress.best, progress.checkpoint)
 	-- A climb saved at the top (the server stopped during the win) starts again.
@@ -8048,7 +8091,8 @@ export type Game = {
 	setMove: (player: Player, value: any) -> (),
 	setStrength: (value: any) -> boolean,
 	restart: () -> (),
-	gift: (who: string, move: number, info: { [string]: any }) -> (number, number),
+	gift: (who: string, move: number, info: { [string]: any }) -> (number, number, number, boolean),
+	setWallMax: (value: any) -> boolean,
 	addWins: (amount: number) -> number,
 	removing: (player: Player) -> (),
 }
@@ -8074,6 +8118,8 @@ function ClimbGame.start(options: Options): Game
 		state:SetAttribute("ClimbJump", progress.jump)
 		state:SetAttribute("ClimbStrength", progress.strength)
 		state:SetAttribute("ClimbHoldStart", holdStart)
+		state:SetAttribute("ClimbWall", progress.wall)
+		state:SetAttribute("ClimbWallMax", progress.wallMax)
 	end
 	publish()
 
@@ -8149,6 +8195,8 @@ function ClimbGame.start(options: Options): Game
 		winning = true
 		cancelHold()
 		progress.wins += 1
+		-- A new climb starts with a whole wall.
+		progress.wall = progress.wallMax
 		setCheckpoint(ClimbPath.TOP)
 		notify:FireAllClients("climbWin", { wins = progress.wins, name = if player then player.DisplayName else "" })
 		task.delay(ClimbGame.WIN_SECONDS, function()
@@ -8273,12 +8321,40 @@ function ClimbGame.start(options: Options): Game
 	-- A gift (or a follow or share) moves the climber `move` platforms (up if
 	-- positive). Every climbing player's game plays it with `info` (the
 	-- gift's coins, name and sender). Returns where the climber was and is now.
-	function self.gift(who: string, move: number, info: { [string]: any }): (number, number)
+	-- The wall's health, set in the streamer panel: a full new wall.
+	function self.setWallMax(value: any): boolean
+		if type(value) ~= "number" or value ~= value then return false end
+		progress.wallMax = math.clamp(math.floor(value), ClimbPath.WALL.min, ClimbPath.WALL.max)
+		progress.wall = progress.wallMax
+		publish()
+		options.save()
+		return true
+	end
+
+	-- A push back past platform 0 hits the wall: 1 health a platform. At 0
+	-- the wall breaks, a win is lost and the wall is built again.
+	local function hitWall(who: string, damage: number): boolean
+		progress.wall -= damage
+		local broke = progress.wall <= 0
+		if broke then
+			progress.wins = math.max(0, progress.wins - 1)
+			progress.wall = progress.wallMax
+		end
+		publish()
+		options.save()
+		notify:FireAllClients("climbWall", { damage = damage, health = progress.wall, max = progress.wallMax, broke = broke, name = who, wins = progress.wins })
+		return broke
+	end
+
+	-- Returns where the climber was and is, and the wall's damage and whether it broke.
+	function self.gift(who: string, move: number, info: { [string]: any }): (number, number, number, boolean)
 		local from = progress.checkpoint
-		if winning or move == 0 then return from, from end
+		if winning or move == 0 then return from, from, 0, false end
+		local damage = if move < 0 then ClimbPath.wallDamage(from, move) else 0
+		local broke = if damage > 0 then hitWall(who, damage) else false
 		local to = math.clamp(from + move, 0, ClimbPath.TOP)
 		-- Already at the bottom (or top): no ride that goes nowhere.
-		if to == from then return from, from end
+		if to == from then return from, from, damage, broke end
 		-- Sent down from the top: the hold is lost.
 		if to < ClimbPath.TOP then cancelHold() end
 		setCheckpoint(to)
@@ -8294,7 +8370,7 @@ function ClimbGame.start(options: Options): Game
 			-- gift has sent them down meanwhile).
 			task.delay(ClimbPath.giftSeconds(info.coins or 1), startHold)
 		end
-		return from, to
+		return from, to, damage, broke
 	end
 
 	function self.removing(player: Player)
@@ -14028,6 +14104,17 @@ local function refreshStrength()
 end
 State:GetAttributeChangedSignal("ClimbStrength"):Connect(refreshStrength)
 refreshStrength()
+panelLabel("Wall health (gifts that push you back past platform 0 hit the wall; when it breaks you lose a win)")
+local climbWallBox = panelBox("", function(text)
+	local number = tonumber((string.gsub(text, "[,%s]", "")))
+	if number then send("setClimbWall", number) end
+end)
+climbWallBox.PlaceholderText = "e.g. 5,000"
+local function refreshWallBox()
+	climbWallBox.Text = Format.commas(attr("ClimbWallMax", 5000))
+end
+State:GetAttributeChangedSignal("ClimbWallMax"):Connect(refreshWallBox)
+refreshWallBox()
 
 panelLabel("CHALKBOARD COUNT")
 panelLabel("While writing, gifts add numbers and adding gifts rub them out.")
@@ -14638,6 +14725,8 @@ Notify.OnClientEvent:Connect(function(kind: string, data: any)
 		climb.onWin(data)
 	elseif kind == "climbRestart" then
 		climb.onRestart()
+	elseif kind == "climbWall" then
+		climb.onWall(data)
 	elseif kind == "chalkGift" then
 		chalk.onGift(data)
 	elseif kind == "chalkReset" then
@@ -17986,6 +18075,12 @@ function ClimbView.pitch(index: number): number
 	return 0.8 + (index % 10) * 0.07
 end
 
+-- The wall's health colour: green when whole, gold, then red near breaking.
+function ClimbView.wallColour(health: number, max: number): string
+	local fraction = health / math.max(1, max)
+	return if fraction > 0.6 then "#76E6A0" elseif fraction > 0.25 then "#F6C85C" else "#FF5454"
+end
+
 -- What the climb's display says.
 function ClimbView.platformText(index: number): string
 	return string.format("PLATFORM %s / %s", Format.commas(math.floor(index + 0.5)), Format.commas(ClimbPath.TOP))
@@ -18288,11 +18383,15 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	-- The display follows the checkpoint, or the ride while a gift carries the climber.
 	local shownPlatform = attr("ClimbCheckpoint", 0)
 	local function refreshStats()
-		statsLabel.Text = string.format('BEST <font color="#FFFFFF">%s</font>    CLIMBS <font color="#F6C85C">%s</font>',
-			Format.commas(attr("ClimbBest", 0)), Format.commas(attr("ClimbWins", 0)))
+		local wall, wallMax = attr("ClimbWall", ClimbPath.WALL.default), attr("ClimbWallMax", ClimbPath.WALL.default)
+		statsLabel.Text = string.format('BEST <font color="#FFFFFF">%s</font>    CLIMBS <font color="#F6C85C">%s</font>    WALL <font color="%s">%s</font>',
+			Format.commas(attr("ClimbBest", 0)), Format.commas(attr("ClimbWins", 0)),
+			ClimbView.wallColour(wall, wallMax), Format.commas(wall))
 	end
 	state:GetAttributeChangedSignal("ClimbBest"):Connect(refreshStats)
 	state:GetAttributeChangedSignal("ClimbWins"):Connect(refreshStats)
+	state:GetAttributeChangedSignal("ClimbWall"):Connect(refreshStats)
+	state:GetAttributeChangedSignal("ClimbWallMax"):Connect(refreshStats)
 	refreshStats()
 	local lastWhole = -1
 	local wasHolding = false
@@ -18335,6 +18434,39 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		if tower then tower.Parent = if active then workspace else hiddenTower end
 	end
 	local startDiamond: (Instance) -> ()
+	-- The wall behind the start: its health over it, and how it takes hits.
+	local wallPart: BasePart? = nil
+	local wallColour: Color3? = nil
+	local wallBar: Frame? = nil
+	local wallText: TextLabel? = nil
+	local function refreshWall()
+		local health, max = attr("ClimbWall", ClimbPath.WALL.default), attr("ClimbWallMax", ClimbPath.WALL.default)
+		local bar, text = wallBar, wallText
+		if bar and text then
+			bar.Size = UDim2.fromScale(math.clamp(health / math.max(1, max), 0, 1), 1)
+			bar.BackgroundColor3 = Color3.fromHex(ClimbView.wallColour(health, max))
+			text.Text = string.format("WALL  %s / %s", Format.commas(health), Format.commas(max))
+		end
+	end
+	local function startWall(model: Instance)
+		local found = model:WaitForChild("ClimbWall", math.huge)
+		if found == nil or not found:IsA("BasePart") then return end
+		wallPart = found
+		wallColour = found.Color
+		local sign = make("BillboardGui", { Name = "WallHealth", Adornee = found, Size = UDim2.fromScale(14, 2.6),
+			StudsOffsetWorldSpace = Vector3.new(0, ClimbPath.WALL_SIZE.Y / 2 + 3, 0), LightInfluence = 0, MaxDistance = 300 }, player:WaitForChild("PlayerGui"))
+		local back = make("Frame", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromScale(0.5, 1), Size = UDim2.fromScale(1, 0.38),
+			BackgroundColor3 = Color3.fromRGB(20, 22, 30), BackgroundTransparency = 0.15, BorderSizePixel = 0 }, sign)
+		rounded(back, 6)
+		local fill = make("Frame", { Size = UDim2.fromScale(1, 1), BorderSizePixel = 0 }, back)
+		rounded(fill, 6)
+		local label = make("TextLabel", { Size = UDim2.fromScale(1, 0.58), BackgroundTransparency = 1, Font = FONT_HEAVY, TextScaled = true,
+			TextColor3 = WHITE, TextStrokeTransparency = 0.3, Text = "" }, sign)
+		wallBar, wallText = fill, label
+		refreshWall()
+	end
+	state:GetAttributeChangedSignal("ClimbWall"):Connect(refreshWall)
+	state:GetAttributeChangedSignal("ClimbWallMax"):Connect(refreshWall)
 	-- Started at the end (once everything it uses is ready).
 	local function findTower()
 		local model = workspace:WaitForChild("DiamondClimb", math.huge)
@@ -18346,6 +18478,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		for _, item in model:GetDescendants() do add(item) end
 		model.DescendantAdded:Connect(add)
 		task.spawn(startDiamond, model)
+		task.spawn(startWall, model)
 		showTower()
 	end
 
@@ -18628,6 +18761,36 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 	local function onWin(data: any)
 		if active then winWaiting = data end
 	end
+	-- A push back past platform 0 hits the wall; at 0 health it breaks.
+	local function onWall(data: any)
+		if not active or type(data) ~= "table" then return end
+		local wall = wallPart
+		local at = if wall then wall.Position else ClimbPath.top(0)
+		local damage = tonumber(data.damage) or 0
+		if data.broke then
+			Sounds.play("bigBoom", at, 1.6)
+			Sounds.play("shatter", at, 1.4)
+			showShout("THE WALL BROKE! -1 WIN", RED, 4)
+		else
+			Sounds.play(if damage >= 200 then "boom" else "clang", at)
+			showShout("WALL -" .. Format.commas(damage), Color3.fromRGB(255, 160, 80), 1.6)
+		end
+		-- The wall flashes and shudders.
+		if wall and wallColour then
+			local base = wallColour
+			wall.Color = if data.broke then WHITE else RED
+			TweenService:Create(wall, TweenInfo.new(if data.broke then 1 else 0.4), { Color = base }):Play()
+			local home = ClimbPath.wallFrame()
+			task.spawn(function()
+				for i = 1, 8 do
+					local amount = (if data.broke then 0.8 else 0.25) * (1 - i / 8)
+					wall.CFrame = home * CFrame.new((math.random() - 0.5) * amount, 0, (math.random() - 0.5) * amount)
+					task.wait(0.03)
+				end
+				wall.CFrame = home
+			end)
+		end
+	end
 	local function onRestart()
 		if not active then return end
 		table.clear(rides)
@@ -18687,6 +18850,7 @@ function ClimbView.start(request: RemoteEvent, state: Instance)
 		onGift = onGift,
 		onWin = onWin,
 		onRestart = onRestart,
+		onWall = onWall,
 	}
 end
 

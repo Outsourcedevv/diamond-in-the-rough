@@ -144,6 +144,8 @@ The second game: jump up **1,000 platforms** spiralling round a tall crystal pil
 
 While you climb, gifts move you instead of the mountain. Back in the lobby or the mine, they work on the mountain as before.
 
+- **The wall.** Behind the start island stands a wall with 5,000 health (set it in the **Y** panel under DIAMOND CLIMB). Gifts keep pushing the climber back even at platform 0: every platform they would go below 0 takes 1 health off the wall. When the wall reaches 0 it breaks, the climber loses a win (never below 0) and the wall is built again at full health. A climb to the top also rebuilds it. Its health shows over the wall and on the climb's display.
+
 ## Chalkboard Count
 
 The third game: you stand at a big green chalkboard in a classroom while a fixed classroom camera films you (with a REC light and viewfinder corners on screen). **Hold** the left mouse button, Space or the screen and you write the next number, then the next, one after another. Reach the **goal** (1,000 to start) to win; after the celebration the board is wiped for the next count.
