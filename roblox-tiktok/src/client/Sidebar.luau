@@ -222,28 +222,39 @@ function Sidebar.start(options: Options)
 		end
 	end)
 
-	-- The arrow on the bar's edge slides it away, and back.
+	-- The arrow on the bar's edge slides it away, and back. It sits beside the
+	-- bar, not in it: the bar's list layout would place it among the buttons
+	-- (and take it off screen with them). Tucked away, the arrow stays at the
+	-- screen's edge to bring the bar back.
+	local ARROW_OPEN = Sidebar.MARGIN + Sidebar.BAR_WIDTH + 4
+	local ARROW_TUCKED = 4
 	local arrow = make("TextButton", {
+		Name = "SidebarArrow",
 		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(1, 4, 0.5, 0),
-		Size = UDim2.fromOffset(22, 58),
+		Position = UDim2.new(0, ARROW_OPEN, Sidebar.CENTRE, 0),
+		Size = UDim2.fromOffset(24, 64),
 		Font = FONT,
-		TextSize = 22,
+		TextSize = 24,
 		TextColor3 = WHITE,
 		Text = "‹",
 		AutoButtonColor = true,
-	}, bar)
+		ZIndex = 4,
+	}, gui)
 	glass(arrow, 10)
 	local collapsed = false
-	local slide: Tween? = nil
+	local slides: { Tween } = {}
 	local function setCollapsed(value: boolean)
 		collapsed = value
 		arrow.Text = if value then "›" else "‹"
-		if slide then slide:Cancel() end
-		local x = if value then -(Sidebar.BAR_WIDTH + 2) else Sidebar.MARGIN
-		local tween = TweenService:Create(bar, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = UDim2.new(0, x, Sidebar.CENTRE, 0) })
-		slide = tween
-		tween:Play()
+		for _, tween in slides do tween:Cancel() end
+		local info = TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+		local barX = if value then -(Sidebar.BAR_WIDTH + 2) else Sidebar.MARGIN
+		local arrowX = if value then ARROW_TUCKED else ARROW_OPEN
+		slides = {
+			TweenService:Create(bar, info, { Position = UDim2.new(0, barX, Sidebar.CENTRE, 0) }),
+			TweenService:Create(arrow, info, { Position = UDim2.new(0, arrowX, Sidebar.CENTRE, 0) }),
+		}
+		for _, tween in slides do tween:Play() end
 	end
 	arrow.Activated:Connect(function() setCollapsed(not collapsed) end)
 

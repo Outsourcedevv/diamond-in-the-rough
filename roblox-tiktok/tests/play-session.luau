@@ -25,6 +25,23 @@ check(World.defaultLoadingRemoved == true, "in place of Roblox's own")
 run(40)
 check(player:GetAttribute("DiamondRushHudReady") == true, "the game's display says it's ready")
 check(player.PlayerGui:FindFirstChild("DiamondRushLoading") == nil, "and the loading screen has gone")
+-- A list layout places its children itself: a child given its own position
+-- there is ignored by Roblox (the sidebar's arrow once sat in the list, so
+-- hiding the sidebar hid the arrow too).
+local function layoutMisplaced()
+	local out = {}
+	for _, layout in World.findAll(player.PlayerGui, function(o) return o.ClassName == "UIListLayout" or o.ClassName == "UIGridLayout" end) do
+		for _, child in layout.Parent:GetChildren() do
+			local p = child.Position
+			if child:IsA("GuiObject") and p and (p.X.Scale ~= 0 or p.X.Offset ~= 0 or p.Y.Scale ~= 0 or p.Y.Offset ~= 0) then
+				table.insert(out, child:GetFullName())
+			end
+		end
+	end
+	return out
+end
+local misplaced = layoutMisplaced()
+check(#misplaced == 0, "nothing given its own position inside a list layout: " .. table.concat(misplaced, ", "))
 section("boot")
 
 local RS = World.services.ReplicatedStorage
