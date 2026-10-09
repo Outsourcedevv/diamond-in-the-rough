@@ -213,7 +213,7 @@ The arrow on its edge slides the sidebar away (and back), leaving only the arrow
 
 **Selling the themes and the haystack skin for Robux** (once):
 
-1. In the [Creator Dashboard](https://create.roblox.com/dashboard/creations), open your game, then **Monetization → Passes**, and make a pass for each theme you want to sell: **Sakura**, **Farm**, **Desert** and **Haunted**, and one for the **Hay & needle** skin (Alpine and Stone & diamond are always free). Give each a picture, and in its **Sales** tab switch on **Item for Sale** and set its price.
+1. In the [Creator Dashboard](https://create.roblox.com/dashboard/creations), open your game, then **Monetization → Passes**, and make a pass for each theme you want to sell: **Sakura**, **Farm**, **Desert** and **Haunted**, and one for the **Hay & needle** skin (Alpine and Stone & diamond are always free). Give each a picture (ready-made 512 × 512 ones are in `art/gamepasses`: `sakura.png`, `farm.png`, `desert.png`, `haunted.png` and `hay.png`; `node art/gamepasses/make.mjs` redraws them), and in its **Sales** tab switch on **Item for Sale** and set its price.
 2. Copy each pass's id (the number in its link) into `ThemePasses` in `src/shared/Config.luau`, e.g. `sakura = 123456789` (the haystack skin's is `hay`).
 3. Rebuild the place and publish.
 
