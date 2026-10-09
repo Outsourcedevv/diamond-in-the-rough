@@ -352,7 +352,7 @@ end
 check(table.concat(titles, "|") == "Connect TikTok|Testing|Controls|How to win|Diamond Climb|Chalkboard", "six guide pages")
 local all = ""
 for _, page in HowToPlay.PAGES do all ..= page.text .. "\n" end
-for _, needed in { "1,000 platforms", "checkpoint", "Jump height", "DIAMOND CLIMB", "Shift+K", "focused", "A viewer sent", "portal", "sprint", "TEST GIFTS", "REBUILD TEST GIFTS", "Open gift settings", "Set key", "TikFinity", "<b>Y</b>", "<b>G</b>", "<b>P</b>", "<b>H</b>", "Diamond bird", "CHALKBOARD COUNT", "Hold to write", "60 second", "1,000 coins", "Test save" } do
+for _, needed in { "1,000 platforms", "checkpoint", "Jump height", "DIAMOND CLIMB", "Shift+K", "focused", "A viewer sent", "portal", "sprint", "sidebar", "TEST GIFTS", "REBUILD TEST GIFTS", "Open gift settings", "Set key", "TikFinity", "<b>Y</b>", "<b>G</b>", "<b>P</b>", "<b>H</b>", "Diamond bird", "CHALKBOARD COUNT", "Hold to write", "60 second", "1,000 coins", "Test save" } do
 	check(string.find(all, needed, 1, true) ~= nil, "the guide covers " .. needed)
 end
 check(HowToPlay.BOARD == "HowToPlay" and HowToPlay.KEY == Enum.KeyCode.H, "the board's prompt and H open the guide")

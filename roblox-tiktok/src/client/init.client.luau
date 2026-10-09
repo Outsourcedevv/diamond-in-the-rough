@@ -154,6 +154,10 @@ local chalk = ChalkView.start(Request, State)
 -- third-person camera and its own display, and Chalkboard Count shows the
 -- writer and the board from a fixed view.
 local LobbyView = require(script:WaitForChild("LobbyView"))
+-- The sidebar on the left: gifts, themes, settings and games (started once
+-- the settings card below exists).
+local Sidebar = require(script:WaitForChild("Sidebar"))
+LobbyView.LEFT = Sidebar.PANEL_LEFT
 -- How to play: from the lobby board, the games menu or H.
 local HowToPlay = require(script:WaitForChild("HowToPlay"))
 HowToPlay.start()
@@ -758,29 +762,6 @@ panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
 
-panelLabel("MAP THEME (changes for everyone straight away)")
-local THEME_BUTTONS = { { "Alpine", "default" }, { "Sakura", "sakura" }, { "Farm", "farm" }, { "Desert", "desert" }, { "Haunted", "haunted" } }
-local themeButtons: { TextButton } = {}
--- Three to a row, so the names fit.
-for first = 1, #THEME_BUTTONS, 3 do
-	local row = {}
-	for i = first, math.min(first + 2, #THEME_BUTTONS) do
-		local name = THEME_BUTTONS[i][2]
-		table.insert(row, { THEME_BUTTONS[i][1], function() send("setTheme", name) end })
-	end
-	for _, button in panelButtons(row) do table.insert(themeButtons, button) end
-end
--- The theme showing now is lit up.
-local function refreshTheme()
-	local theme = attr("Theme", "default")
-	for i, entry in THEME_BUTTONS do
-		local name = entry[2]
-		themeButtons[i].BackgroundColor3 = if theme == name then SELECTED else BUTTON
-	end
-end
-State:GetAttributeChangedSignal("Theme"):Connect(refreshTheme)
-refreshTheme()
-
 panelLabel("MOUNTAIN SKIN (same game, reskinned)")
 local skinButtons = panelButtons({
 	{ "Stone & diamond", function() send("setSkin", "stone") end },
@@ -953,28 +934,26 @@ local function refreshPanelFields()
 	perShareBox.Text = "Share: " .. tostring(attr("PerShare", Config.StonePerShare))
 end
 
--- Settings (every player): the field of view and hiding the buttons, from the
--- Settings button or P (O is Roblox's zoom-out key, which swallows it). The
--- hands are refitted to the FOV, so digging looks the same at any FOV.
+-- Settings (every player): the field of view and switches that hide things,
+-- from SETTINGS on the sidebar or P (O is Roblox's zoom-out key, which
+-- swallows it). The hands are refitted to the FOV, so digging looks the same
+-- at any FOV.
 local SETTINGS_KEY = Enum.KeyCode.P
-local settingsButton = make("TextButton", {
-	Position = UDim2.fromOffset(12, 10),
-	Size = UDim2.fromOffset(0, 32),
-	AutomaticSize = Enum.AutomaticSize.X,
-	Font = FONT,
-	TextSize = 13,
-	TextColor3 = WHITE,
-	Text = "SETTINGS  <font color=\"#A8AEBE\">P</font>",
-	RichText = true,
-}, gui)
-glass(settingsButton, 16)
-make("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, settingsButton)
+-- The settings card opens from SETTINGS on the sidebar (or P), anywhere: the
+-- lobby too, so it has its own screen layer.
+local settingsGui = make("ScreenGui", {
+	Name = "DiamondRushSettings",
+	ResetOnSpawn = false,
+	DisplayOrder = 6,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, player:WaitForChild("PlayerGui"))
 local settingsCard = make("Frame", {
-	Position = UDim2.fromOffset(12, 50),
-	Size = UDim2.fromOffset(300, 306),
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.new(0, Sidebar.PANEL_LEFT, Sidebar.CENTRE, 0),
+	Size = UDim2.fromOffset(300, 394),
 	Visible = false,
 	ZIndex = 15,
-}, gui)
+}, settingsGui)
 glass(settingsCard, 14, 0.08)
 make("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 14) }, settingsCard)
 local function settingsText(properties: { [string]: any }): TextLabel
@@ -1017,7 +996,7 @@ local fovKnob = make("Frame", {
 rounded(fovKnob, 9)
 local function settingsAction(text: string, x: number, colour: Color3): TextButton
 	local button = make("TextButton", {
-		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 252),
+		Position = UDim2.new(x, if x > 0 then 4 else 0, 0, 348),
 		Size = UDim2.new(0.5, -4, 0, 30),
 		BackgroundColor3 = colour,
 		Font = FONT,
@@ -1029,11 +1008,12 @@ local function settingsAction(text: string, x: number, colour: Color3): TextButt
 	rounded(button, 8)
 	return button
 end
--- Hide buttons: tucks away the GAMES tab and this SETTINGS button (G and P
--- still open them), so they stay off the stream. Remembered by the server.
-settingsText({ Position = UDim2.fromOffset(0, 96), Size = UDim2.new(1, -60, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = "Hide buttons" })
+-- Hide the sidebar: tucks it away (arrow and all) so it stays off the stream;
+-- G, P and Y still open the games, the settings and the streamer panel.
+-- Remembered by the server.
+settingsText({ Position = UDim2.fromOffset(0, 96), Size = UDim2.new(1, -60, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = "Hide the sidebar" })
 settingsText({ Position = UDim2.fromOffset(0, 118), Size = UDim2.new(1, -60, 0, 30), Font = FONT_MEDIUM, TextSize = 12, TextColor3 = MUTED, TextWrapped = true,
-	TextYAlignment = Enum.TextYAlignment.Top, Text = "Hides GAMES and SETTINGS. G and P still open them." })
+	TextYAlignment = Enum.TextYAlignment.Top, Text = "G, P and Y still open games, settings and the streamer panel." })
 local hideSwitch = make("TextButton", {
 	AnchorPoint = Vector2.new(1, 0),
 	Position = UDim2.new(1, 0, 0, 98),
@@ -1059,8 +1039,7 @@ local function refreshHidden()
 	local hidden = player:GetAttribute("HideButtons") == true and UserInputService.KeyboardEnabled
 	hideSwitch.BackgroundColor3 = if hidden then SELECTED else BUTTON
 	hideKnob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
-	settingsButton.Visible = not hidden
-	LobbyView.setTabHidden(hidden)
+	Sidebar.setHidden(hidden)
 end
 player:GetAttributeChangedSignal("HideButtons"):Connect(refreshHidden)
 refreshHidden()
@@ -1106,8 +1085,45 @@ local function cardSwitch(y: number, title: string, card: string, attribute: str
 		Request:FireServer("setHideCard", { card = card, hidden = hidden })
 	end)
 end
-cardSwitch(156, "Hide climb speed card", "climb", "HideClimbCard")
-cardSwitch(204, "Hide chalk writing card", "chalk", "HideChalkCard")
+cardSwitch(156, "Hide speed and jump", "climb", "HideClimbCard")
+settingsText({ Position = UDim2.fromOffset(0, 178), Size = UDim2.new(1, -60, 0, 16), Font = FONT_MEDIUM, TextSize = 12, TextColor3 = MUTED, Text = "Diamond Climb's sliders" })
+cardSwitch(206, "Hide writing speed", "chalk", "HideChalkCard")
+settingsText({ Position = UDim2.fromOffset(0, 228), Size = UDim2.new(1, -60, 0, 16), Font = FONT_MEDIUM, TextSize = 12, TextColor3 = MUTED, Text = "Chalkboard Count's card" })
+-- The win counter (the streamer's: it's the same for everyone watching).
+local winsRowTitle = settingsText({ Position = UDim2.fromOffset(0, 258), Size = UDim2.new(1, -60, 0, 20), Font = FONT_MEDIUM, TextSize = 15, TextColor3 = WHITE, Text = "Hide the win counter" })
+local winsRowHint = settingsText({ Position = UDim2.fromOffset(0, 280), Size = UDim2.new(1, -60, 0, 16), Font = FONT_MEDIUM, TextSize = 12, TextColor3 = MUTED, Text = "In every game" })
+local winsSwitch = make("TextButton", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, 0, 0, 260),
+	Size = UDim2.fromOffset(46, 26),
+	BackgroundColor3 = BUTTON,
+	AutoButtonColor = false,
+	Text = "",
+	ZIndex = 16,
+}, settingsCard)
+rounded(winsSwitch, 13)
+local winsKnob = make("Frame", {
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.new(0, 3, 0.5, 0),
+	Size = UDim2.fromOffset(20, 20),
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
+	ZIndex = 17,
+}, winsSwitch)
+rounded(winsKnob, 10)
+local function refreshWinsSwitch()
+	local hidden = State:GetAttribute("ShowWins") == false
+	winsSwitch.BackgroundColor3 = if hidden then SELECTED else BUTTON
+	winsKnob.Position = if hidden then UDim2.new(1, -23, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
+end
+State:GetAttributeChangedSignal("ShowWins"):Connect(refreshWinsSwitch)
+refreshWinsSwitch()
+winsSwitch.Activated:Connect(function()
+	Request:FireServer("setShowWins", State:GetAttribute("ShowWins") == false)
+end)
+local function showWinsRow(isAdmin: boolean)
+	winsRowTitle.Visible, winsRowHint.Visible, winsSwitch.Visible = isAdmin, isAdmin, isAdmin
+end
 local fovReset = settingsAction("Reset", 0, BUTTON)
 local settingsDone = settingsAction("Done", 0.5, SELECTED)
 
@@ -1148,22 +1164,64 @@ fovReset.Activated:Connect(function()
 end)
 
 local function settingsOpen(): boolean
-	return settingsCard.Visible and gui.Enabled
+	return settingsCard.Visible
 end
 local function setSettingsOpen(show: boolean)
 	settingsCard.Visible = show
-	-- The games menu would cover the card.
-	if show then LobbyView.close() end
+	-- One card at a time beside the sidebar.
+	if show then
+		LobbyView.close()
+		Sidebar.setThemesOpen(false)
+	end
 	draggingFov = false
 	if show then UserInputService.MouseBehavior = Enum.MouseBehavior.Default end
 end
-settingsButton.Activated:Connect(function() setSettingsOpen(not settingsCard.Visible) end)
 settingsDone.Activated:Connect(function() setSettingsOpen(false) end)
--- P toggles the settings in the game (no gift can be given P, see Keybinds).
+-- P toggles the settings, anywhere (no gift can be given P, see Keybinds).
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-	if processed or input.KeyCode ~= SETTINGS_KEY or not gui.Enabled or UserInputService:GetFocusedTextBox() then return end
+	if processed or input.KeyCode ~= SETTINGS_KEY or UserInputService:GetFocusedTextBox() then return end
 	setSettingsOpen(not settingsCard.Visible)
 end)
+-- The games menu opening (GAMES, G, or arriving in the lobby) closes the others.
+LobbyView.opened = function()
+	settingsCard.Visible = false
+	Sidebar.setThemesOpen(false)
+end
+
+-- The sidebar: GIFTS opens the gift settings (the streamer's), THEMES the
+-- themes card, SETTINGS this settings card and GAMES the games menu; pressing
+-- one that's open closes it.
+Sidebar.start({
+	request = Request,
+	state = State,
+	onPick = function(name: string)
+		if name == "gifts" then
+			LobbyView.close()
+			setSettingsOpen(false)
+			Sidebar.setThemesOpen(false)
+			panel.Visible = false
+			GiftMenu.setOpen(true)
+		elseif name == "themes" then
+			local show = not Sidebar.themesOpen()
+			LobbyView.close()
+			setSettingsOpen(false)
+			Sidebar.setThemesOpen(show)
+		elseif name == "settings" then
+			setSettingsOpen(not settingsCard.Visible)
+		else
+			LobbyView.setOpen(not LobbyView.isOpen())
+		end
+	end,
+	active = function(): string?
+		if GiftMenu.isOpen() then return "gifts" end
+		if Sidebar.themesOpen() then return "themes" end
+		if settingsCard.Visible then return "settings" end
+		if LobbyView.isOpen() then return "games" end
+		return nil
+	end,
+})
+-- The saved "hide the sidebar" was looked at before the sidebar existed.
+refreshHidden()
 
 -- The settings panel is hidden: the owner presses Y to open or close it.
 local isAdmin = false
@@ -1184,16 +1242,14 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	end
 end)
 RunService.RenderStepped:Connect(function()
-	-- Back in the lobby the game's display is off: its panel and settings close
-	-- (Y and P can't reach them there) and the lobby's camera keeps the mouse.
+	-- Back in the lobby the game's display is off, and the streamer panel with
+	-- it (the sidebar's cards still work there); the lobby keeps the mouse free.
 	if not gui.Enabled then
 		panel.Visible = false
-		settingsCard.Visible = false
-		GiftMenu.setOpen(false)
 		return
 	end
-	-- First person locks the mouse; free it while the panel or settings are open.
-	if panel.Visible or settingsOpen() or GiftMenu.isOpen() then
+	-- First person locks the mouse; free it while a panel or card is open.
+	if panel.Visible or settingsOpen() or GiftMenu.isOpen() or Sidebar.themesOpen() then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		UserInputService.MouseIconEnabled = true
 	end
@@ -1204,6 +1260,8 @@ local function refreshAdmin()
 	if not isAdmin then
 		panel.Visible = false
 	end
+	Sidebar.setAdmin(isAdmin)
+	showWinsRow(isAdmin)
 end
 player:GetAttributeChangedSignal("DiamondRushAdmin"):Connect(refreshAdmin)
 refreshAdmin()
@@ -1458,7 +1516,7 @@ local function digTarget(): number?
 	local phase = attr("Phase", "Digging")
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	local target = aimTarget
-	local allowed = digging and not panel.Visible and not settingsOpen() and not GiftMenu.isOpen() and not HowToPlay.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
+	local allowed = digging and not panel.Visible and not settingsOpen() and not GiftMenu.isOpen() and not Sidebar.themesOpen() and not HowToPlay.isOpen() and phase ~= "Won" and phase ~= "Rebuilding"
 		and not (phase == "Holding" and attr("HolderUserId", 0) == player.UserId)
 	local key = if allowed and target then view:keyForPart(target) else nil
 	if key == nil or root == nil or not root:IsA("BasePart") or (root.Position - (target :: BasePart).Position).Magnitude > 16 then
