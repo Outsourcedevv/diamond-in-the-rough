@@ -2,10 +2,9 @@
 -- The games menu on the left of the screen, in the lobby's royal white and
 -- gold: Diamond in the Rough with its live status and a Join button, Diamond
 -- Climb with the climber's platform and a Join button, Chalkboard Count with
--- the count on the board and a Join button, a slot marked Coming soon, How to play, and Back to lobby while playing. The
--- Hide button hides it to a small tab; the tab (or G) shows it again. The tab
--- itself can be hidden from the settings (G still works). Also turns the
--- lobby's giant diamond on this computer.
+-- the count on the board and a Join button, a slot marked Coming soon, How to play, and Back to lobby while playing. It
+-- opens from GAMES on the sidebar (or G), beside the sidebar; Hide (or G)
+-- closes it. Also turns the lobby's giant diamond on this computer.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -27,23 +26,22 @@ local WIDTH = 360
 local TOGGLE_KEY = Enum.KeyCode.G
 
 local open = false
-local tabHidden = false
-local refreshTab: () -> () = function() end
+-- How far from the left edge the menu opens: just right of the sidebar.
+LobbyView.LEFT = 106
 
 function LobbyView.isOpen(): boolean
 	return open
 end
 
--- Closes the menu (the settings card opens where it would cover it).
-local closeHandler: () -> () = function() end
-function LobbyView.close()
-	closeHandler()
+-- Opens or closes the menu (GAMES on the sidebar; other cards close it).
+-- `opened` runs whenever it opens, so the other cards beside the sidebar close.
+LobbyView.opened = nil :: (() -> ())?
+local openHandler: (boolean) -> () = function() end
+function LobbyView.setOpen(show: boolean)
+	openHandler(show)
 end
-
--- Hides the GAMES tab (the settings' "Hide buttons"); G still opens the menu.
-function LobbyView.setTabHidden(hidden: boolean)
-	tabHidden = hidden
-	refreshTab()
+function LobbyView.close()
+	openHandler(false)
 end
 
 local function make(className: string, properties: { [string]: any }, parent: Instance?): any
@@ -143,21 +141,6 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 		DisplayOrder = 5,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, player:WaitForChild("PlayerGui"))
-
-	-- The tab that brings the menu back.
-	local tab = make("TextButton", {
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 12, 0.5, 0),
-		Size = UDim2.fromOffset(150, 48),
-		BackgroundColor3 = IVORY,
-		Font = Enum.Font.GothamBold,
-		TextSize = 19,
-		TextColor3 = ROYAL,
-		Text = "GAMES",
-		AutoButtonColor = true,
-	}, gui)
-	rounded(tab, 14)
-	stroke(tab, GOLD, 2.5)
 
 	local panel = make("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
@@ -427,10 +410,10 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 	local function setOpen(show: boolean)
 		if show == open then return end
 		open = show
+		if show and LobbyView.opened then (LobbyView.opened :: () -> ())() end
 		if slide then slide:Cancel() end
-		refreshTab()
 		panel.Visible = true
-		local target = if show then UDim2.new(0, 12, 0.5, 0) else UDim2.new(0, -WIDTH - 40, 0.5, 0)
+		local target = if show then UDim2.new(0, LobbyView.LEFT, 0.5, 0) else UDim2.new(0, -WIDTH - 40, 0.5, 0)
 		local tween = TweenService:Create(panel, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = target })
 		slide = tween
 		tween.Completed:Connect(function(playback)
@@ -438,11 +421,7 @@ function LobbyView.start(request: RemoteEvent, state: Instance, onChange: (strin
 		end)
 		tween:Play()
 	end
-	closeHandler = function() setOpen(false) end
-	refreshTab = function()
-		tab.Visible = not open and not tabHidden
-	end
-	tab.Activated:Connect(function() setOpen(true) end)
+	openHandler = setOpen
 	hide.Activated:Connect(function() setOpen(false) end)
 
 	-- G toggles the menu (no gift can be given G, see Keybinds).

@@ -66,6 +66,17 @@ local Config = {
 	-- this many times faster, everywhere (see the client's Sprint).
 	SprintMultiplier = 1.5,
 
+	-- Map themes for Robux (the sidebar's Themes). Alpine is free; each of
+	-- these is a game pass: make it in the Creator Dashboard (your game, then
+	-- Monetization, then Passes), set its price there, and put its id here.
+	-- A theme left at 0 is free.
+	ThemePasses = {
+		sakura = 0,
+		farm = 0,
+		desert = 0,
+		haunted = 0,
+	} :: { [string]: number },
+
 	-- Single player: whoever plays is the streamer, so every player gets the Y
 	-- panel, test gifts and gift settings (with their keys). Set to false for a game where others
 	-- join; then only the owner and Admins can.

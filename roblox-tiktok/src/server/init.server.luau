@@ -13,6 +13,7 @@ local TextService = game:GetService("TextService")
 local Lighting = game:GetService("Lighting")
 local TweenService = game:GetService("TweenService")
 local TextChatService = game:GetService("TextChatService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local Shared = ReplicatedStorage:WaitForChild("DiamondRush")
 local Config = require(Shared:WaitForChild("Config"))
@@ -21,6 +22,7 @@ local ChalkBoard = require(Shared:WaitForChild("ChalkBoard"))
 local Format = require(Shared:WaitForChild("Format"))
 local Skin = require(Shared:WaitForChild("Skin"))
 local GiftTier = require(Shared:WaitForChild("GiftTier"))
+local ThemeShop = require(Shared:WaitForChild("ThemeShop"))
 local Mountain = require(script.Mountain)
 local GiftSettings = require(script.GiftSettings)
 local Store = require(script.Store)
@@ -1425,6 +1427,44 @@ for _, portal in lobby.portals do
 	portal.prompt.Triggered:Connect(join)
 end
 
+-- Map themes for Robux (the sidebar's Themes, see ThemeShop). Each player's
+-- bought themes are checked with Roblox when they join, and again before a
+-- theme they haven't been seen to own is used (a pass bought on the website
+-- meanwhile); they're shown to that player as the OwnedThemes attribute.
+local ownedThemes: { [Player]: { [string]: boolean } } = {}
+local function ownsTheme(player: Player, key: string): boolean
+	if ThemeShop.free(key, Config.ThemePasses) then return true end
+	local owned = ownedThemes[player] or {}
+	ownedThemes[player] = owned
+	if owned[key] then return true end
+	local pass = ThemeShop.pass(key, Config.ThemePasses) :: number
+	local ok, has = pcall(MarketplaceService.UserOwnsGamePassAsync, MarketplaceService, player.UserId, pass)
+	if ok and has == true and player.Parent ~= nil then
+		owned[key] = true
+		player:SetAttribute("OwnedThemes", ThemeShop.encode(owned))
+		return true
+	end
+	return false
+end
+local function checkThemes(player: Player)
+	player:SetAttribute("OwnedThemes", "")
+	for _, theme in ThemeShop.THEMES do
+		if not ThemeShop.free(theme.key, Config.ThemePasses) then ownsTheme(player, theme.key) end
+	end
+end
+-- A theme bought in the game is theirs at once, and goes on the map.
+MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player: Player, pass: number, purchased: boolean)
+	local key = ThemeShop.forPass(pass, Config.ThemePasses)
+	if not purchased or key == nil or player.Parent == nil then return end
+	local owned = ownedThemes[player] or {}
+	ownedThemes[player] = owned
+	owned[key] = true
+	player:SetAttribute("OwnedThemes", ThemeShop.encode(owned))
+	if admins[player] then setTheme(key) end
+	local theme = ThemeShop.find(key)
+	notice(player, "The " .. (if theme then theme.name else key) .. " theme is yours!")
+end)
+
 local function applySetting(player: Player, action: string, value: any)
 	-- The wins box and its +1 / -1 change the win counter on screen: Diamond
 	-- Climb's or Chalkboard Count's own while the streamer is in that game.
@@ -1524,7 +1564,14 @@ local function applySetting(player: Player, action: string, value: any)
 		diamondBird.spawn()
 		return
 	elseif action == "setTheme" and type(value) == "string" then
-		setTheme(value)
+		-- From the sidebar's Themes: free themes, and ones this player bought.
+		local theme = ThemeShop.find(value)
+		if theme == nil then return end
+		if ownsTheme(player, value) then
+			setTheme(value)
+		else
+			notice(player, "Buy the " .. theme.name .. " theme first: it's in Themes, on the sidebar.")
+		end
 		return
 	elseif action == "setSkin" and type(value) == "string" then
 		setSkin(value)
@@ -1741,6 +1788,8 @@ local function onPlayer(player: Player)
 	player:SetAttribute("InGame", false)
 	player:SetAttribute("InClimb", false)
 	player:SetAttribute("InChalk", false)
+	-- Which paid themes they own (asked of Roblox, so it runs on its own).
+	task.spawn(checkThemes, player)
 	player.RespawnLocation = lobby.spawn
 	player.CharacterAdded:Connect(function(character)
 		placeCharacter(player, character)
@@ -1775,6 +1824,7 @@ end
 Players.CharacterAutoLoads = true
 Players.PlayerRemoving:Connect(function(player)
 	admins[player] = nil
+	ownedThemes[player] = nil
 	lastMove[player] = nil
 	mineCooldown[player] = nil
 	synced[player] = nil
