@@ -70,6 +70,9 @@ def play(name: str, scenario: str) -> str:
 RESTART = '''
 local failures = {}
 local function check(c, m) if not c then table.insert(failures, m) end end
+-- Played by the game's creator: Roblox counts them as owning every pass.
+local Config = World.require(World.services.ReplicatedStorage.DiamondRush.Config)
+for _, pass in Config.ThemePasses do World.ownedPasses[pass] = true end
 World.start(server)
 World.run(1)
 local player = World.addPlayer("Streamer", 1001)
@@ -86,7 +89,14 @@ check(State:GetAttribute("BestTime") == saved.best, "the best time comes back")
 local bindings = World.json.decode(State:GetAttribute("GiftBindings"))
 check(bindings.K and bindings.K.gift == "Rose", "the Rose key comes back")
 check(World.json.decode(State:GetAttribute("WinRules")).rose == 2, "Rose's wins come back")
-check(player:GetAttribute("OwnedThemes") == "", "bought themes are asked of Roblox again (none here)")
+check(player:GetAttribute("OwnedThemes") == "sakura,farm,desert,haunted,hay", "bought themes are asked of Roblox again (all of them, for the creator): " .. tostring(player:GetAttribute("OwnedThemes")))
+local function priceLine(name)
+	local label = World.find(player.PlayerGui, function(o) return o.ClassName == "TextLabel" and o.Text == name and o.Parent and o.Parent:FindFirstChild("Price") end)
+	return label and label.Parent.Price.Text
+end
+local R = utf8.char(0xE002)
+check(priceLine("Farm") == R .. " 99  ·  yours", "the creator still sees each price, and that it's theirs: " .. tostring(priceLine("Farm")))
+check(priceLine("Hay & needle") == R .. " 99  ·  yours" and priceLine("Alpine") == "Free", "the haystack's too, and Alpine is free")
 local wins = State:GetAttribute("Wins")
 World.press("K")
 World.run(5)

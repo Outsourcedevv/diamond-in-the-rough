@@ -123,6 +123,12 @@ check(select(2, status("default", "default")) == "using" and status("default", "
 check(status("farm", "default") == "USE" and status("haunted", "default") == "USE", "free and bought themes can be used")
 check(status("sakura", "default", 99) == R .. " 99" and select(2, status("sakura", "default", 99)) == "buy", "the rest show their price in Robux")
 check(status("desert", "default") == "BUY", "a price not known yet says BUY")
+-- The price line under each one: everyone sees the price, owner or not.
+check(ThemeShop.tag("default", owned, passes) == "Free" and ThemeShop.tag("farm", owned, passes) == "Free", "free ones say Free")
+check(ThemeShop.tag("sakura", owned, passes, 99) == R .. " 99", "the rest show their price")
+check(ThemeShop.tag("haunted", owned, passes, 249) == R .. " 249  ·  yours", "and say when they're yours (the game's creator owns every pass)")
+check(ThemeShop.tag("desert", owned, passes, nil, false) == "Pass not for sale yet" and ThemeShop.tag("haunted", owned, passes, nil, false) == "Yours  ·  pass not for sale", "a pass with no price isn't for sale yet")
+check(ThemeShop.tag("desert", owned, passes) == "Game pass" and ThemeShop.tag("haunted", owned, passes) == "Yours", "before Roblox has said")
 check(ThemeShop.encode({ haunted = true, sakura = true }) == "sakura,haunted", "owned themes as text")
 local decoded = ThemeShop.decode("haunted,nonsense,,farm")
 check(decoded.haunted and decoded.farm and decoded.nonsense == nil, "and back, ignoring anything unknown")
@@ -226,6 +232,13 @@ check(row("Alpine").Text == "IN USE", "Alpine is in use")
 check(row("Sakura").Text == R .. " 99" and row("Desert").Text == R .. " 149", "paid themes show their Robux price")
 check(row("Farm").Text == "USE", "a theme with no pass is free")
 check(row("Haunted").Text == "USE", "a bought theme can be used")
+local function tag(name)
+	for _, child in childrenOf(row(name).Parent) do if child.Name == "Price" then return child.Text end end
+	return nil
+end
+check(tag("Sakura") == R .. " 99" and tag("Desert") == R .. " 149", "each row shows its price on a line of its own")
+check(tag("Farm") == "Free" and tag("Alpine") == "Free", "and free ones say so")
+check(tag("Haunted") == "Yours  ·  pass not for sale", "a bought theme whose pass has no price says so: " .. tag("Haunted"))
 row("Farm").Activated:Fire()
 check(fired[#fired].action == "setTheme" and fired[#fired].value == "farm", "USE puts the theme on the map")
 row("Sakura").Activated:Fire()
@@ -235,6 +248,7 @@ state:SetAttribute("Theme", "farm")
 check(row("Farm").Text == "IN USE" and row("Alpine").Text == "USE", "the card follows the map's theme")
 player:SetAttribute("OwnedThemes", "haunted,sakura")
 check(row("Sakura").Text == "USE", "a theme just bought can be used")
+check(tag("Sakura") == R .. " 99  ·  yours", "and its price line says it's yours, with its price still showing")
 row("Alpine").Activated:Fire()
 check(fired[#fired].value == "default", "Alpine is always free")
 
@@ -254,6 +268,7 @@ for _, object in instances do if object.Name == "Highlight" and object.Parent an
 check(needle ~= nil and needle.Size[2] <= 3, "the haystack's picture has a thin needle in it")
 check(row("Stone & diamond").Text == "IN USE", "the stone skin is in use to start with")
 check(row("Hay & needle").Text == R .. " 79", "the haystack skin shows its Robux price")
+check(tag("Hay & needle") == R .. " 79" and tag("Stone & diamond") == "Free", "on its price line too")
 local before = #prompted
 row("Hay & needle").Activated:Fire()
 check(#prompted == before + 1 and prompted[#prompted].pass == 555, "its price opens Roblox's purchase of the haystack pass")
@@ -274,10 +289,15 @@ check(fired[#fired].action == "setTheme", "and the themes still change the theme
 local list = nil
 for _, object in instances do if object.Name == "ThemeList" then list = object end end
 check(list ~= nil and list.ClassName == "ScrollingFrame" and list.AutomaticCanvasSize == "AutomaticSize.Y", "the rows are in a scrolling list")
-check(list.Size[4] == #ThemeShop.ITEMS * 64 + 2 * 26, "on a big screen it shows every row: " .. tostring(list.Size[4]))
+local full = #ThemeShop.ITEMS * 72 + 2 * 26
+local function fits(height) return 2 * Sidebar.CENTRE * height - list.Size[4] >= 150 end
+check(list.Size[4] < full and fits(720), "on a 720p screen it fits and scrolls: " .. tostring(list.Size[4]))
+camera.ViewportSize = Vector2.new(1920, 1080)
+viewportChanged:Fire()
+check(list.Size[4] == full and fits(1080), "on a 1080p screen it shows every row: " .. tostring(list.Size[4]))
 camera.ViewportSize = Vector2.new(800, 390)
 viewportChanged:Fire()
-check(list.Size[4] == 190, "on a short screen it shrinks and scrolls: " .. tostring(list.Size[4]))
+check(list.Size[4] == 167 and fits(390), "on a short screen it shrinks and scrolls: " .. tostring(list.Size[4]))
 Sidebar.setThemesOpen(false)
 check(not Sidebar.themesOpen(), "it closes")
 print("sidebar: " .. passed .. " checks passed")

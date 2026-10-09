@@ -85,6 +85,19 @@ function ThemeShop.status(key: string, current: string, owned: { [string]: boole
 	return "BUY", "buy"
 end
 
+-- The little line on a theme's card under its blurb: what it costs, and
+-- whether it's the player's already. Everyone sees the price, buyers or not
+-- (Roblox counts a pass's creator as owning it, so the game's owner always
+-- sees USE). onSale is false once Roblox has said the pass has no price (it
+-- isn't for sale yet), nil while it hasn't said.
+function ThemeShop.tag(key: string, owned: { [string]: boolean }, passes: { [string]: number }, price: number?, onSale: boolean?): string
+	if ThemeShop.free(key, passes) then return "Free" end
+	local yours = owned[key] == true
+	if price then return ThemeShop.ROBUX .. " " .. tostring(price) .. (if yours then "  ·  yours" else "") end
+	if onSale == false then return if yours then "Yours  ·  pass not for sale" else "Pass not for sale yet" end
+	return if yours then "Yours" else "Game pass"
+end
+
 -- The OwnedThemes attribute ("sakura,farm") as a set, and back.
 function ThemeShop.decode(text: any): { [string]: boolean }
 	local owned: { [string]: boolean } = {}
