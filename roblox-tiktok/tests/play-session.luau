@@ -97,6 +97,17 @@ check(player:GetAttribute("OwnedThemes") == "", "nothing owned yet")
 section("lobby")
 
 -- Sidebar: THEMES, SETTINGS, GAMES, GIFTS -------------------------------------------------
+-- The real passes: every theme and skin but Alpine and stone is sold.
+local ThemeShop = World.require(RS.DiamondRush.ThemeShop)
+local realPasses = table.clone(Config.ThemePasses)
+for _, item in ThemeShop.ITEMS do
+	local pass = ThemeShop.pass(item.key, realPasses)
+	if item.key == "default" or item.key == "stone" then
+		check(pass == nil, item.name .. " is free")
+	else
+		check(type(pass) == "number" and pass > 1000, item.name .. " has its game pass: " .. tostring(pass))
+	end
+end
 click(sidebarButton("THEMES"), "THEMES")
 check(Sidebar.themesOpen(), "THEMES opens the themes card")
 check(not LobbyView.isOpen(), "and closes the games menu")
@@ -106,6 +117,17 @@ local function themeButton(name)
 	return l.Parent:FindFirstChildOfClass("TextButton")
 end
 check(themeButton("Alpine") and themeButton("Alpine").Text == "IN USE", "Alpine is in use")
+check(themeButton("Farm") and string.find(themeButton("Farm").Text, "99", 1, true) ~= nil, "Farm shows its Robux price from Roblox: " .. tostring(themeButton("Farm") and themeButton("Farm").Text))
+check(themeButton("Hay & needle") and string.find(themeButton("Hay & needle").Text, "99", 1, true) ~= nil, "and so does the haystack")
+click(themeButton("Farm"), "Farm (buy)")
+check(#World.purchases == 1 and World.purchases[1].pass == realPasses.farm, "pressing a price opens Roblox's purchase of the Farm pass")
+check(State:GetAttribute("Theme") == "default", "an unbought theme isn't used")
+table.clear(World.purchases)
+-- Then as if no passes were made yet, when everything is free.
+for key in Config.ThemePasses do Config.ThemePasses[key] = 0 end
+player:SetAttribute("OwnedThemes", "nothing")
+player:SetAttribute("OwnedThemes", "")
+run(0.5)
 check(themeButton("Farm") and themeButton("Farm").Text == "USE", "Farm is free while it has no pass")
 click(themeButton("Farm"), "Farm")
 run(3)
@@ -119,9 +141,9 @@ run(3)
 check(State:GetAttribute("Theme") == "default", "and back to Alpine")
 section("themes (free)")
 
--- Selling a theme: give Sakura a pass, then buy it.
-Config.ThemePasses.sakura = 111
-Config.ThemePasses.desert = 333
+-- Selling a theme: give Sakura and Desert their passes, then buy Desert.
+Config.ThemePasses.sakura = realPasses.sakura
+Config.ThemePasses.desert = realPasses.desert
 -- (The card looks again when what's owned changes.)
 player:SetAttribute("OwnedThemes", "nothing")
 player:SetAttribute("OwnedThemes", "")
@@ -129,7 +151,7 @@ run(0.5)
 click(themeButton("Desert"), "Desert")
 run(1)
 check(State:GetAttribute("Theme") == "default", "an unbought paid theme isn't used")
-check(#World.purchases >= 1 and World.purchases[#World.purchases].pass == 333, "pressing a price opens Roblox's purchase of that pass")
+check(#World.purchases >= 1 and World.purchases[#World.purchases].pass == realPasses.desert, "pressing a price opens Roblox's purchase of that pass")
 -- The client asking to use it anyway is refused by the server.
 table.clear(notices)
 Request:FireServer("setTheme", "desert")
@@ -137,8 +159,8 @@ run(1)
 check(State:GetAttribute("Theme") == "default", "the server refuses a theme that wasn't bought")
 check(#notices > 0 and string.find(notices[#notices], "Buy the Desert theme", 1, true) ~= nil, "and says to buy it")
 -- The purchase goes through.
-World.ownedPasses[333] = true
-World.services.MarketplaceService.PromptGamePassPurchaseFinished:Fire(player, 333, true)
+World.ownedPasses[realPasses.desert] = true
+World.services.MarketplaceService.PromptGamePassPurchaseFinished:Fire(player, realPasses.desert, true)
 run(3)
 check(State:GetAttribute("Theme") == "desert", "a bought theme goes on the map")
 check(string.find(player:GetAttribute("OwnedThemes") or "", "desert", 1, true) ~= nil, "and is owned")
@@ -459,7 +481,7 @@ click(themeButton("Stone & diamond"), "Stone & diamond")
 run(2)
 check(State:GetAttribute("Skin") == "stone", "and back to stone")
 -- Selling the haystack: give it a pass, then buy it.
-Config.ThemePasses.hay = 555
+Config.ThemePasses.hay = realPasses.hay
 player:SetAttribute("OwnedThemes", "x")
 player:SetAttribute("OwnedThemes", "desert")
 run(0.5)
@@ -468,7 +490,7 @@ local purchasesBefore = #World.purchases
 click(themeButton("Hay & needle"), "Hay & needle (buy)")
 run(1)
 check(State:GetAttribute("Skin") == "stone", "an unbought haystack isn't used")
-check(#World.purchases == purchasesBefore + 1 and World.purchases[#World.purchases].pass == 555, "its price opens Roblox's purchase of the haystack pass")
+check(#World.purchases == purchasesBefore + 1 and World.purchases[#World.purchases].pass == realPasses.hay, "its price opens Roblox's purchase of the haystack pass")
 table.clear(notices)
 Request:FireServer("setSkin", "hay")
 run(1)
@@ -477,8 +499,8 @@ check(#notices > 0 and string.find(notices[#notices], "Buy the Hay & needle skin
 Request:FireServer("setSkin", "sakura")
 run(1)
 check(State:GetAttribute("Skin") == "stone", "a theme isn't a skin")
-World.ownedPasses[555] = true
-World.services.MarketplaceService.PromptGamePassPurchaseFinished:Fire(player, 555, true)
+World.ownedPasses[realPasses.hay] = true
+World.services.MarketplaceService.PromptGamePassPurchaseFinished:Fire(player, realPasses.hay, true)
 run(3)
 check(State:GetAttribute("Skin") == "hay", "a bought haystack goes on the mountain")
 check(State:GetAttribute("Theme") == "default", "and the map's theme stays")
@@ -491,7 +513,7 @@ run(2)
 check(State:GetAttribute("Skin") == "hay", "a bought haystack can be used again")
 Request:FireServer("setSkin", "stone")
 run(2)
-Config.ThemePasses.hay = 0
+for key, pass in realPasses do Config.ThemePasses[key] = pass end
 Sidebar.setThemesOpen(false)
 -- At the camp, facing the mountain, is too close; turned round, it's fine.
 local camp = World.workspace.Camp

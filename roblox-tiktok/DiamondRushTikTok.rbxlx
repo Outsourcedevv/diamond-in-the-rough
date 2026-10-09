@@ -785,11 +785,11 @@ local Config = {
 	-- it in the Creator Dashboard (your game, then Monetization, then Passes),
 	-- set its price there, and put its id here. One left at 0 is free.
 	ThemePasses = {
-		sakura = 0,
-		farm = 0,
-		desert = 0,
-		haunted = 0,
-		hay = 0, -- the Hay & needle skin
+		sakura = 2021768478,
+		farm = 2022968472,
+		desert = 2021846468,
+		haunted = 2022674480,
+		hay = 2021990458, -- the Hay & needle skin
 	} :: { [string]: number },
 
 	-- Single player: whoever plays is the streamer, so every player gets the Y
