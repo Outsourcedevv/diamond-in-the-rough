@@ -762,17 +762,10 @@ panelButtons({
 	{ "Send a diamond bird now", function() send("spawnBird") end },
 })
 
-panelLabel("MOUNTAIN SKIN (same game, reskinned)")
-local skinButtons = panelButtons({
-	{ "Stone & diamond", function() send("setSkin", "stone") end },
-	{ "Hay & needle", function() send("setSkin", "hay") end },
-})
--- The mountain repaints itself and the display's words follow the skin.
+-- The mountain repaints itself and the display's words follow the skin
+-- (chosen in Themes, on the sidebar, under Mountain skins).
 local function refreshSkin()
 	local skin = attr("Skin", "stone")
-	for i, name in Skin.NAMES do
-		skinButtons[i].BackgroundColor3 = if skin == name then SELECTED else BUTTON
-	end
 	stoneTitle.Text = string.upper(Skin.words(skin).material) .. " LEFT"
 	view:setSkin(skin)
 end
