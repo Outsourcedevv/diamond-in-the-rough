@@ -62,6 +62,9 @@ local Config = {
 	-- your uploads, copy its asset id and put it here, e.g. "1234567890".
 	DigSoundId = "",
 	DigSoundVolume = 0.5,
+	-- Holding Shift (or the left stick, or the Run button on a phone) moves
+	-- this many times faster, everywhere (see the client's Sprint).
+	SprintMultiplier = 1.5,
 
 	-- Single player: whoever plays is the streamer, so every player gets the Y
 	-- panel, test gifts and gift settings (with their keys). Set to false for a game where others
