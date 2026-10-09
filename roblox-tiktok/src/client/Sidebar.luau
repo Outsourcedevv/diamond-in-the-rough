@@ -281,52 +281,103 @@ function Sidebar.start(options: Options)
 	make("TextLabel", { Size = UDim2.new(1, -40, 0, 22), BackgroundTransparency = 1, Font = FONT, TextSize = 18, TextColor3 = WHITE,
 		TextXAlignment = Enum.TextXAlignment.Left, Text = "THEMES", ZIndex = 6 }, header)
 	make("TextLabel", { Position = UDim2.fromOffset(0, 24), Size = UDim2.new(1, -40, 0, 18), BackgroundTransparency = 1, Font = FONT_MEDIUM, TextSize = 12,
-		TextColor3 = MUTED, TextXAlignment = Enum.TextXAlignment.Left, Text = "The map's look, for everyone. Buy one once, keep it.", ZIndex = 6 }, header)
+		TextColor3 = MUTED, TextXAlignment = Enum.TextXAlignment.Left, Text = "The map's look and the mountain's. Buy one once, keep it.", ZIndex = 6 }, header)
 	local closeCard = make("TextButton", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), Size = UDim2.fromOffset(32, 32),
 		BackgroundColor3 = BUTTON, Font = FONT, TextSize = 16, TextColor3 = WHITE, Text = "X", ZIndex = 6 }, header)
 	rounded(closeCard, 8)
 	local message = make("TextLabel", { LayoutOrder = 99, Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Font = FONT_MEDIUM, TextSize = 12,
 		TextColor3 = GOLD, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, AutomaticSize = Enum.AutomaticSize.Y, Text = "", ZIndex = 6 }, card)
 
+	-- The rows scroll when the screen is too short for them all (phones).
+	local ROW_HEIGHT = 56
+	local SECTION_HEIGHT = 18
+	local list = make("ScrollingFrame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
+		ScrollBarThickness = 4, ScrollBarImageColor3 = MUTED, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y, ZIndex = 6 }, card)
+	list.Name = "ThemeList"
+	make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8) }, list)
+	local listHeight = #ThemeShop.ITEMS * (ROW_HEIGHT + 8) + 2 * (SECTION_HEIGHT + 8)
+	local function fitList()
+		local camera = workspace.CurrentCamera
+		local screenHeight = if camera then camera.ViewportSize.Y else 720
+		list.Size = UDim2.new(1, 0, 0, math.clamp(screenHeight - 200, 120, listHeight))
+	end
+	fitList()
+	if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitList) end
+
 	local prices: { [string]: number } = {}
-	local rows: { [string]: { button: TextButton, kind: string } } = {}
+	local rows: { [string]: { button: TextButton, kind: string, item: ThemeShop.Theme } } = {}
 	local function refreshRows()
-		local current = tostring(options.state:GetAttribute("Theme") or "default")
+		-- What's in use now: the map's theme, and the mountain's skin.
+		local current = {
+			theme = tostring(options.state:GetAttribute("Theme") or "default"),
+			skin = tostring(options.state:GetAttribute("Skin") or "stone"),
+		}
 		local owned = ThemeShop.decode(player:GetAttribute("OwnedThemes"))
 		for key, row in rows do
-			local label, kind = ThemeShop.status(key, current, owned, Config.ThemePasses, prices[key])
+			local label, kind = ThemeShop.status(key, current[row.item.kind] or "", owned, Config.ThemePasses, prices[key])
 			row.kind = kind
 			row.button.Text = label
 			row.button.BackgroundColor3 = if kind == "using" then BUTTON elseif kind == "use" then SELECTED else GREEN
 			row.button.AutoButtonColor = kind ~= "using"
 		end
 	end
-	for index, theme in ThemeShop.THEMES do
-		local row = make("Frame", { LayoutOrder = index, Size = UDim2.new(1, 0, 0, 56), BackgroundColor3 = BUTTON, BackgroundTransparency = 0.5, ZIndex = 6 }, card)
-		rounded(row, 10)
-		-- A little picture of the theme: its sky, its ground and a highlight.
-		local picture = make("Frame", { Position = UDim2.fromOffset(6, 6), Size = UDim2.fromOffset(64, 44), BackgroundColor3 = theme.sky, ClipsDescendants = true, ZIndex = 7 }, row)
-		rounded(picture, 8)
+	local function section(order: number, text: string)
+		make("TextLabel", { LayoutOrder = order, Size = UDim2.new(1, 0, 0, SECTION_HEIGHT), BackgroundTransparency = 1, Font = FONT, TextSize = 12,
+			TextColor3 = GOLD, TextXAlignment = Enum.TextXAlignment.Left, Text = text, ZIndex = 6 }, list)
+	end
+	-- A little picture of a theme: its sky, its ground, a peak and a highlight.
+	local function themePicture(picture: Frame, theme: ThemeShop.Theme)
 		make("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 0.4), BackgroundColor3 = theme.ground, BorderSizePixel = 0, ZIndex = 8 }, picture)
-		local peak = make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.42, 0.62), Size = UDim2.fromOffset(26, 26), Rotation = 45,
+		make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.42, 0.62), Size = UDim2.fromOffset(26, 26), Rotation = 45,
 			BackgroundColor3 = theme.ground:Lerp(Color3.new(0, 0, 0), 0.25), BorderSizePixel = 0, ZIndex = 8 }, picture)
-		peak.ZIndex = 8
 		make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.78, 0.3), Size = UDim2.fromOffset(10, 10), BackgroundColor3 = theme.accent, BorderSizePixel = 0, ZIndex = 9 }, picture).Name = "Highlight"
+	end
+	-- A little picture of a skin: the mountain against its backdrop, with what's
+	-- hidden in it showing: a diamond in the stone, or a needle in the hay.
+	local function skinPicture(picture: Frame, skin: ThemeShop.Theme)
+		if skin.key == "hay" then
+			local stack = make("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.3), Size = UDim2.fromOffset(52, 48), BackgroundColor3 = skin.ground, BorderSizePixel = 0, ZIndex = 8 }, picture)
+			rounded(stack, 24)
+			for k = 1, 3 do
+				make("Frame", { Position = UDim2.fromOffset(8 + k * 8, 8 + k * 4), Size = UDim2.fromOffset(12, 2), Rotation = -20 + k * 15,
+					BackgroundColor3 = skin.ground:Lerp(Color3.new(0, 0, 0), 0.2), BorderSizePixel = 0, ZIndex = 9 }, stack)
+			end
+			make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.62, 0.36), Size = UDim2.fromOffset(2, 20), Rotation = 35,
+				BackgroundColor3 = skin.accent, BorderSizePixel = 0, ZIndex = 10 }, stack).Name = "Highlight"
+		else
+			make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.95), Size = UDim2.fromOffset(46, 46), Rotation = 45,
+				BackgroundColor3 = skin.ground, BorderSizePixel = 0, ZIndex = 8 }, picture)
+			make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.72), Size = UDim2.fromOffset(9, 9), Rotation = 45,
+				BackgroundColor3 = skin.accent, BorderSizePixel = 0, ZIndex = 9 }, picture).Name = "Highlight"
+		end
+	end
+	local function addRow(order: number, item: ThemeShop.Theme)
+		local row = make("Frame", { LayoutOrder = order, Size = UDim2.new(1, -6, 0, ROW_HEIGHT), BackgroundColor3 = BUTTON, BackgroundTransparency = 0.5, ZIndex = 6 }, list)
+		rounded(row, 10)
+		local picture = make("Frame", { Position = UDim2.fromOffset(6, 6), Size = UDim2.fromOffset(64, 44), BackgroundColor3 = item.sky, ClipsDescendants = true, ZIndex = 7 }, row)
+		rounded(picture, 8)
+		if item.kind == "skin" then skinPicture(picture, item) else themePicture(picture, item) end
 		make("TextLabel", { Position = UDim2.fromOffset(80, 8), Size = UDim2.new(1, -180, 0, 20), BackgroundTransparency = 1, Font = FONT, TextSize = 16, TextColor3 = WHITE,
-			TextXAlignment = Enum.TextXAlignment.Left, Text = theme.name, ZIndex = 7 }, row)
+			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Text = item.name, ZIndex = 7 }, row)
 		make("TextLabel", { Position = UDim2.fromOffset(80, 28), Size = UDim2.new(1, -180, 0, 18), BackgroundTransparency = 1, Font = FONT_MEDIUM, TextSize = 11, TextColor3 = MUTED,
-			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Text = theme.blurb, ZIndex = 7 }, row)
+			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Text = item.blurb, ZIndex = 7 }, row)
 		local button = make("TextButton", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), Size = UDim2.fromOffset(88, 32),
 			BackgroundColor3 = SELECTED, Font = FONT, TextSize = 14, TextColor3 = WHITE, Text = "", ZIndex = 7 }, row)
 		rounded(button, 8)
-		rows[theme.key] = { button = button, kind = "use" }
+		rows[item.key] = { button = button, kind = "use", item = item }
 		button.Activated:Connect(function()
-			local kind = rows[theme.key].kind
+			local kind = rows[item.key].kind
 			if kind == "use" then
-				options.request:FireServer("setTheme", theme.key)
-				message.Text = theme.name .. " is going on the map."
+				if item.kind == "skin" then
+					options.request:FireServer("setSkin", item.key)
+					message.Text = "The mountain is turning into " .. item.name .. "."
+				else
+					options.request:FireServer("setTheme", item.key)
+					message.Text = item.name .. " is going on the map."
+				end
 			elseif kind == "buy" then
-				local pass = ThemeShop.pass(theme.key, Config.ThemePasses)
+				local pass = ThemeShop.pass(item.key, Config.ThemePasses)
 				if pass then
 					message.Text = ""
 					local ok = pcall(MarketplaceService.PromptGamePassPurchase, MarketplaceService, player, pass)
@@ -335,21 +386,28 @@ function Sidebar.start(options: Options)
 			end
 		end)
 		-- Its price, asked of Roblox once.
-		local pass = ThemeShop.pass(theme.key, Config.ThemePasses)
+		local pass = ThemeShop.pass(item.key, Config.ThemePasses)
 		if pass then
 			task.spawn(function()
 				local ok, info = pcall(MarketplaceService.GetProductInfo, MarketplaceService, pass, Enum.InfoType.GamePass)
 				if ok and type(info) == "table" and type(info.PriceInRobux) == "number" then
-					prices[theme.key] = info.PriceInRobux
+					prices[item.key] = info.PriceInRobux
 					refreshRows()
 				end
 			end)
 		end
 	end
-	options.state:GetAttributeChangedSignal("Theme"):Connect(function()
-		refreshRows()
-		message.Text = ""
-	end)
+	-- The map's themes, then the mountain's skins in a section of their own.
+	section(0, "MAP THEMES")
+	for index, theme in ThemeShop.THEMES do addRow(index, theme) end
+	section(100, "MOUNTAIN SKINS  ·  same game, reskinned")
+	for index, skin in ThemeShop.SKINS do addRow(100 + index, skin) end
+	for _, name in { "Theme", "Skin" } do
+		options.state:GetAttributeChangedSignal(name):Connect(function()
+			refreshRows()
+			message.Text = ""
+		end)
+	end
 	player:GetAttributeChangedSignal("OwnedThemes"):Connect(refreshRows)
 	refreshRows()
 

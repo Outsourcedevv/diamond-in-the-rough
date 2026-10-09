@@ -1428,10 +1428,11 @@ for _, portal in lobby.portals do
 	portal.prompt.Triggered:Connect(join)
 end
 
--- Map themes for Robux (the sidebar's Themes, see ThemeShop). Each player's
--- bought themes are checked with Roblox when they join, and again before a
--- theme they haven't been seen to own is used (a pass bought on the website
--- meanwhile); they're shown to that player as the OwnedThemes attribute.
+-- Map themes and the haystack skin for Robux (the sidebar's Themes, see
+-- ThemeShop). Each player's bought ones are checked with Roblox when they
+-- join, and again before one they haven't been seen to own is used (a pass
+-- bought on the website meanwhile); they're shown to that player as the
+-- OwnedThemes attribute.
 local ownedThemes: { [Player]: { [string]: boolean } } = {}
 local function ownsTheme(player: Player, key: string): boolean
 	if ThemeShop.free(key, Config.ThemePasses) then return true end
@@ -1449,11 +1450,11 @@ local function ownsTheme(player: Player, key: string): boolean
 end
 local function checkThemes(player: Player)
 	player:SetAttribute("OwnedThemes", "")
-	for _, theme in ThemeShop.THEMES do
-		if not ThemeShop.free(theme.key, Config.ThemePasses) then ownsTheme(player, theme.key) end
+	for _, item in ThemeShop.ITEMS do
+		if not ThemeShop.free(item.key, Config.ThemePasses) then ownsTheme(player, item.key) end
 	end
 end
--- A theme bought in the game is theirs at once, and goes on the map.
+-- A theme or skin bought in the game is theirs at once, and goes on.
 MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player: Player, pass: number, purchased: boolean)
 	local key = ThemeShop.forPass(pass, Config.ThemePasses)
 	if not purchased or key == nil or player.Parent == nil then return end
@@ -1461,9 +1462,12 @@ MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player: Playe
 	ownedThemes[player] = owned
 	owned[key] = true
 	player:SetAttribute("OwnedThemes", ThemeShop.encode(owned))
-	if admins[player] then setTheme(key) end
-	local theme = ThemeShop.find(key)
-	notice(player, "The " .. (if theme then theme.name else key) .. " theme is yours!")
+	local item = ThemeShop.find(key)
+	local isSkin = item ~= nil and item.kind == "skin"
+	if admins[player] then
+		if isSkin then setSkin(key) else setTheme(key) end
+	end
+	notice(player, "The " .. (if item then item.name else key) .. (if isSkin then " skin" else " theme") .. " is yours!")
 end)
 
 local function applySetting(player: Player, action: string, value: any)
@@ -1567,7 +1571,7 @@ local function applySetting(player: Player, action: string, value: any)
 	elseif action == "setTheme" and type(value) == "string" then
 		-- From the sidebar's Themes: free themes, and ones this player bought.
 		local theme = ThemeShop.find(value)
-		if theme == nil then return end
+		if theme == nil or theme.kind ~= "theme" then return end
 		if ownsTheme(player, value) then
 			setTheme(value)
 		else
@@ -1575,7 +1579,14 @@ local function applySetting(player: Player, action: string, value: any)
 		end
 		return
 	elseif action == "setSkin" and type(value) == "string" then
-		setSkin(value)
+		-- From the sidebar's Themes: the stone skin, and the haystack if bought.
+		local skin = ThemeShop.find(value)
+		if skin == nil or skin.kind ~= "skin" then return end
+		if ownsTheme(player, value) then
+			setSkin(value)
+		else
+			notice(player, "Buy the " .. skin.name .. " skin first: it's in Themes, on the sidebar.")
+		end
 		return
 	elseif action == "setGiftSettings" and type(value) == "table" then
 		-- The full-screen gift settings: one gift's rules for each game and its key.

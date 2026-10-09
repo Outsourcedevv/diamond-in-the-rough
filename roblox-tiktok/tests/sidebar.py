@@ -4,7 +4,10 @@ passes, what each button says), the sidebar's four buttons with their drawn
 icons in order, GIFTS for the streamer only, the arrow sliding it away and
 back, hiding it, and the Themes card: prices from Roblox, USE puts a theme on
 the map, a price prompts Roblox's purchase of the right pass, and the card
-follows the map's theme and what the player owns.
+follows the map's theme and what the player owns. The mountain skins (stone,
+and the haystack with its needle) have a section of their own on the card,
+after the map themes, and work the same way with setSkin; the list scrolls
+on short screens.
 
     python3 tests/sidebar.py [path/to/luau]
 """
@@ -71,7 +74,7 @@ local TweenService = { Create = function(_, object, _, goal)
 	return { Play = function() for key, value in goal do object[key] = value end end, Cancel = function() end }
 end }
 local prompted = {}
-local PRICES = { [111] = 99, [333] = 149 }
+local PRICES = { [111] = 99, [333] = 149, [555] = 79 }
 local MarketplaceService = {
 	PromptGamePassPurchase = function(_, who, pass) table.insert(prompted, { who = who, pass = pass }) end,
 	GetProductInfo = function(_, id) return { PriceInRobux = PRICES[id] } end,
@@ -95,6 +98,9 @@ local Players = { LocalPlayer = player }
 local state = attributed({})
 local fired = {}
 local request = { FireServer = function(_, action, value) table.insert(fired, { action = action, value = value }) end }
+local viewportChanged = signal()
+local camera = { ViewportSize = Vector2.new(1280, 720), GetPropertyChangedSignal = function() return viewportChanged end }
+local workspace = { CurrentCamera = camera }
 '''
 
 test = r'''
@@ -106,7 +112,7 @@ end
 local R = ThemeShop.ROBUX
 
 -- The shop's rules.
-local passes = { sakura = 111, farm = 0, desert = 333, haunted = 444 }
+local passes = { sakura = 111, farm = 0, desert = 333, haunted = 444, hay = 555 }
 check(#ThemeShop.THEMES == 5 and ThemeShop.THEMES[1].key == "default" and ThemeShop.THEMES[1].name == "Alpine", "five themes, Alpine first")
 check(ThemeShop.free("default", passes) and ThemeShop.free("farm", passes) and not ThemeShop.free("sakura", passes), "Alpine and unpriced themes are free")
 check(ThemeShop.pass("default", { default = 5 }) == nil, "Alpine can never be sold")
@@ -121,6 +127,14 @@ check(ThemeShop.encode({ haunted = true, sakura = true }) == "sakura,haunted", "
 local decoded = ThemeShop.decode("haunted,nonsense,,farm")
 check(decoded.haunted and decoded.farm and decoded.nonsense == nil, "and back, ignoring anything unknown")
 check(next(ThemeShop.decode(nil)) == nil, "nothing owned yet")
+-- The mountain's skins.
+check(#ThemeShop.SKINS == 2 and ThemeShop.SKINS[1].key == "stone" and ThemeShop.SKINS[2].key == "hay", "two skins, stone first")
+check(ThemeShop.find("hay").kind == "skin" and ThemeShop.find("sakura").kind == "theme", "skins and themes know which they are")
+check(#ThemeShop.ITEMS == #ThemeShop.THEMES + #ThemeShop.SKINS and ThemeShop.ITEMS[#ThemeShop.ITEMS].key == "hay", "the shop sells themes, then skins")
+check(ThemeShop.pass("stone", { stone = 5 }) == nil and ThemeShop.free("stone", passes), "the stone skin can never be sold")
+check(ThemeShop.pass("hay", passes) == 555 and ThemeShop.forPass(555, passes) == "hay", "the haystack skin's pass unlocks it")
+check(ThemeShop.decode("hay,sakura").hay and ThemeShop.encode({ hay = true, sakura = true }) == "sakura,hay", "an owned skin is remembered with the themes")
+check(Config.ThemePasses.hay ~= nil, "Config has a pass for the haystack skin")
 for key in pairs(Config.ThemePasses) do check(ThemeShop.find(key) ~= nil and key ~= "default", "Config sells a real theme: " .. key) end
 
 -- The icons are drawn.
@@ -223,6 +237,47 @@ player:SetAttribute("OwnedThemes", "haunted,sakura")
 check(row("Sakura").Text == "USE", "a theme just bought can be used")
 row("Alpine").Activated:Fire()
 check(fired[#fired].value == "default", "Alpine is always free")
+
+-- The mountain skins, in their own section after the map's themes.
+local themesLabel, skinsLabel = nil, nil
+for _, object in instances do
+	if object.ClassName == "TextLabel" and object.Text == "MAP THEMES" then themesLabel = object end
+	if object.ClassName == "TextLabel" and type(object.Text) == "string" and string.sub(object.Text, 1, 14) == "MOUNTAIN SKINS" then skinsLabel = object end
+end
+check(themesLabel ~= nil and skinsLabel ~= nil and themesLabel.Parent == skinsLabel.Parent, "the card has a MAP THEMES and a MOUNTAIN SKINS section")
+local function rowFrame(name) return row(name).Parent end
+check(themesLabel.LayoutOrder < rowFrame("Alpine").LayoutOrder and rowFrame("Haunted").LayoutOrder < skinsLabel.LayoutOrder, "the themes sit under MAP THEMES")
+check(skinsLabel.LayoutOrder < rowFrame("Stone & diamond").LayoutOrder and rowFrame("Stone & diamond").LayoutOrder < rowFrame("Hay & needle").LayoutOrder, "the skins sit under MOUNTAIN SKINS, stone first")
+check(rowFrame("Hay & needle").Parent == skinsLabel.Parent, "in the same list")
+local needle = nil
+for _, object in instances do if object.Name == "Highlight" and object.Parent and object.Parent.Parent and object.Parent.Parent.Parent == rowFrame("Hay & needle") then needle = object end end
+check(needle ~= nil and needle.Size[2] <= 3, "the haystack's picture has a thin needle in it")
+check(row("Stone & diamond").Text == "IN USE", "the stone skin is in use to start with")
+check(row("Hay & needle").Text == R .. " 79", "the haystack skin shows its Robux price")
+local before = #prompted
+row("Hay & needle").Activated:Fire()
+check(#prompted == before + 1 and prompted[#prompted].pass == 555, "its price opens Roblox's purchase of the haystack pass")
+player:SetAttribute("OwnedThemes", "haunted,sakura,hay")
+check(row("Hay & needle").Text == "USE", "a bought haystack skin can be used")
+row("Hay & needle").Activated:Fire()
+check(fired[#fired].action == "setSkin" and fired[#fired].value == "hay", "USE puts the haystack skin on the mountain")
+state:SetAttribute("Theme", "default")
+state:SetAttribute("Skin", "hay")
+check(row("Hay & needle").Text == "IN USE" and row("Stone & diamond").Text == "USE", "the card follows the mountain's skin")
+check(row("Alpine").Text == "IN USE" and row("Farm").Text == "USE", "and a skin doesn't change which theme is in use")
+row("Stone & diamond").Activated:Fire()
+check(fired[#fired].action == "setSkin" and fired[#fired].value == "stone", "the stone skin is always free")
+row("Farm").Activated:Fire()
+check(fired[#fired].action == "setTheme", "and the themes still change the theme")
+
+-- The list fits the screen, and scrolls on a short one (a phone).
+local list = nil
+for _, object in instances do if object.Name == "ThemeList" then list = object end end
+check(list ~= nil and list.ClassName == "ScrollingFrame" and list.AutomaticCanvasSize == "AutomaticSize.Y", "the rows are in a scrolling list")
+check(list.Size[4] == #ThemeShop.ITEMS * 64 + 2 * 26, "on a big screen it shows every row: " .. tostring(list.Size[4]))
+camera.ViewportSize = Vector2.new(800, 390)
+viewportChanged:Fire()
+check(list.Size[4] == 190, "on a short screen it shrinks and scrolls: " .. tostring(list.Size[4]))
 Sidebar.setThemesOpen(false)
 check(not Sidebar.themesOpen(), "it closes")
 print("sidebar: " .. passed .. " checks passed")
