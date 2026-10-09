@@ -25,6 +25,7 @@ local Sounds = require(script:WaitForChild("Sounds"))
 -- Everyone arrives in the royal lobby, with a normal camera (see LobbyView).
 FirstPerson.setEnabled(player:GetAttribute("InGame") == true)
 FirstPerson.start()
+require(script:WaitForChild("Sprint")).start()
 require(script:WaitForChild("SceneryView")).start()
 local State = ReplicatedStorage:WaitForChild("DiamondRushState") :: Configuration
 local Remotes = ReplicatedStorage:WaitForChild("DiamondRushRemotes")

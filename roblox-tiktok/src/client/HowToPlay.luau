@@ -52,6 +52,7 @@ HowToPlay.PAGES = {
 		title = "Controls",
 		text = table.concat({
 			"<b>W A S D</b> to walk, <b>Space</b> to jump, move the mouse to look.",
+			"Hold <b>Shift</b> to sprint (1.5 times as fast). On a phone, hold the <b>Run</b> button.",
 			"<b>Hold left mouse</b> on the mountain to dig. Stand close to the rock you aim at.",
 			"<b>Click</b> the diamond to pick it up, and the diamond bird to catch it.",
 			"",
