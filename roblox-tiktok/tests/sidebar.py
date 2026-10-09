@@ -178,12 +178,19 @@ check(button("GIFTS").Visible == true, "and shows for the streamer")
 local arrow = nil
 for _, object in instances do if object.ClassName == "TextButton" and object.Text == "‹" then arrow = object end end
 check(arrow ~= nil, "an arrow on the sidebar's edge")
-local bar = arrow.Parent
-check(bar.Position[2] == Sidebar.MARGIN, "the sidebar shows to start with")
+local bar = button("GAMES").Parent
+-- The bar's list layout would place anything inside it among the buttons, so
+-- the arrow must sit beside the bar (it once sat in it, and hiding the bar
+-- hid the arrow too).
+local inList = false
+for _, child in childrenOf(arrow.Parent) do if child.ClassName == "UIListLayout" then inList = true end end
+check(not inList and arrow.Parent ~= bar, "the arrow sits beside the bar, not in its list")
+check(bar.Position[2] == Sidebar.MARGIN and arrow.Position[2] >= Sidebar.MARGIN + Sidebar.BAR_WIDTH, "the sidebar shows to start with, the arrow on its edge")
 arrow.Activated:Fire()
-check(arrow.Text == "›" and bar.Position[2] < 0 and bar.Position[2] + Sidebar.BAR_WIDTH + 4 >= 0, "the arrow tucks it away, leaving the arrow on screen")
+check(arrow.Text == "›" and bar.Position[2] + Sidebar.BAR_WIDTH <= 0, "the arrow tucks the bar away off screen")
+check(arrow.Position[2] >= 0 and arrow.Position[2] < 20, "and stays at the screen's edge to bring it back")
 arrow.Activated:Fire()
-check(arrow.Text == "‹" and bar.Position[2] == Sidebar.MARGIN, "and brings it back")
+check(arrow.Text == "‹" and bar.Position[2] == Sidebar.MARGIN and arrow.Position[2] >= Sidebar.MARGIN + Sidebar.BAR_WIDTH, "and brings it back")
 Sidebar.setHidden(true)
 check(gui.Enabled == false, "settings can hide it")
 Sidebar.setHidden(false)
