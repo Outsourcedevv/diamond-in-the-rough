@@ -9,8 +9,12 @@ World.start(server)
 World.run(1)
 local player = World.addPlayer("Phone", 2002)
 if player.Character == nil then World.spawnCharacter(player) end
+World.start(loading)
+World.run(0.5)
+local loadingGui = player.PlayerGui:FindFirstChild("DiamondRushLoading")
 World.start(hud)
 World.run(40)
+check(loadingGui ~= nil and player.PlayerGui:FindFirstChild("DiamondRushLoading") == nil, "the loading screen shows, then goes, on a phone")
 local Request = World.services.ReplicatedStorage.DiamondRushRemotes.Request
 local gui = player.PlayerGui
 local sidebar = gui:FindFirstChild("Sidebar")

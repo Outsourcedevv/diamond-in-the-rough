@@ -2,7 +2,7 @@
 client script run together in a stand-in Roblox world (tests/roblox-world.luau)
 with a simulated clock, the player's inputs and Roblox's purchases. Three runs:
 
-  1. tests/play-session.luau: the lobby, the sidebar and every card and
+  1. tests/play-session.luau: the loading screen, the lobby, the sidebar and every card and
      switch, the keys, the portals, every game with gifts, the gift settings
      (wins, reset gifts, keys), buying a theme, finding and holding the
      diamond, statues, saving;
@@ -38,6 +38,7 @@ local shared = World.newInstance("Folder"); shared.Name = "DiamondRush"; shared.
 local SSS = World.services.ServerScriptService
 local SPS = World.services.StarterPlayer.StarterPlayerScripts
 """)
+    parts.append(f'local loading = World.addScript(World.services.ReplicatedFirst, "DiamondRushLoading", "LocalScript", {long_string((root / "src/first/init.client.luau").read_text(encoding="utf-8"))})\n')
     for path in sorted((root / "src/shared").glob("*.luau")):
         parts.append(f'World.addScript(shared, "{path.stem}", "ModuleScript", {long_string(path.read_text(encoding="utf-8"))})\n')
     parts.append(f'local server = World.addScript(SSS, "DiamondRushServer", "Script", {long_string((root / "src/server/init.server.luau").read_text(encoding="utf-8"))})\n')

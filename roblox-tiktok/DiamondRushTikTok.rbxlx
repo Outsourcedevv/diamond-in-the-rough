@@ -20,15 +20,236 @@
       <bool name="Use2022MaterialsXml">true</bool>
     </Properties>
   </Item>
-  <Item class="ReplicatedStorage" referent="3">
+  <Item class="ReplicatedFirst" referent="3">
+    <Properties>
+      <string name="Name">ReplicatedFirst</string>
+    </Properties>
+    <Item class="LocalScript" referent="4">
+      <Properties>
+        <string name="Name">DiamondRushLoading</string>
+        <string name="Source"><![CDATA[--!strict
+-- The loading screen: runs first (ReplicatedFirst), in place of Roblox's own,
+-- and covers the screen until the game is ready to play: the place has
+-- loaded, the palace stands, the player's character is in it and the game's
+-- display has started (it says so with the player's DiamondRushHudReady
+-- attribute). A royal blue card with the title, a turning diamond, a gold
+-- progress bar that fills as each of those is done, and tips. It shows for
+-- at least MIN_SECONDS so it never flashes, never stays past MAX_SECONDS, and
+-- fades away at the end.
+local Players = game:GetService("Players")
+local ReplicatedFirst = game:GetService("ReplicatedFirst")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local MIN_SECONDS = 2.5
+local MAX_SECONDS = 45
+
+local ROYAL = Color3.fromRGB(34, 52, 140)
+local ROYAL_DEEP = Color3.fromRGB(12, 18, 64)
+local GOLD = Color3.fromRGB(246, 200, 92)
+local ICE = Color3.fromRGB(176, 230, 255)
+local WHITE = Color3.fromRGB(255, 255, 255)
+local MUTED = Color3.fromRGB(190, 200, 236)
+
+local TIPS = {
+	"Hold Shift to sprint.",
+	"Walk into a room's glowing portal to join its game.",
+	"Press G for the games menu, P for settings and H for how to play.",
+	"Dig into the mountain, find the diamond, and hold it for 15 seconds to win.",
+	"Catch the diamond bird: every gift counts double for 30 seconds.",
+	"Streamers: set up your gifts in Gifts, on the sidebar.",
+	"Pick the map's look in Themes, on the sidebar.",
+}
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local function make(className: string, properties: { [string]: any }, parent: Instance?): any
+	local instance = Instance.new(className)
+	for key, value in properties do
+		(instance :: any)[key] = value
+	end
+	if parent then instance.Parent = parent end
+	return instance
+end
+local function corner(parent: Instance, radius: UDim)
+	make("UICorner", { CornerRadius = radius }, parent)
+end
+
+local gui = make("ScreenGui", {
+	Name = "DiamondRushLoading",
+	IgnoreGuiInset = true,
+	ResetOnSpawn = false,
+	DisplayOrder = 1000,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, playerGui)
+pcall(function() ReplicatedFirst:RemoveDefaultLoadingScreen() end)
+
+-- One group, so the whole screen fades as one.
+local screen = make("CanvasGroup", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, gui)
+make("UIGradient", { Color = ColorSequence.new(ROYAL, ROYAL_DEEP), Rotation = 90 }, screen)
+
+-- Sparkles drifting up the screen.
+local sparkles = {}
+local random = Random.new()
+for k = 1, 24 do
+	local size = random:NextInteger(3, 7)
+	local dot = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(random:NextNumber(), random:NextNumber()),
+		Size = UDim2.fromOffset(size, size),
+		Rotation = 45,
+		BackgroundColor3 = if k % 3 == 0 then GOLD else ICE,
+		BackgroundTransparency = random:NextNumber(0.3, 0.7),
+		BorderSizePixel = 0,
+	}, screen)
+	table.insert(sparkles, { frame = dot, speed = random:NextNumber(0.015, 0.05), x = dot.Position.X.Scale, y = dot.Position.Y.Scale })
+end
+
+local middle = make("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(520, 380),
+	BackgroundTransparency = 1,
+}, screen)
+-- Shrinks to fit small screens (phones).
+local fit = make("UIScale", { Scale = 1 }, middle)
+local function refit()
+	local camera = workspace.CurrentCamera
+	local size = if camera then camera.ViewportSize else Vector2.new(1280, 720)
+	fit.Scale = math.clamp(math.min(size.X / 560, size.Y / 420), 0.5, 1.2)
+end
+refit()
+if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit) end
+
+-- The diamond: a gem on its corner with a gold edge and a lighter heart,
+-- turning gently and pulsing, with a glint sweeping across it.
+local gemHolder = make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(260, 80), Size = UDim2.fromOffset(110, 110), BackgroundTransparency = 1 }, middle)
+local glow = make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(1.45, 1.45), BackgroundColor3 = ICE, BackgroundTransparency = 0.85, BorderSizePixel = 0 }, gemHolder)
+corner(glow, UDim.new(1, 0))
+local gem = make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.72, 0.72), Rotation = 45, BackgroundColor3 = WHITE, BorderSizePixel = 0, ClipsDescendants = true }, gemHolder)
+corner(gem, UDim.new(0.12, 0))
+make("UIGradient", { Color = ColorSequence.new(WHITE, ICE), Rotation = -45 }, gem)
+make("UIStroke", { Color = GOLD, Thickness = 4 }, gem)
+local heart = make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.46, 0.46), BackgroundColor3 = Color3.fromRGB(120, 200, 255), BackgroundTransparency = 0.25, BorderSizePixel = 0 }, gem)
+corner(heart, UDim.new(0.15, 0))
+local glint = make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(-0.5, 0.5), Size = UDim2.new(0.18, 0, 2, 0), Rotation = 0, BackgroundColor3 = WHITE, BackgroundTransparency = 0.35, BorderSizePixel = 0 }, gem)
+local pulse = make("UIScale", { Scale = 1 }, gemHolder)
+
+local title = make("TextLabel", {
+	Position = UDim2.fromOffset(0, 176),
+	Size = UDim2.new(1, 0, 0, 48),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	TextSize = 40,
+	TextColor3 = WHITE,
+	Text = "DIAMOND IN THE ROUGH",
+}, middle)
+make("UIStroke", { Color = ROYAL_DEEP, Thickness = 3, ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual }, title)
+local status = make("TextLabel", {
+	Position = UDim2.fromOffset(0, 226),
+	Size = UDim2.new(1, 0, 0, 22),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	TextSize = 16,
+	TextColor3 = GOLD,
+	Text = "Loading…",
+}, middle)
+
+-- The progress bar.
+local track = make("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 258), Size = UDim2.fromOffset(380, 14), BackgroundColor3 = WHITE, BackgroundTransparency = 0.85, BorderSizePixel = 0 }, middle)
+corner(track, UDim.new(1, 0))
+local fill = make("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, track)
+corner(fill, UDim.new(1, 0))
+make("UIGradient", { Color = ColorSequence.new(Color3.fromRGB(255, 230, 150), GOLD) }, fill)
+local percent = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 278), Size = UDim2.fromOffset(120, 18), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = MUTED, Text = "0%" }, middle)
+
+local tip = make("TextLabel", {
+	Position = UDim2.fromOffset(0, 326),
+	Size = UDim2.new(1, 0, 0, 40),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamMedium,
+	TextSize = 15,
+	TextWrapped = true,
+	TextColor3 = MUTED,
+	Text = TIPS[random:NextInteger(1, #TIPS)],
+}, middle)
+
+-- What's left to wait for, in order, with how full the bar is once each is done.
+local target = 0.05
+local stage = "Loading…"
+local done = false
+local started = os.clock()
+task.spawn(function()
+	if not game:IsLoaded() then game.Loaded:Wait() end
+	target, stage = 0.35, "Building the palace…"
+	workspace:WaitForChild("Lobby", MAX_SECONDS)
+	target, stage = 0.6, "Getting your character ready…"
+	local character = player.Character or player.CharacterAdded:Wait()
+	character:WaitForChild("HumanoidRootPart", MAX_SECONDS)
+	target, stage = 0.85, "Almost there…"
+	while player:GetAttribute("DiamondRushHudReady") ~= true do
+		player:GetAttributeChangedSignal("DiamondRushHudReady"):Wait()
+	end
+	target, stage = 1, "Ready!"
+	done = true
+end)
+
+local shown = 0
+local tipAt = os.clock()
+local tipIndex = 1
+local beat: RBXScriptConnection
+beat = RunService.RenderStepped:Connect(function(dt: number)
+	local t = os.clock() - started
+	-- The bar eases towards where loading is up to.
+	shown += (target - shown) * math.min(1, dt * 6)
+	if target >= 1 and shown > 0.995 then shown = 1 end
+	fill.Size = UDim2.fromScale(math.clamp(shown, 0, 1), 1)
+	percent.Text = tostring(math.floor(shown * 100 + 0.5)) .. "%"
+	status.Text = stage
+	-- The diamond turns a little either way, pulses, and a glint sweeps across.
+	gem.Rotation = 45 + math.sin(t * 1.6) * 10
+	pulse.Scale = 1 + math.sin(t * 3) * 0.04
+	glow.BackgroundTransparency = 0.82 + math.sin(t * 3) * 0.05
+	glint.Position = UDim2.fromScale(-0.5 + ((t * 0.6) % 1.6), 0.5)
+	for _, sparkle in sparkles do
+		sparkle.y -= sparkle.speed * dt
+		if sparkle.y < -0.05 then sparkle.y = 1.05 end
+		sparkle.frame.Position = UDim2.fromScale(sparkle.x, sparkle.y)
+	end
+	-- A new tip every few seconds.
+	if os.clock() - tipAt > 3.5 then
+		tipAt = os.clock()
+		tipIndex = tipIndex % #TIPS + 1
+		tip.Text = TIPS[tipIndex]
+	end
+end)
+
+-- Wait until it's all done (and the screen has shown a moment), or give up
+-- waiting, then fade away.
+while not (done and os.clock() - started >= MIN_SECONDS and shown >= 1) and os.clock() - started < MAX_SECONDS do
+	task.wait(0.1)
+end
+target = 1
+task.wait(0.3)
+local fade = TweenService:Create(screen, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { GroupTransparency = 1 })
+fade:Play()
+fade.Completed:Wait()
+beat:Disconnect()
+gui:Destroy()
+]]></string>
+      </Properties>
+    </Item>
+  </Item>
+  <Item class="ReplicatedStorage" referent="5">
     <Properties>
       <string name="Name">ReplicatedStorage</string>
     </Properties>
-    <Item class="Folder" referent="4">
+    <Item class="Folder" referent="6">
       <Properties>
         <string name="Name">DiamondRush</string>
       </Properties>
-      <Item class="ModuleScript" referent="5">
+      <Item class="ModuleScript" referent="7">
         <Properties>
           <string name="Name">BirdBonus</string>
           <string name="Source"><![CDATA[--!strict
@@ -91,7 +312,7 @@ return BirdBonus
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="6">
+      <Item class="ModuleScript" referent="8">
         <Properties>
           <string name="Name">ChalkBoard</string>
           <string name="Source"><![CDATA[--!strict
@@ -331,7 +552,7 @@ return ChalkBoard
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="7">
+      <Item class="ModuleScript" referent="9">
         <Properties>
           <string name="Name">ClimbPath</string>
           <string name="Source"><![CDATA[--!strict
@@ -488,7 +709,7 @@ return ClimbPath
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="8">
+      <Item class="ModuleScript" referent="10">
         <Properties>
           <string name="Name">Config</string>
           <string name="Source"><![CDATA[--!strict
@@ -583,7 +804,7 @@ return Config
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="9">
+      <Item class="ModuleScript" referent="11">
         <Properties>
           <string name="Name">DiamondShape</string>
           <string name="Source"><![CDATA[--!strict
@@ -806,7 +1027,7 @@ return DiamondShape
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="10">
+      <Item class="ModuleScript" referent="12">
         <Properties>
           <string name="Name">Format</string>
           <string name="Source"><![CDATA[--!strict
@@ -858,7 +1079,7 @@ return Format
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="11">
+      <Item class="ModuleScript" referent="13">
         <Properties>
           <string name="Name">GiftCatalogue</string>
           <string name="Source"><![CDATA[--!strict
@@ -1056,7 +1277,7 @@ return GiftCatalogue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="12">
+      <Item class="ModuleScript" referent="14">
         <Properties>
           <string name="Name">GiftTier</string>
           <string name="Source"><![CDATA[--!strict
@@ -1079,7 +1300,7 @@ return GiftTier
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="13">
+      <Item class="ModuleScript" referent="15">
         <Properties>
           <string name="Name">Grid</string>
           <string name="Source"><![CDATA[--!strict
@@ -1760,7 +1981,7 @@ return Grid
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="14">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">HoldTimer</string>
           <string name="Source"><![CDATA[--!strict
@@ -1791,7 +2012,7 @@ return HoldTimer
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="15">
+      <Item class="ModuleScript" referent="17">
         <Properties>
           <string name="Name">Inflate</string>
           <string name="Source"><![CDATA[--!strict
@@ -2015,7 +2236,7 @@ return Inflate
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="16">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">Keybinds</string>
           <string name="Source"><![CDATA[--!strict
@@ -2093,7 +2314,7 @@ return Keybinds
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">MeshPack</string>
           <string name="Source"><![CDATA[--!strict
@@ -2301,7 +2522,7 @@ return MeshPack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="18">
+      <Item class="ModuleScript" referent="20">
         <Properties>
           <string name="Name">MountainCodec</string>
           <string name="Source"><![CDATA[--!strict
@@ -2424,7 +2645,7 @@ return MountainCodec
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="19">
+      <Item class="ModuleScript" referent="21">
         <Properties>
           <string name="Name">PartShapes</string>
           <string name="Source"><![CDATA[--!strict
@@ -2504,7 +2725,7 @@ return PartShapes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="20">
+      <Item class="ModuleScript" referent="22">
         <Properties>
           <string name="Name">RockStyle</string>
           <string name="Source"><![CDATA[--!strict
@@ -2681,7 +2902,7 @@ return RockStyle
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="21">
+      <Item class="ModuleScript" referent="23">
         <Properties>
           <string name="Name">ScenePackData</string>
           <string name="Source"><![CDATA[--!strict
@@ -5194,7 +5415,7 @@ H44kTFtpTKosYs80HUUjx6lJBM1IIhU0wjFDne44YDAzkYybTsIMTzUjZp3NIMZikzorJ1U5ftJ0mVVJ
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="22">
+      <Item class="ModuleScript" referent="24">
         <Properties>
           <string name="Name">SceneryThemes</string>
           <string name="Source"><![CDATA[--!strict
@@ -5238,7 +5459,7 @@ return SceneryThemes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="23">
+      <Item class="ModuleScript" referent="25">
         <Properties>
           <string name="Name">Skin</string>
           <string name="Source"><![CDATA[--!strict
@@ -5275,7 +5496,7 @@ return Skin
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="24">
+      <Item class="ModuleScript" referent="26">
         <Properties>
           <string name="Name">ThemeShop</string>
           <string name="Source"><![CDATA[--!strict
@@ -5371,11 +5592,11 @@ return ThemeShop
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="25">
+  <Item class="ServerScriptService" referent="27">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="26">
+    <Item class="Script" referent="28">
       <Properties>
         <string name="Name">DiamondRushServer</string>
         <token name="RunContext">0</token>
@@ -7221,7 +7442,7 @@ publishSettings()
 newRound()
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="27">
+      <Item class="ModuleScript" referent="29">
         <Properties>
           <string name="Name">ChalkGame</string>
           <string name="Source"><![CDATA[--!strict
@@ -7653,7 +7874,7 @@ return ChalkGame
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="28">
+      <Item class="ModuleScript" referent="30">
         <Properties>
           <string name="Name">Classroom</string>
           <string name="Source"><![CDATA[--!strict
@@ -7916,7 +8137,7 @@ return Classroom
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="29">
+      <Item class="ModuleScript" referent="31">
         <Properties>
           <string name="Name">Climb</string>
           <string name="Source"><![CDATA[--!strict
@@ -8080,7 +8301,7 @@ return Climb
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="30">
+      <Item class="ModuleScript" referent="32">
         <Properties>
           <string name="Name">ClimbGame</string>
           <string name="Source"><![CDATA[--!strict
@@ -8475,7 +8696,7 @@ return ClimbGame
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="31">
+      <Item class="ModuleScript" referent="33">
         <Properties>
           <string name="Name">Desert</string>
           <string name="Source"><![CDATA[--!strict
@@ -8858,7 +9079,7 @@ return Desert
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="32">
+      <Item class="ModuleScript" referent="34">
         <Properties>
           <string name="Name">DiamondBird</string>
           <string name="Source"><![CDATA[--!strict
@@ -9120,7 +9341,7 @@ return DiamondBird
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="33">
+      <Item class="ModuleScript" referent="35">
         <Properties>
           <string name="Name">Farm</string>
           <string name="Source"><![CDATA[--!strict
@@ -9638,7 +9859,7 @@ return Farm
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="34">
+      <Item class="ModuleScript" referent="36">
         <Properties>
           <string name="Name">GiftSettings</string>
           <string name="Source"><![CDATA[--!strict
@@ -9814,7 +10035,7 @@ return GiftSettings
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="35">
+      <Item class="ModuleScript" referent="37">
         <Properties>
           <string name="Name">Haunted</string>
           <string name="Source"><![CDATA[--!strict
@@ -10257,7 +10478,7 @@ return Haunted
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="36">
+      <Item class="ModuleScript" referent="38">
         <Properties>
           <string name="Name">Leaderboards</string>
           <string name="Source"><![CDATA[--!strict
@@ -10590,7 +10811,7 @@ return Leaderboards
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="37">
+      <Item class="ModuleScript" referent="39">
         <Properties>
           <string name="Name">Lobby</string>
           <string name="Source"><![CDATA[--!strict
@@ -11367,7 +11588,7 @@ return Lobby
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="38">
+      <Item class="ModuleScript" referent="40">
         <Properties>
           <string name="Name">Mountain</string>
           <string name="Source"><![CDATA[--!strict
@@ -11687,7 +11908,7 @@ return Mountain
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="39">
+      <Item class="ModuleScript" referent="41">
         <Properties>
           <string name="Name">Sakura</string>
           <string name="Source"><![CDATA[--!strict
@@ -12077,7 +12298,7 @@ return Sakura
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="40">
+      <Item class="ModuleScript" referent="42">
         <Properties>
           <string name="Name">ScenePack</string>
           <string name="Source"><![CDATA[--!strict
@@ -12231,7 +12452,7 @@ return ScenePack
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="41">
+      <Item class="ModuleScript" referent="43">
         <Properties>
           <string name="Name">Scenery</string>
           <string name="Source"><![CDATA[--!strict
@@ -13165,7 +13386,7 @@ return Scenery
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="42">
+      <Item class="ModuleScript" referent="44">
         <Properties>
           <string name="Name">Statue</string>
           <string name="Source"><![CDATA[--!strict
@@ -13298,7 +13519,7 @@ return Statue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="43">
+      <Item class="ModuleScript" referent="45">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[--!strict
@@ -13406,7 +13627,7 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="44">
+      <Item class="ModuleScript" referent="46">
         <Properties>
           <string name="Name">Watchtower</string>
           <string name="Source"><![CDATA[--!strict
@@ -13604,15 +13825,15 @@ return Watchtower
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="45">
+  <Item class="StarterPlayer" referent="47">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="46">
+    <Item class="StarterPlayerScripts" referent="48">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="47">
+      <Item class="LocalScript" referent="49">
         <Properties>
           <string name="Name">DiamondRushHud</string>
           <string name="Source"><![CDATA[--!strict
@@ -15186,9 +15407,12 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	local binding = bindings[pressedCombo(input)]
 	if binding then send("testGift", { coins = binding.coins, count = 1, name = binding.gift, keybind = true }) end
 end)
+
+-- Everything is set up: the loading screen (src/first) can go.
+player:SetAttribute("DiamondRushHudReady", true)
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="48">
+        <Item class="ModuleScript" referent="50">
           <Properties>
             <string name="Name">BirdView</string>
             <string name="Source"><![CDATA[--!strict
@@ -15335,7 +15559,7 @@ return BirdView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="49">
+        <Item class="ModuleScript" referent="51">
           <Properties>
             <string name="Name">CameraShake</string>
             <string name="Source"><![CDATA[--!strict
@@ -15377,7 +15601,7 @@ return CameraShake
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="50">
+        <Item class="ModuleScript" referent="52">
           <Properties>
             <string name="Name">ChalkEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -16054,7 +16278,7 @@ return ChalkEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="51">
+        <Item class="ModuleScript" referent="53">
           <Properties>
             <string name="Name">ChalkView</string>
             <string name="Source"><![CDATA[--!strict
@@ -16882,7 +17106,7 @@ return ChalkView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="52">
+        <Item class="ModuleScript" referent="54">
           <Properties>
             <string name="Name">ClimbEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -18288,7 +18512,7 @@ return ClimbEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="53">
+        <Item class="ModuleScript" referent="55">
           <Properties>
             <string name="Name">ClimbView</string>
             <string name="Source"><![CDATA[--!strict
@@ -19142,7 +19366,7 @@ return ClimbView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="54">
+        <Item class="ModuleScript" referent="56">
           <Properties>
             <string name="Name">FirstPerson</string>
             <string name="Source"><![CDATA[--!strict
@@ -19629,7 +19853,7 @@ return FirstPerson
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="55">
+        <Item class="ModuleScript" referent="57">
           <Properties>
             <string name="Name">GiftEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -20908,7 +21132,7 @@ return GiftEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="56">
+        <Item class="ModuleScript" referent="58">
           <Properties>
             <string name="Name">GiftMenu</string>
             <string name="Source"><![CDATA[--!strict
@@ -21482,7 +21706,7 @@ return GiftMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="57">
+        <Item class="ModuleScript" referent="59">
           <Properties>
             <string name="Name">HoldCountdown</string>
             <string name="Source"><![CDATA[--!strict
@@ -21569,7 +21793,7 @@ return HoldCountdown
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="58">
+        <Item class="ModuleScript" referent="60">
           <Properties>
             <string name="Name">HowToPlay</string>
             <string name="Source"><![CDATA[--!strict
@@ -21880,7 +22104,7 @@ return HowToPlay
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="59">
+        <Item class="ModuleScript" referent="61">
           <Properties>
             <string name="Name">LobbyView</string>
             <string name="Source"><![CDATA[--!strict
@@ -22433,7 +22657,7 @@ return LobbyView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="60">
+        <Item class="ModuleScript" referent="62">
           <Properties>
             <string name="Name">MountainView</string>
             <string name="Source"><![CDATA[--!strict
@@ -22934,7 +23158,7 @@ return MountainView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="61">
+        <Item class="ModuleScript" referent="63">
           <Properties>
             <string name="Name">PetalView</string>
             <string name="Source"><![CDATA[--!strict
@@ -23036,7 +23260,7 @@ return PetalView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="62">
+        <Item class="ModuleScript" referent="64">
           <Properties>
             <string name="Name">RebuildEffects</string>
             <string name="Source"><![CDATA[--!strict
@@ -23164,7 +23388,7 @@ return RebuildEffects
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="63">
+        <Item class="ModuleScript" referent="65">
           <Properties>
             <string name="Name">SceneryView</string>
             <string name="Source"><![CDATA[--!strict
@@ -23308,7 +23532,7 @@ return SceneryView
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="64">
+        <Item class="ModuleScript" referent="66">
           <Properties>
             <string name="Name">Sidebar</string>
             <string name="Source"><![CDATA[--!strict
@@ -23667,7 +23891,7 @@ return Sidebar
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="65">
+        <Item class="ModuleScript" referent="67">
           <Properties>
             <string name="Name">Sounds</string>
             <string name="Source"><![CDATA[--!strict
@@ -23925,7 +24149,7 @@ return Sounds
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="66">
+        <Item class="ModuleScript" referent="68">
           <Properties>
             <string name="Name">Sprint</string>
             <string name="Source"><![CDATA[--!strict
@@ -24050,12 +24274,12 @@ return Sprint
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="67">
+  <Item class="Workspace" referent="69">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Terrain" referent="68">
+    <Item class="Terrain" referent="70">
       <Properties>
         <string name="Name">Terrain</string>
         <bool name="Decoration">true</bool>
