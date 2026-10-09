@@ -217,7 +217,7 @@ The arrow on its edge slides the sidebar away (and back), leaving only the arrow
 2. Copy each pass's id (the number in its link) into `ThemePasses` in `src/shared/Config.luau`, e.g. `sakura = 123456789` (the haystack skin's is `hay`).
 3. Rebuild the place and publish.
 
-A theme or skin left at `0` is free, so everything works before the passes are made. The server checks with Roblox which passes each player owns when they join (and again before a theme they haven't been seen to own goes on), so nobody can use a paid theme or skin they haven't bought. In Studio, purchases are only tests: no Robux are spent.
+All five passes are made and their ids are in `Config.ThemePasses` (Sakura `2021768478`, Farm `2022968472`, Desert `2021846468`, Haunted `2022674480`, Hay & needle `2021990458`), so each is sold at the price set on its pass in the Creator Dashboard. A theme or skin set to `0` there would be free. The server checks with Roblox which passes each player owns when they join (and again before a theme they haven't been seen to own goes on), so nobody can use a paid theme or skin they haven't bought. In Studio, purchases are only tests: no Robux are spent.
 
 ## Leaderboards and gold statues
 
