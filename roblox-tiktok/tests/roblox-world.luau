@@ -906,6 +906,8 @@ terrain.Name = "Terrain"
 terrain.Parent = workspace
 service("Players")
 service("ReplicatedStorage")
+service("ReplicatedFirst")
+data(game).Loaded = Signal()
 service("ServerStorage")
 service("ServerScriptService")
 service("StarterPack")
@@ -1080,6 +1082,7 @@ methods.AssetService = {
 	CreateMeshPartAsync = function() error("EditableMesh isn't available here") end,
 	CreateEditableImage = function() error("EditableImage isn't available here") end,
 }
+methods.ReplicatedFirst = { RemoveDefaultLoadingScreen = function() World.defaultLoadingRemoved = true end }
 methods.LocalizationService = { GetCountryRegionForPlayerAsync = function() return "US" end }
 methods.PolicyService = { GetPolicyInfoForPlayerAsync = function() return { AreAdsAllowed = true, ArePaidRandomItemsRestricted = false, AllowedExternalLinkReferences = {} } end }
 methods.BadgeService = { AwardBadge = function() return true end, UserHasBadgeAsync = function() return false end }

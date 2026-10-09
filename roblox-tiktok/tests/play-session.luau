@@ -16,8 +16,15 @@ World.start(server)
 run(1)
 local player = World.addPlayer("Streamer", 1001)
 if World.services.Players.CharacterAutoLoads ~= false and player.Character == nil then World.spawnCharacter(player) end
+World.start(loading)
+World.run(0.5)
+local loadingGui = player.PlayerGui:FindFirstChild("DiamondRushLoading")
 World.start(hud)
+check(loadingGui ~= nil and loadingGui.Enabled, "the loading screen covers the screen as the player joins")
+check(World.defaultLoadingRemoved == true, "in place of Roblox's own")
 run(40)
+check(player:GetAttribute("DiamondRushHudReady") == true, "the game's display says it's ready")
+check(player.PlayerGui:FindFirstChild("DiamondRushLoading") == nil, "and the loading screen has gone")
 section("boot")
 
 local RS = World.services.ReplicatedStorage

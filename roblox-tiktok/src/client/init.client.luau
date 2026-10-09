@@ -1569,3 +1569,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	local binding = bindings[pressedCombo(input)]
 	if binding then send("testGift", { coins = binding.coins, count = 1, name = binding.gift, keybind = true }) end
 end)
+
+-- Everything is set up: the loading screen (src/first) can go.
+player:SetAttribute("DiamondRushHudReady", true)
