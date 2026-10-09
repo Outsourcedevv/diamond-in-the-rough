@@ -1290,7 +1290,8 @@ local function placeStatue(player: Player, value: any)
 	local forward = if look.Magnitude > 0.1 then look.Unit else Vector3.new(0, 0, -1)
 	local spot = root.Position + forward * 9
 	if Vector3.new(spot.X, 0, spot.Z).Magnitude < arenaRadius then
-		notice(player, "Too close to the mountain: walk back towards the camp and try again.")
+		-- The camp is right at the edge, so facing the mountain from there is too close.
+		notice(player, "Statues stand outside the mountain's area: turn away from the mountain (or walk further out) and try again.")
 		return
 	end
 	local clean = filtered(player, name)

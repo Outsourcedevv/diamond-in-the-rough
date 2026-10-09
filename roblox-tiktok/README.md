@@ -225,7 +225,7 @@ The two leaderboards count gifts whose sender is known. Gifts sent by a key (Tik
 - **Preview with sample names** fills both boards with made-up viewers for 20 seconds, so you can check them before going live.
 - **Reset top helpers** / **Reset top griefers** clear a board (click twice to confirm), for example at the start of a new stream.
 
-To place a **gold statue**, stand where you want it (outside the mountain area), face that spot and open the **Y** panel. Under **GOLD STATUES**, type the gifter's name and how many coins they sent, then press **Place statue in front of me**. The statue appears a few steps ahead, facing you. Up to 12 statues are kept.
+To place a **gold statue**, stand where you want it (outside the mountain area), face that spot and open the **Y** panel. The camp is right at the edge of the mountain's area, so there, face away from the mountain. Under **GOLD STATUES**, type the gifter's name and how many coins they sent, then press **Place statue in front of me**. The statue appears a few steps ahead, facing you. Up to 12 statues are kept.
 
 To **remove a statue**, use any of these in the same section. Each button needs a second click to confirm, so a stray click never removes anything:
 
@@ -311,6 +311,7 @@ In the game, the server's `ScenePack.luau` lays the pack out and sends the place
 - The gift settings menu and its keys: `python3 tests/gift-menu.py [path/to/luau]`.
 - Sprinting (holding Shift, and speeds the server sets meanwhile): `python3 tests/sprint.py [path/to/luau]`.
 - The sidebar, its icons and the theme shop: `python3 tests/sidebar.py [path/to/luau]`.
+- The whole game played end to end: `python3 tests/play.py [path/to/luau]`. The real server and client scripts run together in a stand-in Roblox world (`tests/roblox-world.luau`) with a simulated clock: the lobby, the sidebar and its cards, the keys, the portals, every game with gifts, the gift settings, buying a theme, finding and holding the diamond, statues and saving (`tests/play-session.luau`), a restart from that save, and a phone (`tests/play-phone.luau`). Any script error fails it. It can't see physics, rendering or the camera: those still need Studio.
 
 ### How 250,000 rocks stay fast
 
