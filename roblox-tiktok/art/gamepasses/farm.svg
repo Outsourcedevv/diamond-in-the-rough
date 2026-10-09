@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+	<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff0c4"/><stop offset="1" stop-color="#f7bb6c"/></linearGradient><filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10"/></filter><linearGradient id="barn" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c8302e"/><stop offset="1" stop-color="#a32325"/></linearGradient><linearGradient id="silo" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#dcd7ce"/><stop offset="1" stop-color="#a9a399"/></linearGradient></defs>
+	
+	<rect width="512" height="512" fill="url(#sky)"/>
+	<circle cx="396" cy="118" r="70" fill="#fff4c8" opacity="0.8" filter="url(#soft)"/>
+	<circle cx="396" cy="118" r="42" fill="#fff6d6"/>
+	<ellipse cx="110" cy="110" rx="58" ry="18" fill="#fffaf0" opacity="0.85"/><ellipse cx="140" cy="96" rx="34" ry="18" fill="#fffaf0" opacity="0.85"/>
+	<path d="M0 300 Q120 246 250 290 T512 270 V512 H0 Z" fill="#a9c26a"/>
+	<path d="M0 340 Q256 300 512 336 V512 H0 Z" fill="#d6b65a"/>
+	<path d="M-40 512 Q150 380 200 344" stroke="#c3a04a" stroke-width="5" fill="none" opacity="0.55"/><path d="M30 512 Q180 380 226 344" stroke="#c3a04a" stroke-width="5" fill="none" opacity="0.55"/><path d="M100 512 Q210 380 252 344" stroke="#c3a04a" stroke-width="5" fill="none" opacity="0.55"/><path d="M170 512 Q240 380 278 344" stroke="#c3a04a" stroke-width="5" fill="none" opacity="0.55"/><path d="M240 512 Q270 380 304 344" stroke="#c3a04a" stroke-width="5" fill="none" opacity="0.55"/><path d="M310 512 Q300 380 330 344" stroke="#c3a04a" stroke-width="5" fill="none" opacity="0.55"/><path d="M380 512 Q330 380 356 344" stroke="#c3a04a" stroke-width="5" fill="none" opacity="0.55"/><path d="M450 512 Q360 380 382 344" stroke="#c3a04a" stroke-width="5" fill="none" opacity="0.55"/><path d="M520 512 Q390 380 408 344" stroke="#c3a04a" stroke-width="5" fill="none" opacity="0.55"/>
+	<rect x="350" y="168" width="54" height="182" fill="url(#silo)"/>
+	<path d="M350 170 Q377 128 404 170 Z" fill="#7d8794"/>
+	<path d="M350 206 H404 M350 246 H404 M350 286 H404 M350 326 H404" stroke="#8f897f" stroke-width="3"/>
+	<rect x="150" y="222" width="190" height="130" fill="url(#barn)"/>
+	<path d="M138 228 L166 176 L245 148 L324 176 L352 228 Z" fill="#7c1b1d"/>
+	<path d="M138 228 L166 176 L245 148 L324 176 L352 228" stroke="#fbf4e8" stroke-width="7" fill="none" stroke-linejoin="round"/>
+	<rect x="225" y="186" width="40" height="32" fill="#fbf4e8"/><rect x="231" y="192" width="28" height="20" fill="#3a1414"/>
+	<rect x="203" y="276" width="84" height="76" fill="#fbf4e8"/><rect x="209" y="282" width="72" height="70" fill="#b42a2a"/>
+	<path d="M209 282 L281 352 M281 282 L209 352" stroke="#fbf4e8" stroke-width="6"/>
+	<rect x="160" y="250" width="26" height="22" fill="#fbf4e8"/><rect x="304" y="250" width="26" height="22" fill="#fbf4e8"/>
+	<rect x="14" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="58" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="102" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="146" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="190" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="234" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="278" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="322" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="366" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="410" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="454" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/><rect x="498" y="350" width="9" height="40" rx="2" fill="#f2e6cc"/>
+	<rect x="0" y="358" width="512" height="8" fill="#f2e6cc"/><rect x="0" y="376" width="512" height="8" fill="#f2e6cc"/>
+	<g>
+		<rect x="90" y="344" width="9" height="30" rx="3" fill="#f4efe6"/><rect x="106" y="346" width="9" height="30" rx="3" fill="#e5ddd0"/>
+		<rect x="142" y="344" width="9" height="30" rx="3" fill="#f4efe6"/><rect x="156" y="346" width="9" height="30" rx="3" fill="#e5ddd0"/>
+		<ellipse cx="124" cy="330" rx="48" ry="28" fill="#f8f4ee"/>
+		<path d="M104 304 q14 8 6 22 q-14 6 -22 -6 q-2 -12 16 -16 Z" fill="#26211f"/>
+		<ellipse cx="144" cy="336" rx="13" ry="10" fill="#26211f"/>
+		<ellipse cx="128" cy="350" rx="9" ry="5" fill="#26211f"/>
+		<path d="M170 324 q12 18 4 30" stroke="#f8f4ee" stroke-width="4" fill="none" stroke-linecap="round"/>
+		<rect x="52" y="300" width="34" height="38" rx="12" fill="#f8f4ee"/>
+		<ellipse cx="62" cy="332" rx="16" ry="11" fill="#f2a7a7"/>
+		<circle cx="57" cy="332" r="2.4" fill="#7a3d3d"/><circle cx="67" cy="332" r="2.4" fill="#7a3d3d"/>
+		<circle cx="62" cy="314" r="3.4" fill="#26211f"/>
+		<path d="M54 300 q-6 -12 2 -14 M80 300 q6 -12 -2 -14" stroke="#efe2c4" stroke-width="5" fill="none" stroke-linecap="round"/>
+		<ellipse cx="84" cy="306" rx="9" ry="5" fill="#26211f" transform="rotate(25 84 306)"/>
+	</g>
+	
+	<g font-family="DejaVu Sans, Liberation Sans, sans-serif" font-weight="bold" text-anchor="middle">
+		<rect x="98" y="390" width="316" height="62" rx="31" fill="#141c48" fill-opacity="0.92" stroke="#f6c85c" stroke-width="4"/>
+		<text x="256" y="432" font-size="31" fill="#ffffff" letter-spacing="1.5">FARM</text>
+		<rect x="196.25" y="370" width="119.5" height="26" rx="13" fill="#f6c85c"/>
+		<text x="256" y="388.5" font-size="13" fill="#141c48" letter-spacing="1.5">MAP THEME</text>
+	</g>
+</svg>

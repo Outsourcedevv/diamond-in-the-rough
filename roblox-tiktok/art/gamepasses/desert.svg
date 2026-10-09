@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+	<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe3a8"/><stop offset="1" stop-color="#f4925a"/></linearGradient><filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="12"/></filter><linearGradient id="mesa" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c6643a"/><stop offset="1" stop-color="#9a4329"/></linearGradient><linearGradient id="water" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6ee0dc"/><stop offset="1" stop-color="#2aa8b4"/></linearGradient></defs>
+	
+	<rect width="512" height="512" fill="url(#sky)"/>
+	<circle cx="256" cy="180" r="96" fill="#ffdb7a" opacity="0.7" filter="url(#soft)"/>
+	<circle cx="256" cy="180" r="62" fill="#ffe08a"/>
+	<path d="M120 300 L150 236 L230 232 L250 300 Z M300 300 L318 226 L368 222 L390 300 Z" fill="#dc9363"/>
+	<path d="M0 312 V186 L24 176 L118 176 L134 198 L150 312 Z" fill="url(#mesa)"/>
+	<path d="M4 206 H132" stroke="#a54b2d" stroke-width="3" opacity="0.7"/><path d="M4 232 H132" stroke="#a54b2d" stroke-width="3" opacity="0.7"/><path d="M4 262 H132" stroke="#a54b2d" stroke-width="3" opacity="0.7"/>
+	<path d="M372 312 L390 158 L470 152 L512 162 V312 Z" fill="url(#mesa)"/>
+	<path d="M388 190 H512" stroke="#a54b2d" stroke-width="3" opacity="0.7"/><path d="M388 224 H512" stroke="#a54b2d" stroke-width="3" opacity="0.7"/><path d="M388 260 H512" stroke="#a54b2d" stroke-width="3" opacity="0.7"/>
+	<path d="M0 318 Q150 280 300 312 T512 300 V512 H0 Z" fill="#eab575"/>
+	<path d="M0 382 Q200 340 512 376 V512 H0 Z" fill="#d89a5c"/>
+	<ellipse cx="256" cy="348" rx="128" ry="26" fill="#6aa84f"/>
+	<ellipse cx="256" cy="348" rx="112" ry="19" fill="url(#water)"/>
+	<path d="M190 344 Q256 338 322 344" stroke="#d6fbf8" stroke-width="3" fill="none" opacity="0.8"/>
+	<path d="M318 346 Q323.6 276.4 346 230" stroke="#8a5a32" stroke-width="10" fill="none" stroke-linecap="round"/>
+		<path d="M318 346 Q323.6 276.4 346 230" stroke="#6e4426" stroke-width="10" stroke-dasharray="3 9" fill="none"/>
+		<path d="M346 230 Q312.1 212.5 284.2 250.6 Q318.1 226.5 346 230 Z" fill="#2f8a3c"/><path d="M346 230 Q316.6 196.0 292.3 225.0 Q322.6 210.0 346 230 Z" fill="#27773a"/><path d="M346 230 Q326.5 183.2 310.4 205.2 Q332.5 197.2 346 230 Z" fill="#27773a"/><path d="M346 230 Q340.1 176.6 335.2 194.9 Q346.1 190.6 346 230 Z" fill="#3fa04a"/><path d="M346 230 Q354.8 177.4 362.0 196.1 Q360.8 191.4 346 230 Z" fill="#3fa04a"/><path d="M346 230 Q367.9 185.4 385.9 208.5 Q373.9 199.4 346 230 Z" fill="#27773a"/><path d="M346 230 Q376.8 199.1 402.2 229.8 Q382.8 213.1 346 230 Z" fill="#3fa04a"/><path d="M346 230 Q380.0 216.0 408.0 256.0 Q386.0 230.0 346 230 Z" fill="#27773a"/><path d="M346 230 Q376.8 232.9 402.2 282.2 Q382.8 246.9 346 230 Z" fill="#2f8a3c"/><path d="M346 230 Q313.2 205.6 286.1 240.0 Q319.2 219.6 346 230 Z" fill="#2f8a3c"/><circle cx="346" cy="234" r="5" fill="#5a3a20"/>
+	<path d="M196 348 Q191.6 297.6 174 264" stroke="#8a5a32" stroke-width="7.800000000000001" fill="none" stroke-linecap="round"/>
+		<path d="M196 348 Q191.6 297.6 174 264" stroke="#6e4426" stroke-width="7.800000000000001" stroke-dasharray="3 9" fill="none"/>
+		<path d="M174 264 Q147.6 250.4 125.8 280.1 Q153.6 264.4 174 264 Z" fill="#2f8a3c"/><path d="M174 264 Q151.0 237.5 132.1 260.1 Q157.0 251.5 174 264 Z" fill="#2f8a3c"/><path d="M174 264 Q158.8 227.5 146.3 244.7 Q164.8 241.5 174 264 Z" fill="#2f8a3c"/><path d="M174 264 Q169.4 222.4 165.6 236.7 Q175.4 236.4 174 264 Z" fill="#27773a"/><path d="M174 264 Q180.9 222.9 186.5 237.6 Q186.9 236.9 174 264 Z" fill="#27773a"/><path d="M174 264 Q191.0 229.2 205.1 247.2 Q197.0 243.2 174 264 Z" fill="#2f8a3c"/><path d="M174 264 Q198.0 239.9 217.8 263.8 Q204.0 253.9 174 264 Z" fill="#2f8a3c"/><path d="M174 264 Q200.5 253.1 222.4 284.3 Q206.5 267.1 174 264 Z" fill="#3fa04a"/><path d="M174 264 Q198.0 266.3 217.8 304.7 Q204.0 280.3 174 264 Z" fill="#27773a"/><path d="M174 264 Q148.4 245.0 127.3 271.8 Q154.4 259.0 174 264 Z" fill="#27773a"/><circle cx="174" cy="268" r="3.9000000000000004" fill="#5a3a20"/>
+	<g fill="#4f8f3e"><rect x="430" y="300" width="16" height="74" rx="8"/><path d="M432 336 h-14 a7 7 0 0 1 -7 -7 v-18 a6 6 0 0 1 12 0 v12 h9 Z"/><path d="M444 322 h13 a6 6 0 0 0 6 -6 v-16 a6 6 0 0 0 -12 0 v10 h-7 Z"/></g>
+	
+	<g font-family="DejaVu Sans, Liberation Sans, sans-serif" font-weight="bold" text-anchor="middle">
+		<rect x="98" y="390" width="316" height="62" rx="31" fill="#141c48" fill-opacity="0.92" stroke="#f6c85c" stroke-width="4"/>
+		<text x="256" y="432" font-size="31" fill="#ffffff" letter-spacing="1.5">DESERT</text>
+		<rect x="196.25" y="370" width="119.5" height="26" rx="13" fill="#f6c85c"/>
+		<text x="256" y="388.5" font-size="13" fill="#141c48" letter-spacing="1.5">MAP THEME</text>
+	</g>
+</svg>
