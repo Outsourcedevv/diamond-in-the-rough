@@ -289,7 +289,7 @@ function Sidebar.start(options: Options)
 		TextColor3 = GOLD, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, AutomaticSize = Enum.AutomaticSize.Y, Text = "", ZIndex = 6 }, card)
 
 	-- The rows scroll when the screen is too short for them all (phones).
-	local ROW_HEIGHT = 56
+	local ROW_HEIGHT = 64
 	local SECTION_HEIGHT = 18
 	local list = make("ScrollingFrame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
 		ScrollBarThickness = 4, ScrollBarImageColor3 = MUTED, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
@@ -300,13 +300,16 @@ function Sidebar.start(options: Options)
 	local function fitList()
 		local camera = workspace.CurrentCamera
 		local screenHeight = if camera then camera.ViewportSize.Y else 720
-		list.Size = UDim2.new(1, 0, 0, math.clamp(screenHeight - 200, 120, listHeight))
+		-- The card is centred at CENTRE, so it can be 2 x CENTRE of the screen
+		-- tall; the header, the message and Roblox's top bar take about 160.
+		list.Size = UDim2.new(1, 0, 0, math.clamp(math.floor(screenHeight * Sidebar.CENTRE * 2 - 160), 120, listHeight))
 	end
 	fitList()
 	if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitList) end
 
 	local prices: { [string]: number } = {}
-	local rows: { [string]: { button: TextButton, kind: string, item: ThemeShop.Theme } } = {}
+	local onSale: { [string]: boolean } = {}
+	local rows: { [string]: { button: TextButton, kind: string, item: ThemeShop.Theme, tag: TextLabel } } = {}
 	local function refreshRows()
 		-- What's in use now: the map's theme, and the mountain's skin.
 		local current = {
@@ -320,6 +323,7 @@ function Sidebar.start(options: Options)
 			row.button.Text = label
 			row.button.BackgroundColor3 = if kind == "using" then BUTTON elseif kind == "use" then SELECTED else GREEN
 			row.button.AutoButtonColor = kind ~= "using"
+			row.tag.Text = ThemeShop.tag(key, owned, Config.ThemePasses, prices[key], onSale[key])
 		end
 	end
 	local function section(order: number, text: string)
@@ -355,17 +359,20 @@ function Sidebar.start(options: Options)
 	local function addRow(order: number, item: ThemeShop.Theme)
 		local row = make("Frame", { LayoutOrder = order, Size = UDim2.new(1, -6, 0, ROW_HEIGHT), BackgroundColor3 = BUTTON, BackgroundTransparency = 0.5, ZIndex = 6 }, list)
 		rounded(row, 10)
-		local picture = make("Frame", { Position = UDim2.fromOffset(6, 6), Size = UDim2.fromOffset(64, 44), BackgroundColor3 = item.sky, ClipsDescendants = true, ZIndex = 7 }, row)
+		local picture = make("Frame", { Position = UDim2.fromOffset(6, 10), Size = UDim2.fromOffset(64, 44), BackgroundColor3 = item.sky, ClipsDescendants = true, ZIndex = 7 }, row)
 		rounded(picture, 8)
 		if item.kind == "skin" then skinPicture(picture, item) else themePicture(picture, item) end
-		make("TextLabel", { Position = UDim2.fromOffset(80, 8), Size = UDim2.new(1, -180, 0, 20), BackgroundTransparency = 1, Font = FONT, TextSize = 16, TextColor3 = WHITE,
+		make("TextLabel", { Position = UDim2.fromOffset(80, 5), Size = UDim2.new(1, -180, 0, 20), BackgroundTransparency = 1, Font = FONT, TextSize = 16, TextColor3 = WHITE,
 			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Text = item.name, ZIndex = 7 }, row)
-		make("TextLabel", { Position = UDim2.fromOffset(80, 28), Size = UDim2.new(1, -180, 0, 18), BackgroundTransparency = 1, Font = FONT_MEDIUM, TextSize = 11, TextColor3 = MUTED,
+		make("TextLabel", { Position = UDim2.fromOffset(80, 25), Size = UDim2.new(1, -180, 0, 16), BackgroundTransparency = 1, Font = FONT_MEDIUM, TextSize = 11, TextColor3 = MUTED,
 			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Text = item.blurb, ZIndex = 7 }, row)
 		local button = make("TextButton", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), Size = UDim2.fromOffset(88, 32),
 			BackgroundColor3 = SELECTED, Font = FONT, TextSize = 14, TextColor3 = WHITE, Text = "", ZIndex = 7 }, row)
 		rounded(button, 8)
-		rows[item.key] = { button = button, kind = "use", item = item }
+		-- Its price, and whether it's yours (see ThemeShop.tag).
+		local tag = make("TextLabel", { Name = "Price", Position = UDim2.fromOffset(80, 42), Size = UDim2.new(1, -180, 0, 16), BackgroundTransparency = 1, Font = FONT, TextSize = 12, TextColor3 = GOLD,
+			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Text = "", ZIndex = 7 }, row)
+		rows[item.key] = { button = button, kind = "use", item = item, tag = tag }
 		button.Activated:Connect(function()
 			local kind = rows[item.key].kind
 			if kind == "use" then
@@ -390,8 +397,13 @@ function Sidebar.start(options: Options)
 		if pass then
 			task.spawn(function()
 				local ok, info = pcall(MarketplaceService.GetProductInfo, MarketplaceService, pass, Enum.InfoType.GamePass)
-				if ok and type(info) == "table" and type(info.PriceInRobux) == "number" then
-					prices[item.key] = info.PriceInRobux
+				if ok and type(info) == "table" then
+					if type(info.PriceInRobux) == "number" then
+						prices[item.key] = info.PriceInRobux
+						onSale[item.key] = true
+					else
+						onSale[item.key] = false
+					end
 					refreshRows()
 				end
 			end)
